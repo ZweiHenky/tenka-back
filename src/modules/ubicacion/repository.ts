@@ -1,0 +1,31 @@
+import { prisma } from '../../config/database';
+import type { UbicacionEntity } from './entity';
+import type { UbicacionRepository } from './repository.interface';
+
+export const ubicacionRepository: UbicacionRepository = {
+  async findAll(): Promise<UbicacionEntity[]> {
+    return prisma.ubicacion.findMany({ orderBy: { nombreCompleto: 'asc' } });
+  },
+
+  async findById(id: string): Promise<UbicacionEntity | null> {
+    return prisma.ubicacion.findUnique({ where: { id } });
+  },
+
+  async findOrCreate(data: { lat: number; lng: number; nombreCompleto: string; estado: string; municipio: string }): Promise<UbicacionEntity> {
+    const existing = await prisma.ubicacion.findFirst({ where: { nombreCompleto: data.nombreCompleto, estado: data.estado } });
+    if (existing) return existing;
+    return prisma.ubicacion.create({ data });
+  },
+
+  async create(data: { lat: number; lng: number; nombreCompleto: string; estado: string; municipio: string }): Promise<UbicacionEntity> {
+    return prisma.ubicacion.create({ data });
+  },
+
+  async update(id: string, data: Record<string, unknown>): Promise<UbicacionEntity> {
+    return prisma.ubicacion.update({ where: { id }, data });
+  },
+
+  async delete(id: string): Promise<void> {
+    await prisma.ubicacion.delete({ where: { id } });
+  },
+};

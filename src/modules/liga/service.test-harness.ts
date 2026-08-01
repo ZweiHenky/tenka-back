@@ -1,0 +1,110 @@
+import { vi } from 'vitest';
+import type { AuthenticatedUser } from '../../types/auth';
+
+const mocks = vi.hoisted(() => ({
+  findById: vi.fn(),
+  findVisibleById: vi.fn(),
+  findUpdateContext: vi.fn(),
+  findDeleteContext: vi.fn(),
+  findManagementContext: vi.fn(),
+  findManageableCanchas: vi.fn(),
+  findManageableArbitros: vi.fn(),
+  findRecentSchedule: vi.fn(),
+  findByNormalizedName: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  delete: vi.fn(),
+  arbitroFindFirst: vi.fn(),
+  arbitroFindUnique: vi.fn(),
+  arbitroCount: vi.fn(),
+  arbitroCreate: vi.fn(),
+  arbitroUpdate: vi.fn(),
+  arbitroDelete: vi.fn(),
+  canchaFindUnique: vi.fn(),
+  canchaFindFirst: vi.fn(),
+  canchaCreate: vi.fn(),
+  canchaUpdate: vi.fn(),
+  canchaDelete: vi.fn(),
+  partidoCount: vi.fn(),
+  partidoArbitroCount: vi.fn(),
+}));
+
+vi.mock('./repository', () => ({
+  ligaRepository: {
+    findById: mocks.findById,
+    findVisibleById: mocks.findVisibleById,
+    findUpdateContext: mocks.findUpdateContext,
+    findDeleteContext: mocks.findDeleteContext,
+    findManagementContext: mocks.findManagementContext,
+    findManageableCanchas: mocks.findManageableCanchas,
+    findManageableArbitros: mocks.findManageableArbitros,
+    findRecentSchedule: mocks.findRecentSchedule,
+    findByNormalizedName: mocks.findByNormalizedName,
+    create: mocks.create,
+    update: mocks.update,
+    delete: mocks.delete,
+  },
+}));
+
+vi.mock('../../config/database', () => ({
+  prisma: {
+    ligaArbitro: {
+      findFirst: mocks.arbitroFindFirst,
+      findUnique: mocks.arbitroFindUnique,
+      count: mocks.arbitroCount,
+      create: mocks.arbitroCreate,
+      update: mocks.arbitroUpdate,
+      delete: mocks.arbitroDelete,
+    },
+    ligaCancha: {
+      findUnique: mocks.canchaFindUnique,
+      findFirst: mocks.canchaFindFirst,
+      create: mocks.canchaCreate,
+      update: mocks.canchaUpdate,
+      delete: mocks.canchaDelete,
+    },
+    partido: {
+      count: mocks.partidoCount,
+    },
+    partidoArbitro: {
+      count: mocks.partidoArbitroCount,
+    },
+  },
+}));
+
+vi.mock('../media/service', () => ({
+  mediaService: { scheduleImageCleanup: vi.fn() },
+}));
+
+export const owner: AuthenticatedUser = { id: 'user-1', email: 'owner@test.com', rol: 'LIGA' };
+export const foreignUser: AuthenticatedUser = { id: 'user-2', email: 'foreign@test.com', rol: 'LIGA' };
+export const admin: AuthenticatedUser = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
+
+export const existingLiga = {
+  id: 'liga-1',
+  nombre: 'Liga Centro',
+  nombreNormalizado: 'liga centro',
+  descripcion: '',
+  logo: null,
+  logoPublicId: null,
+  cancha: null,
+  canchaPublicId: null,
+  multiplesCanchas: false,
+  usaArbitros: false,
+  canchas: [],
+  arbitros: [],
+  userId: 'user-1',
+  ubicacionId: 'ubicacion-1',
+};
+
+export function resetServiceMocks() {
+  vi.clearAllMocks();
+}
+
+export function getServiceMocks() {
+  return mocks;
+}
+
+export async function loadLigaService() {
+  return (await import('./service')).ligaService;
+}

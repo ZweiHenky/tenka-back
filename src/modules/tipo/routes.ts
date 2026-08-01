@@ -1,0 +1,11 @@
+import { Router } from 'express';
+import { tipoController } from './controller';
+import { requireAuth, requireRole } from '../../middlewares/authMiddleware';
+const router = Router();
+router.get('/', tipoController.list);
+router.get('/:id', tipoController.getById);
+router.use(requireAuth, requireRole('ADMINISTRADOR'));
+router.post('/', tipoController.create);
+router.patch('/:id', tipoController.update);
+router.delete('/:id', tipoController.delete);
+export { router as tipoRouter };

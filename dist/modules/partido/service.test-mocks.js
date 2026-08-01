@@ -1,0 +1,31 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.rondaPlayoffModuleMock = exports.tablaPosicionModuleMock = exports.repositoryModuleMock = exports.databaseModuleMock = void 0;
+const vitest_1 = require("vitest");
+exports.databaseModuleMock = {
+    prisma: {
+        $transaction: vitest_1.vi.fn(),
+        divisionEquipo: { count: vitest_1.vi.fn() },
+        partido: { findFirst: vitest_1.vi.fn(), findMany: vitest_1.vi.fn(), update: vitest_1.vi.fn() },
+        jornada: { findUnique: vitest_1.vi.fn(), findMany: vitest_1.vi.fn() },
+    },
+};
+exports.repositoryModuleMock = {
+    partidoRepository: {
+        findAuthorizationContext: vitest_1.vi.fn(),
+        findAllVisible: vitest_1.vi.fn(),
+        findById: vitest_1.vi.fn(),
+        findVisibleById: vitest_1.vi.fn(),
+        findVisibleByJornada: vitest_1.vi.fn(),
+        findVisibleByRondaPlayoff: vitest_1.vi.fn(),
+        update: vitest_1.vi.fn(),
+        delete: vitest_1.vi.fn(),
+    },
+};
+exports.tablaPosicionModuleMock = {
+    tablaPosicionService: { recalcular: vitest_1.vi.fn() },
+};
+exports.rondaPlayoffModuleMock = {
+    rondaPlayoffService: { advanceWinners: vitest_1.vi.fn() },
+};
+//# sourceMappingURL=service.test-mocks.js.map

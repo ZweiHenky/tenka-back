@@ -1,0 +1,24 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.jugadorRouter = void 0;
+const express_1 = require("express");
+const authMiddleware_1 = require("../../middlewares/authMiddleware");
+const controller_1 = require("./controller");
+const router = (0, express_1.Router)();
+exports.jugadorRouter = router;
+router.get('/', controller_1.jugadorController.list);
+router.get('/me', authMiddleware_1.requireAuth, controller_1.jugadorController.getMe);
+router.get('/:jugadorId/divisiones', authMiddleware_1.optionalAuth, controller_1.jugadorController.listDivisionsByPlayer);
+router.get('/division/:divisionId/equipo/:equipoId', authMiddleware_1.optionalAuth, controller_1.jugadorController.listByDivisionTeam);
+router.get('/:id', controller_1.jugadorController.getById);
+router.use(authMiddleware_1.requireAuth);
+router.post('/me', controller_1.jugadorController.createMe);
+router.patch('/me', controller_1.jugadorController.updateMe);
+router.post('/', (0, authMiddleware_1.requireRole)('CAPITAN', 'LIGA'), controller_1.jugadorController.create);
+router.patch('/:id', (0, authMiddleware_1.requireRole)('CAPITAN', 'LIGA'), controller_1.jugadorController.update);
+router.delete('/:id', controller_1.jugadorController.delete);
+router.post('/equipo', (0, authMiddleware_1.requireRole)('CAPITAN', 'LIGA'), controller_1.jugadorController.assignToTeam);
+router.delete('/equipo/:equipoId/:jugadorId', (0, authMiddleware_1.requireRole)('CAPITAN', 'LIGA'), controller_1.jugadorController.removeFromTeam);
+router.post('/division', (0, authMiddleware_1.requireRole)('CAPITAN', 'LIGA'), controller_1.jugadorController.assignToDivision);
+router.delete('/division/:divisionId/:equipoId/:jugadorId', (0, authMiddleware_1.requireRole)('CAPITAN', 'LIGA'), controller_1.jugadorController.removeFromDivision);
+//# sourceMappingURL=routes.js.map

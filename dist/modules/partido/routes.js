@@ -1,0 +1,21 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.partidoRouter = void 0;
+const express_1 = require("express");
+const controller_1 = require("./controller");
+const controller_2 = require("../referee-access/controller");
+const authMiddleware_1 = require("../../middlewares/authMiddleware");
+const router = (0, express_1.Router)();
+exports.partidoRouter = router;
+router.get('/', authMiddleware_1.optionalAuth, controller_1.partidoController.list);
+router.get('/jornada/:jornadaId', authMiddleware_1.optionalAuth, controller_1.partidoController.findByJornada);
+router.get('/ronda-playoff/:rondaPlayoffId', authMiddleware_1.optionalAuth, controller_1.partidoController.findByRondaPlayoff);
+router.get('/:id', authMiddleware_1.optionalAuth, controller_1.partidoController.getById);
+router.use(authMiddleware_1.requireAuth);
+router.post('/', controller_1.partidoController.create);
+router.patch('/:id', controller_1.partidoController.update);
+router.delete('/:id', controller_1.partidoController.delete);
+router.post('/:id/referee-link', controller_2.refereeAccessController.createAccess);
+router.delete('/:id/referee-link', controller_2.refereeAccessController.revokeAccess);
+router.get('/:id/referee-link-status', controller_1.partidoController.getRefereeLinkStatus);
+//# sourceMappingURL=routes.js.map

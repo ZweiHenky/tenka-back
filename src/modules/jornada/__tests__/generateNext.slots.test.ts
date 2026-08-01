@@ -1,0 +1,325 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  divisionId, expectMatch, jornadaRepository, jornadaService, mockDivision,
+  mockJornadaCreated, mockNoPreviousJornadas, mockPartidosCreatedReturn, mockTeams,
+  partidoRepository, prisma, resetGenerateNextHarness, TEAMS,
+} from './support/generateNextHarness';
+
+beforeEach(resetGenerateNextHarness);
+
+describe('generateNext slots', () => {
+  it('7 equipos + 1 slot normal completo → slot respetado', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(3);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBe(3);
+    expect(expectMatch(calls, 't1', 't2', 'REGULAR')).toBe(true);
+    // t1 and t2 should NOT appear in any other match
+    const otherMatches = calls.filter(([args]: any[]) => args.equipoLocalId !== 't1' || args.equipoVisitanteId !== 't2');
+    otherMatches.forEach(([args]: any[]) => {
+      expect(args.equipoLocalId).not.toBe('t1');
+      expect(args.equipoVisitanteId).not.toBe('t1');
+      expect(args.equipoLocalId).not.toBe('t2');
+      expect(args.equipoVisitanteId).not.toBe('t2');
+    });
+  });
+
+  it('7 equipos + 1 complemento con 1 equipo → complemento no excluye del RR', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(4);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    const compMatch = calls.find(([args]: any[]) => args.equipoLocalId === 't4');
+    expect(compMatch).toBeDefined();
+    const [compArgs] = compMatch as [any];
+    expect(compArgs.tipoPartido).toBe('COMPLEMENTO');
+  });
+
+  it('complemento vacío → ValidationError', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+
+    await expect(jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento' },
+    ])).rejects.toThrow('debe tener al menos el equipo que obtiene puntos');
+  });
+
+  it('amistoso sin equipos → ValidationError', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+
+    await expect(jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'amistoso' },
+    ])).rejects.toThrow('debe tener ambos equipos asignados');
+  });
+
+  it('amistoso con un solo equipo → ValidationError', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+
+    await expect(jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'amistoso', equipoLocalId: 't1' },
+    ])).rejects.toThrow('debe tener ambos equipos asignados');
+  });
+
+  it('mismo equipo en 2 slots normales → ValidationError', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+
+    await expect(jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
+      { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', equipoLocalId: 't1', equipoVisitanteId: 't3' },
+    ])).rejects.toThrow('ya está asignado a otro horario');
+  });
+
+  it('mismo equipo en normal + complemento → permitido (puntos puede repetirse)', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(4);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
+      { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't1' },
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    const compMatch = calls.find(([args]: any[]) => args.tipoPartido === 'COMPLEMENTO');
+    expect(compMatch).toBeDefined();
+  });
+
+  it('más pairings que slots en plan → padding', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(4);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
+      { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't3' },
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBe(4);
+  });
+
+  it('flags correctos: Puntos en complemento suma, Sin puntos no suma', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(4);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    const compMatch = calls.find(([args]: any[]) => args.equipoLocalId === 't4');
+    expect(compMatch).toBeDefined();
+
+    const [compArgs] = compMatch as [any];
+    expect(compArgs.tipoPartido).toBe('COMPLEMENTO');
+  });
+
+  it('complemento con ambos equipos asignados → Puntos y Sin puntos preservan tipo', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(4);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't5' },
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    const comp = calls.find(([args]: any[]) => args.equipoLocalId === 't4' && args.equipoVisitanteId === 't5');
+    expect(comp).toBeDefined();
+    const [compArgs] = comp as [any];
+    expect(compArgs.tipoPartido).toBe('COMPLEMENTO');
+  });
+
+  it('2 complementos con 1 equipo cada uno → excluye del RR, flags correctos', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(4);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
+      { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't5' },
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    const t4Comp = calls.find(([args]: any[]) => args.equipoLocalId === 't4');
+    expect(t4Comp).toBeDefined();
+    const [t4Args] = t4Comp as [any];
+    expect(t4Args.tipoPartido).toBe('COMPLEMENTO');
+    const t5Comp = calls.find(([args]: any[]) => args.equipoLocalId === 't5');
+    expect(t5Comp).toBeDefined();
+    const [t5Args] = t5Comp as [any];
+    expect(t5Args.tipoPartido).toBe('COMPLEMENTO');
+  });
+
+  it('slots=[] (array vacío) → mismo que undefined', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(3);
+
+    await jornadaService.generateNext(divisionId, []);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBe(3);
+  });
+
+  it('slot parcial con historial previo → no repite el mismo rival de J1', async () => {
+    mockDivision({ maxEquipos: 6, diasPartido: null });
+    const sixTeams = TEAMS.slice(0, 6);
+    (prisma.divisionEquipo.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+      sixTeams.map((t) => ({ equipo: { id: t.id, nombre: t.nombre } })),
+    );
+    // J1 had t1 vs t2
+    (jornadaRepository.findByDivision as ReturnType<typeof vi.fn>).mockResolvedValue({
+      rows: [{
+        numero: 1,
+        partidos: [{
+          equipoLocalId: 't1',
+          equipoVisitanteId: 't2',
+          tipoPartido: 'REGULAR',
+        }],
+      }],
+    });
+    mockJornadaCreated(2);
+    mockPartidosCreatedReturn(3);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-08', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1' },
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBe(3);
+    const t1Match = calls.find(([args]: any[]) => args.equipoLocalId === 't1' || args.equipoVisitanteId === 't1');
+    expect(t1Match).toBeDefined();
+    const [t1Args] = t1Match as [any];
+    // Should NOT face t2 again
+    const opponent = t1Args.equipoLocalId === 't1' ? t1Args.equipoVisitanteId : t1Args.equipoLocalId;
+    expect(opponent).not.toBe('t2');
+    // With r=1 on 6 teams, canonical RR pairing for t1 is t3
+    expect(opponent).toBe('t3');
+  });
+
+  it('slot parcial visitante con historial → no repite rival', async () => {
+    mockDivision({ maxEquipos: 6, diasPartido: null });
+    const sixTeams = TEAMS.slice(0, 6);
+    (prisma.divisionEquipo.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+      sixTeams.map((t) => ({ equipo: { id: t.id, nombre: t.nombre } })),
+    );
+    // J1 had t2 vs t1 (reverse orientation)
+    (jornadaRepository.findByDivision as ReturnType<typeof vi.fn>).mockResolvedValue({
+      rows: [{
+        numero: 1,
+        partidos: [{
+          equipoLocalId: 't2',
+          equipoVisitanteId: 't1',
+          tipoPartido: 'REGULAR',
+        }],
+      }],
+    });
+    mockJornadaCreated(2);
+    mockPartidosCreatedReturn(3);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-08', horaInicio: '18:00', horaFin: '19:30', equipoVisitanteId: 't1' },
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBe(3);
+    const t1Match = calls.find(([args]: any[]) => args.equipoLocalId === 't1' || args.equipoVisitanteId === 't1');
+    expect(t1Match).toBeDefined();
+    const [t1Args] = t1Match as [any];
+    const opponent = t1Args.equipoLocalId === 't1' ? t1Args.equipoVisitanteId : t1Args.equipoLocalId;
+    expect(opponent).not.toBe('t2');
+  });
+
+  it('slot normal parcial (solo local) → se llena del pool', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(3);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1' },
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.length).toBe(3);
+    const matchWithT1 = calls.find(([args]: any[]) => args.equipoLocalId === 't1' || args.equipoVisitanteId === 't1');
+    expect(matchWithT1).toBeDefined();
+    // t1 should not be in any other match
+    const t1Count = calls.filter(([args]: any[]) => args.equipoLocalId === 't1' || args.equipoVisitanteId === 't1').length;
+    expect(t1Count).toBe(1);
+  });
+
+  it('mixed jornada: regular + amistoso + complemento, each preserves tipoPartido', async () => {
+    const sixTeams = TEAMS.slice(0, 6);
+    mockDivision({ maxEquipos: 6, diasPartido: null });
+    (prisma.divisionEquipo.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+      sixTeams.map((t) => ({ equipo: { id: t.id, nombre: t.nombre } })),
+    );
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(5);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
+      { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'amistoso', equipoLocalId: 't3', equipoVisitanteId: 't4' },
+      { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'complemento', equipoLocalId: 't5', equipoVisitanteId: 't6' },
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    // 3 from plan + 1 padding (complemento local blockeado)
+    expect(calls.length).toBe(4);
+
+    const regular = calls.find(([args]: any[]) => args.equipoLocalId === 't1' && args.equipoVisitanteId === 't2');
+    expect(regular).toBeDefined();
+    expect(regular![0].tipoPartido).toBe('REGULAR');
+
+    const amistoso = calls.find(([args]: any[]) => args.equipoLocalId === 't3' && args.equipoVisitanteId === 't4');
+    expect(amistoso).toBeDefined();
+    expect(amistoso![0].tipoPartido).toBe('AMISTOSO');
+
+    const complemento = calls.find(([args]: any[]) => args.equipoLocalId === 't5' && args.equipoVisitanteId === 't6');
+    expect(complemento).toBeDefined();
+    expect(complemento![0].tipoPartido).toBe('COMPLEMENTO');
+  });
+});
