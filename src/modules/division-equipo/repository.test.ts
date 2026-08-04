@@ -97,6 +97,7 @@ describe('divisionEquipoRepository saldo boundaries', () => {
         equipoId: true,
         division: { include: {
           liga: { select: { id: true, nombre: true, logo: true } },
+          categoria: { select: { id: true, nombre: true } },
           estadoLiga: { select: { id: true, nombre: true } },
         } },
       },

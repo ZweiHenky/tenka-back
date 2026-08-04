@@ -10,6 +10,7 @@
     "seed": "npx prisma db seed",
     "seed:catalogs": "ts-node-dev --transpile-only prisma/seed-catalogs.ts",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "sentry:test": "node dist/scripts/test-sentry.js"
   },

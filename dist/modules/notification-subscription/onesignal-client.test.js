@@ -31,14 +31,14 @@ const onesignal_client_1 = require("./onesignal-client");
         (0, vitest_1.expect)(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
         (0, vitest_1.expect)(logger.warn).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
             provider: 'onesignal',
-            operation: 'remove_tag',
+            operation: 'sync_tag',
             timeout: true,
         }), 'Provider operation failed');
-        (0, vitest_1.expect)(captureException).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(captureException).not.toHaveBeenCalled();
     });
     (0, vitest_1.it)('does not read or observe response bodies, credentials, or request values', async () => {
         const text = vitest_1.vi.fn(() => Promise.resolve('api-key=leaked response details'));
-        vitest_1.vi.stubGlobal('fetch', vitest_1.vi.fn(() => Promise.resolve({ ok: false, status: 401, text })));
+        vitest_1.vi.stubGlobal('fetch', vitest_1.vi.fn(() => Promise.resolve({ ok: false, status: 401, text, headers: new Headers() })));
         await (0, vitest_1.expect)((0, onesignal_client_1.removeTag)('private-subscription-id', 'private-tag')).resolves.toBe(false);
         (0, vitest_1.expect)(text).not.toHaveBeenCalled();
         const observed = JSON.stringify({ logs: logger.warn.mock.calls, events: captureException.mock.calls });

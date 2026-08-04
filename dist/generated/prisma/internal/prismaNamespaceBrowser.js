@@ -48,7 +48,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NullsOrder = exports.QueryMode = exports.SortOrder = exports.OneSignalTagCleanupJobScalarFieldEnum = exports.DivisionNotificationSubscriptionScalarFieldEnum = exports.MediaDeletionJobScalarFieldEnum = exports.TablaPosicionScalarFieldEnum = exports.PartidoRefereeAccessScalarFieldEnum = exports.TandaArbitralPartidoScalarFieldEnum = exports.TandaArbitralScalarFieldEnum = exports.PartidoArbitroScalarFieldEnum = exports.PartidoScalarFieldEnum = exports.RondaPlayoffScalarFieldEnum = exports.JornadaScalarFieldEnum = exports.PremioScalarFieldEnum = exports.DivisionJugadorScalarFieldEnum = exports.DivisionEquipoScalarFieldEnum = exports.EquipoJugadorScalarFieldEnum = exports.JugadorScalarFieldEnum = exports.EquipoScalarFieldEnum = exports.DivisionScalarFieldEnum = exports.LigaArbitroScalarFieldEnum = exports.LigaCanchaScalarFieldEnum = exports.LigaScalarFieldEnum = exports.TipoCompetenciaScalarFieldEnum = exports.EstadoLigaScalarFieldEnum = exports.UbicacionScalarFieldEnum = exports.TipoScalarFieldEnum = exports.CategoriaScalarFieldEnum = exports.VerificationScalarFieldEnum = exports.SessionScalarFieldEnum = exports.AccountScalarFieldEnum = exports.UserScalarFieldEnum = exports.TransactionIsolationLevel = exports.ModelName = exports.AnyNull = exports.JsonNull = exports.DbNull = exports.NullTypes = exports.Decimal = void 0;
+exports.JsonNullValueFilter = exports.NullsOrder = exports.QueryMode = exports.NullableJsonNullValueInput = exports.SortOrder = exports.NotificationOutboxScalarFieldEnum = exports.OneSignalTagCleanupJobScalarFieldEnum = exports.DivisionNotificationSubscriptionScalarFieldEnum = exports.MediaAssetScalarFieldEnum = exports.MediaDeletionJobScalarFieldEnum = exports.TablaPosicionScalarFieldEnum = exports.PartidoRefereeAccessScalarFieldEnum = exports.TandaArbitralPartidoScalarFieldEnum = exports.TandaArbitralScalarFieldEnum = exports.PartidoArbitroScalarFieldEnum = exports.AnotacionPartidoScalarFieldEnum = exports.PartidoScalarFieldEnum = exports.RondaPlayoffScalarFieldEnum = exports.JornadaScalarFieldEnum = exports.PremioScalarFieldEnum = exports.DivisionJugadorScalarFieldEnum = exports.DivisionEquipoScalarFieldEnum = exports.EquipoJugadorScalarFieldEnum = exports.JugadorScalarFieldEnum = exports.EquipoScalarFieldEnum = exports.DivisionScalarFieldEnum = exports.LigaArbitroScalarFieldEnum = exports.LigaCanchaScalarFieldEnum = exports.LigaScalarFieldEnum = exports.TipoCompetenciaScalarFieldEnum = exports.EstadoLigaScalarFieldEnum = exports.UbicacionScalarFieldEnum = exports.TipoScalarFieldEnum = exports.CategoriaScalarFieldEnum = exports.VerificationScalarFieldEnum = exports.SessionScalarFieldEnum = exports.AccountScalarFieldEnum = exports.UserScalarFieldEnum = exports.TransactionIsolationLevel = exports.ModelName = exports.AnyNull = exports.JsonNull = exports.DbNull = exports.NullTypes = exports.Decimal = void 0;
 const runtime = __importStar(require("@prisma/client/runtime/index-browser"));
 exports.Decimal = runtime.Decimal;
 exports.NullTypes = {
@@ -97,14 +97,17 @@ exports.ModelName = {
     Jornada: 'Jornada',
     RondaPlayoff: 'RondaPlayoff',
     Partido: 'Partido',
+    AnotacionPartido: 'AnotacionPartido',
     PartidoArbitro: 'PartidoArbitro',
     TandaArbitral: 'TandaArbitral',
     TandaArbitralPartido: 'TandaArbitralPartido',
     PartidoRefereeAccess: 'PartidoRefereeAccess',
     TablaPosicion: 'TablaPosicion',
     MediaDeletionJob: 'MediaDeletionJob',
+    MediaAsset: 'MediaAsset',
     DivisionNotificationSubscription: 'DivisionNotificationSubscription',
-    OneSignalTagCleanupJob: 'OneSignalTagCleanupJob'
+    OneSignalTagCleanupJob: 'OneSignalTagCleanupJob',
+    NotificationOutbox: 'NotificationOutbox'
 };
 /*
  * Enums
@@ -206,6 +209,7 @@ exports.LigaScalarFieldEnum = {
 exports.LigaCanchaScalarFieldEnum = {
     id: 'id',
     nombre: 'nombre',
+    nombreNormalizado: 'nombreNormalizado',
     activa: 'activa',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
@@ -236,7 +240,8 @@ exports.DivisionScalarFieldEnum = {
     estadoLigaId: 'estadoLigaId',
     categoriaId: 'categoriaId',
     tipoId: 'tipoId',
-    tipoCompetenciaId: 'tipoCompetenciaId'
+    tipoCompetenciaId: 'tipoCompetenciaId',
+    canchaUnicaId: 'canchaUnicaId'
 };
 exports.EquipoScalarFieldEnum = {
     id: 'id',
@@ -274,6 +279,7 @@ exports.DivisionJugadorScalarFieldEnum = {
     divisionId: 'divisionId',
     equipoId: 'equipoId',
     jugadorId: 'jugadorId',
+    dorsal: 'dorsal',
     createdAt: 'createdAt'
 };
 exports.PremioScalarFieldEnum = {
@@ -291,6 +297,8 @@ exports.JornadaScalarFieldEnum = {
     numero: 'numero',
     fechaInicio: 'fechaInicio',
     fechaFin: 'fechaFin',
+    generationKey: 'generationKey',
+    generationRequestHash: 'generationRequestHash',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     divisionId: 'divisionId'
@@ -318,11 +326,27 @@ exports.PartidoScalarFieldEnum = {
     exhibicionVisitante: 'exhibicionVisitante',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
+    version: 'version',
     jornadaId: 'jornadaId',
     rondaPlayoffId: 'rondaPlayoffId',
     equipoLocalId: 'equipoLocalId',
     equipoVisitanteId: 'equipoVisitanteId',
     canchaId: 'canchaId'
+};
+exports.AnotacionPartidoScalarFieldEnum = {
+    id: 'id',
+    partidoId: 'partidoId',
+    jugadorId: 'jugadorId',
+    equipoId: 'equipoId',
+    ladoMarcador: 'ladoMarcador',
+    cantidad: 'cantidad',
+    jugadorIdSnapshot: 'jugadorIdSnapshot',
+    equipoIdSnapshot: 'equipoIdSnapshot',
+    jugadorNombre: 'jugadorNombre',
+    equipoNombre: 'equipoNombre',
+    dorsal: 'dorsal',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
 };
 exports.PartidoArbitroScalarFieldEnum = {
     partidoId: 'partidoId',
@@ -365,9 +389,30 @@ exports.TablaPosicionScalarFieldEnum = {
 exports.MediaDeletionJobScalarFieldEnum = {
     id: 'id',
     publicId: 'publicId',
+    status: 'status',
+    leaseUntil: 'leaseUntil',
+    lockedBy: 'lockedBy',
     attempts: 'attempts',
+    maxAttempts: 'maxAttempts',
     lastError: 'lastError',
+    deadAt: 'deadAt',
     nextTryAt: 'nextTryAt',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
+exports.MediaAssetScalarFieldEnum = {
+    id: 'id',
+    ownerId: 'ownerId',
+    kind: 'kind',
+    publicId: 'publicId',
+    secureUrl: 'secureUrl',
+    format: 'format',
+    bytes: 'bytes',
+    width: 'width',
+    height: 'height',
+    status: 'status',
+    expiresAt: 'expiresAt',
+    attachedAt: 'attachedAt',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt'
 };
@@ -376,6 +421,7 @@ exports.DivisionNotificationSubscriptionScalarFieldEnum = {
     divisionId: 'divisionId',
     oneSignalId: 'oneSignalId',
     pushSubscriptionId: 'pushSubscriptionId',
+    userId: 'userId',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt'
 };
@@ -383,15 +429,47 @@ exports.OneSignalTagCleanupJobScalarFieldEnum = {
     id: 'id',
     oneSignalId: 'oneSignalId',
     tag: 'tag',
+    desired: 'desired',
+    status: 'status',
+    leaseUntil: 'leaseUntil',
+    lockedBy: 'lockedBy',
     attempts: 'attempts',
+    maxAttempts: 'maxAttempts',
     lastError: 'lastError',
+    deadAt: 'deadAt',
     nextTryAt: 'nextTryAt',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
+exports.NotificationOutboxScalarFieldEnum = {
+    id: 'id',
+    eventKey: 'eventKey',
+    jornadaId: 'jornadaId',
+    divisionId: 'divisionId',
+    audience: 'audience',
+    eventType: 'eventType',
+    aggregationKey: 'aggregationKey',
+    payload: 'payload',
+    targetUserIds: 'targetUserIds',
+    providerIdempotencyKey: 'providerIdempotencyKey',
+    status: 'status',
+    attempts: 'attempts',
+    maxAttempts: 'maxAttempts',
+    nextAttemptAt: 'nextAttemptAt',
+    leaseUntil: 'leaseUntil',
+    lockedBy: 'lockedBy',
+    lastErrorCode: 'lastErrorCode',
+    sentAt: 'sentAt',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt'
 };
 exports.SortOrder = {
     asc: 'asc',
     desc: 'desc'
+};
+exports.NullableJsonNullValueInput = {
+    DbNull: exports.DbNull,
+    JsonNull: exports.JsonNull
 };
 exports.QueryMode = {
     default: 'default',
@@ -400,5 +478,10 @@ exports.QueryMode = {
 exports.NullsOrder = {
     first: 'first',
     last: 'last'
+};
+exports.JsonNullValueFilter = {
+    DbNull: exports.DbNull,
+    JsonNull: exports.JsonNull,
+    AnyNull: exports.AnyNull
 };
 //# sourceMappingURL=prismaNamespaceBrowser.js.map

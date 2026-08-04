@@ -24,7 +24,9 @@ describe('partidoService.update team replacement', () => {
 
     expect(prisma.divisionEquipo.count).not.toHaveBeenCalled();
     expect(prisma.partido.findFirst).not.toHaveBeenCalled();
-    expect(partidoRepository.update).toHaveBeenCalledWith('partido-1', { golesLocal: 2 });
+    expect(prisma.equipo.findMany).not.toHaveBeenCalled();
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
+    expect(partidoRepository.update).toHaveBeenCalledWith('partido-1', { golesLocal: 2 }, prisma);
   });
 
   it('swaps teams while preserving each selected side', async () => {
@@ -33,23 +35,36 @@ describe('partidoService.update team replacement', () => {
     expect(prisma.divisionEquipo.count).toHaveBeenCalledWith({
       where: { divisionId: 'division-1', equipoId: 'equipo-3' },
     });
-    expect(prisma.partido.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        id: { not: 'partido-1' },
-        jornadaId: 'jornada-1',
-        tipoPartido: 'REGULAR',
-      }),
+    expect(prisma.partido.findMany).not.toHaveBeenCalled();
+    expect(prisma.partido.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'partido-2', estado: 'PROGRAMADO', jornadaId: 'jornada-1', tipoPartido: 'REGULAR' }),
+      data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-4' },
     }));
-    expect(prisma.partido.update).toHaveBeenCalledWith({
-      where: { id: 'partido-2' }, data: { equipoLocalId: 'equipo-1' },
-    });
-    expect(prisma.partido.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'partido-1' }, data: { equipoLocalId: 'equipo-3' },
+    expect(prisma.partido.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'partido-1', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' }),
+      data: { equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-2' },
     }));
     expect(prisma.partido.findFirst).toHaveBeenCalledOnce();
     expect(prisma.partido.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: { notIn: ['partido-1', 'partido-2'] } }),
     }));
+    expect(prisma.equipo.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ['equipo-1', 'equipo-2', 'equipo-3', 'equipo-4'] } },
+      select: { userId: true },
+    });
+    expect(prisma.$executeRaw).toHaveBeenCalledOnce();
+    expect(vi.mocked(prisma.partido.updateMany).mock.invocationCallOrder.at(-1))
+      .toBeLessThan(vi.mocked(prisma.$executeRaw).mock.invocationCallOrder[0]);
+  });
+
+  it('fails the swap transaction when the schedule outbox cannot be written', async () => {
+    vi.mocked(prisma.$executeRaw).mockRejectedValueOnce(new Error('outbox unavailable'));
+
+    await expect(partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, owner))
+      .rejects.toThrow('outbox unavailable');
+
+    expect(prisma.partido.updateMany).toHaveBeenCalledTimes(2);
+    expect(prisma.partido.findUnique).not.toHaveBeenCalled();
   });
 
   it('allows the resulting unordered pair when it occurred in a prior jornada', async () => {
@@ -69,7 +84,7 @@ describe('partidoService.update team replacement', () => {
   it.each([
     ['same order', 'equipo-3', 'equipo-2'],
     ['reversed order', 'equipo-2', 'equipo-3'],
-  ])('rejects a duplicate unordered pair in the simulated current jornada: %s', async (_label, local, visitor) => {
+  ])('rejects an ambiguous incoming-team appearance before duplicate-pair matching: %s', async (_label, local, visitor) => {
     vi.mocked(prisma.jornada.findMany).mockResolvedValue([{ id: 'jornada-1', numero: 1, partidos: [
       { id: 'partido-1', estado: 'PROGRAMADO', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' },
       { id: 'partido-2', estado: 'PROGRAMADO', equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-4' },
@@ -77,26 +92,33 @@ describe('partidoService.update team replacement', () => {
     ] }] as any)
 
     await expect(partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, owner))
-      .rejects.toThrow('El intercambio produciría un enfrentamiento duplicado dentro de la jornada actual')
-    expect(prisma.partido.update).not.toHaveBeenCalled()
+      .rejects.toThrow('intercambio es ambiguo')
+    expect(prisma.partido.updateMany).not.toHaveBeenCalled()
   })
 
   it('blocks when the incoming team has no match in the jornada', async () => {
-    vi.mocked(prisma.partido.findMany).mockResolvedValue([]);
+    vi.mocked(prisma.jornada.findMany).mockResolvedValue([{ id: 'jornada-1', numero: 1, partidos: [
+      { id: 'partido-1', estado: 'PROGRAMADO', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' },
+    ] }] as any);
     await expect(partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, owner))
       .rejects.toThrow('no tiene otro partido en esta jornada');
   });
 
   it('blocks an ambiguous incoming team appearance', async () => {
-    vi.mocked(prisma.partido.findMany).mockResolvedValue([{ id: 'p2' }, { id: 'p3' }] as any);
+    vi.mocked(prisma.jornada.findMany).mockResolvedValue([{ id: 'jornada-1', numero: 1, partidos: [
+      { id: 'partido-1', estado: 'PROGRAMADO', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' },
+      { id: 'p2', estado: 'PROGRAMADO', equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-4' },
+      { id: 'p3', estado: 'PROGRAMADO', equipoLocalId: 'equipo-5', equipoVisitanteId: 'equipo-3' },
+    ] }] as any);
     await expect(partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, owner))
       .rejects.toThrow('intercambio es ambiguo');
   });
 
   it('blocks a target match that is not PROGRAMADO', async () => {
-    vi.mocked(prisma.partido.findMany).mockResolvedValue([{
-      id: 'partido-2', estado: 'FINALIZADO', equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-4',
-    }] as any);
+    vi.mocked(prisma.jornada.findMany).mockResolvedValue([{ id: 'jornada-1', numero: 1, partidos: [
+      { id: 'partido-1', estado: 'PROGRAMADO', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' },
+      { id: 'partido-2', estado: 'FINALIZADO', equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-4' },
+    ] }] as any);
     await expect(partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, owner))
       .rejects.toThrow('partido del equipo seleccionado debe estar programado');
   });
@@ -132,10 +154,10 @@ describe('partidoService.update team replacement', () => {
   });
 
   it('rejects when the outgoing team would face itself in the target match', async () => {
-    vi.mocked(prisma.partido.findMany).mockResolvedValue([{
-      id: 'partido-2', estado: 'PROGRAMADO', equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-1',
-      fecha: new Date('2026-08-01T20:00:00Z'), fechaFin: new Date('2026-08-01T21:00:00Z'),
-    }] as any);
+    vi.mocked(prisma.jornada.findMany).mockResolvedValue([{ id: 'jornada-1', numero: 1, partidos: [
+      { id: 'partido-1', estado: 'PROGRAMADO', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' },
+      { id: 'partido-2', estado: 'PROGRAMADO', equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-1', fecha: new Date('2026-08-01T20:00:00Z'), fechaFin: new Date('2026-08-01T21:00:00Z') },
+    ] }] as any);
     await expect(partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, owner))
       .rejects.toThrow('mismo equipo como local y visitante');
   });
@@ -177,7 +199,7 @@ describe('partidoService.update team replacement', () => {
         OR: [{ equipoLocalId: 'equipo-1' }, { equipoVisitanteId: 'equipo-1' }],
       },
     ]);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
   });
 
   it('keeps owner authorization before replacement validation', async () => {
@@ -186,6 +208,13 @@ describe('partidoService.update team replacement', () => {
 
     expect(prisma.divisionEquipo.count).not.toHaveBeenCalled();
   });
+
+  it.each(['golesLocal', 'golesVisitante', 'penalesLocal', 'penalesVisitante', 'estado', 'jornadaId', 'rondaPlayoffId', 'tipoPartido'])
+    ('rejects replacement mixed with %s before opening a transaction', async (field) => {
+      await expect(partidoService.update('partido-1', { equipoLocalId: 'equipo-3', [field]: field === 'estado' ? 'PROGRAMADO' : 1 }, owner))
+        .rejects.toThrow('No se puede combinar el reemplazo de equipo');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
 
   it('allows an administrator to update a foreign partido', async () => {
     await partidoService.update('partido-1', { golesLocal: 2 }, admin);

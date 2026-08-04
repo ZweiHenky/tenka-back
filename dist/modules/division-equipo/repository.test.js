@@ -83,6 +83,7 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
                 equipoId: true,
                 division: { include: {
                         liga: { select: { id: true, nombre: true, logo: true } },
+                        categoria: { select: { id: true, nombre: true } },
                         estadoLiga: { select: { id: true, nombre: true } },
                     } },
             },

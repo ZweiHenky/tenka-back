@@ -17,14 +17,14 @@ exports.equipoRepository = {
             where: { userId, nombreNormalizado, ...(excludeId ? { id: { not: excludeId } } : {}) },
         });
     },
-    async create(data) {
-        return database_1.prisma.equipo.create({ data });
+    async create(data, tx) {
+        return (tx ?? database_1.prisma).equipo.create({ data });
     },
-    async update(id, data) {
-        return database_1.prisma.equipo.update({ where: { id }, data });
+    async update(id, data, tx) {
+        return (tx ?? database_1.prisma).equipo.update({ where: { id }, data });
     },
-    async delete(id) {
-        await database_1.prisma.equipo.delete({ where: { id } });
+    async delete(id, tx) {
+        await (tx ?? database_1.prisma).equipo.delete({ where: { id } });
     },
 };
 //# sourceMappingURL=repository.js.map

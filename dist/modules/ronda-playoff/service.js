@@ -6,6 +6,7 @@ const database_1 = require("../../config/database");
 const repository_1 = require("./repository");
 const authorization_1 = require("../../utils/authorization");
 const divisionVisibility_1 = require("../../utils/divisionVisibility");
+const leagueScheduleLock_1 = require("../../utils/leagueScheduleLock");
 async function assertDivisionOwner(divisionId, actor) {
     const division = await database_1.prisma.division.findUnique({
         where: { id: divisionId },
@@ -44,6 +45,37 @@ const NOMBRES_RONDAS = {
 };
 const CANTIDADES_EQUIPOS = [2, 4, 8, 16, 32];
 const spanishNameCollator = new Intl.Collator('es', { sensitivity: 'base' });
+async function serializablePlayoffWrite(operation, conflictMessage) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+            return await database_1.prisma.$transaction(operation, { isolationLevel: 'Serializable' });
+        }
+        catch (error) {
+            if (error?.code === 'P2034' && attempt < 2)
+                continue;
+            if (error?.code === 'P2034' || error?.code === 'P2002')
+                throw new errors_1.ConflictError(conflictMessage);
+            throw error;
+        }
+    }
+    throw new errors_1.ConflictError(conflictMessage);
+}
+async function lockedDivision(tx, divisionId, actor) {
+    const lockTarget = await tx.division.findUnique({ where: { id: divisionId }, select: { ligaId: true } });
+    if (!lockTarget)
+        throw new errors_1.NotFoundError('División');
+    await (0, leagueScheduleLock_1.acquireLeagueScheduleLock)(tx, lockTarget.ligaId);
+    const division = await tx.division.findUnique({
+        where: { id: divisionId },
+        select: { ligaId: true, liga: { select: { userId: true } } },
+    });
+    if (!division)
+        throw new errors_1.NotFoundError('División');
+    if (division.ligaId !== lockTarget.ligaId)
+        throw new errors_1.ConflictError('La división cambió de liga durante la operación; vuelve a intentarlo');
+    (0, authorization_1.assertOwnerOrAdmin)(actor, division.liga.userId, 'División');
+    return division;
+}
 exports.rondaPlayoffService = {
     async list(actor) {
         return database_1.prisma.rondaPlayoff.findMany({ where: { division: (0, divisionVisibility_1.visibleDivisionWhere)(actor) } });
@@ -70,153 +102,190 @@ exports.rondaPlayoffService = {
         return repository_1.rondaPlayoffRepository.update(id, data);
     },
     async delete(id, actor) {
-        const ronda = await findForWrite(id, actor);
-        await assertDivisionOwner(ronda.divisionId, actor);
-        await repository_1.rondaPlayoffRepository.delete(id);
+        await serializablePlayoffWrite(async (tx) => {
+            const lockTarget = await tx.rondaPlayoff.findUnique({
+                where: { id },
+                select: { divisionId: true, division: { select: { ligaId: true } } },
+            });
+            if (!lockTarget)
+                throw new errors_1.NotFoundError('Ronda de playoff');
+            await (0, leagueScheduleLock_1.acquireLeagueScheduleLock)(tx, lockTarget.division.ligaId);
+            const ronda = await tx.rondaPlayoff.findUnique({
+                where: { id },
+                select: { orden: true, division: { select: { ligaId: true, liga: { select: { userId: true } }, rondasPlayoff: { orderBy: { orden: 'desc' }, take: 1, select: { id: true } } } } },
+            });
+            if (!ronda)
+                throw new errors_1.NotFoundError('Ronda de playoff');
+            if (ronda.division.ligaId !== lockTarget.division.ligaId)
+                throw new errors_1.ConflictError('La ronda cambió de liga durante la eliminación; vuelve a intentarlo');
+            (0, authorization_1.assertOwnerOrAdmin)(actor, ronda.division.liga.userId, 'División');
+            if (ronda.division.rondasPlayoff[0]?.id !== id) {
+                throw new errors_1.ConflictError('Solo se puede eliminar la última ronda de playoff');
+            }
+            await tx.rondaPlayoff.delete({ where: { id } });
+        }, 'Las rondas de playoff cambiaron durante la eliminación; vuelve a intentarlo');
     },
     async deleteByDivision(divisionId, actor) {
-        await assertDivisionOwner(divisionId, actor);
-        await repository_1.rondaPlayoffRepository.deleteByDivision(divisionId);
+        await serializablePlayoffWrite(async (tx) => {
+            await lockedDivision(tx, divisionId, actor);
+            await tx.rondaPlayoff.deleteMany({ where: { divisionId } });
+        }, 'Las rondas de playoff cambiaron durante la eliminación; vuelve a intentarlo');
     },
     async generate(divisionId, cantidadEquipos, actor) {
-        const division = await database_1.prisma.division.findFirst({
-            where: (0, authorization_1.isAdmin)(actor) ? { id: divisionId } : { id: divisionId, liga: { userId: actor.id } },
-            select: {
-                equipos: {
-                    select: {
-                        equipoId: true,
-                        equipo: {
-                            select: {
-                                nombre: true,
-                                tablaPosiciones: {
-                                    where: { divisionId },
-                                    select: { puntos: true, diferenciaGoles: true, ganados: true, golesFavor: true },
+        if (!CANTIDADES_EQUIPOS.includes(cantidadEquipos)) {
+            throw new errors_1.ValidationError('La cantidad debe ser 2, 4, 8, 16 o 32');
+        }
+        return serializablePlayoffWrite(async (tx) => {
+            const lockTarget = await tx.division.findUnique({ where: { id: divisionId }, select: { ligaId: true } });
+            if (!lockTarget)
+                throw new errors_1.NotFoundError('División');
+            await (0, leagueScheduleLock_1.acquireLeagueScheduleLock)(tx, lockTarget.ligaId);
+            const division = await tx.division.findFirst({
+                where: (0, authorization_1.isAdmin)(actor) ? { id: divisionId } : { id: divisionId, liga: { userId: actor.id } },
+                select: {
+                    ligaId: true,
+                    rondasPlayoff: { take: 1, select: { id: true } },
+                    equipos: {
+                        select: {
+                            equipoId: true,
+                            equipo: {
+                                select: {
+                                    nombre: true,
+                                    tablaPosiciones: {
+                                        where: { divisionId },
+                                        select: { puntos: true, diferenciaGoles: true, ganados: true, golesFavor: true },
+                                    },
                                 },
                             },
                         },
                     },
                 },
-            },
-        });
-        if (!division)
-            throw new errors_1.NotFoundError('División');
-        if (!CANTIDADES_EQUIPOS.includes(cantidadEquipos)) {
-            throw new errors_1.ValidationError('La cantidad debe ser 2, 4, 8, 16 o 32');
-        }
-        if (division.equipos.length < cantidadEquipos) {
-            throw new errors_1.ValidationError(`Se necesitan al menos ${cantidadEquipos} equipos asignados a la división`);
-        }
-        const clasificados = division.equipos
-            .map(({ equipoId, equipo }) => ({
-            equipoId,
-            nombre: equipo.nombre,
-            puntos: equipo.tablaPosiciones[0]?.puntos ?? 0,
-            diferenciaGoles: equipo.tablaPosiciones[0]?.diferenciaGoles ?? 0,
-            ganados: equipo.tablaPosiciones[0]?.ganados ?? 0,
-            golesFavor: equipo.tablaPosiciones[0]?.golesFavor ?? 0,
-        }))
-            .sort((a, b) => b.puntos - a.puntos
-            || b.diferenciaGoles - a.diferenciaGoles
-            || b.ganados - a.ganados
-            || b.golesFavor - a.golesFavor
-            || spanishNameCollator.compare(a.nombre, b.nombre)
-            || a.equipoId.localeCompare(b.equipoId))
-            .slice(0, cantidadEquipos);
-        const nombresRonda = NOMBRES_RONDAS[cantidadEquipos];
-        return database_1.prisma.$transaction(async (tx) => {
+            });
+            if (!division)
+                throw new errors_1.NotFoundError('División');
+            if (division.ligaId !== lockTarget.ligaId)
+                throw new errors_1.ConflictError('La división cambió de liga durante la generación; vuelve a intentarlo');
+            if (division.rondasPlayoff.length > 0)
+                throw new errors_1.ConflictError('La división ya tiene rondas de playoff');
+            if (division.equipos.length < cantidadEquipos) {
+                throw new errors_1.ValidationError(`Se necesitan al menos ${cantidadEquipos} equipos asignados a la división`);
+            }
+            const clasificados = division.equipos
+                .map(({ equipoId, equipo }) => ({
+                equipoId,
+                nombre: equipo.nombre,
+                puntos: equipo.tablaPosiciones[0]?.puntos ?? 0,
+                diferenciaGoles: equipo.tablaPosiciones[0]?.diferenciaGoles ?? 0,
+                ganados: equipo.tablaPosiciones[0]?.ganados ?? 0,
+                golesFavor: equipo.tablaPosiciones[0]?.golesFavor ?? 0,
+            }))
+                .sort((a, b) => b.puntos - a.puntos
+                || b.diferenciaGoles - a.diferenciaGoles
+                || b.ganados - a.ganados
+                || b.golesFavor - a.golesFavor
+                || spanishNameCollator.compare(a.nombre, b.nombre)
+                || a.equipoId.localeCompare(b.equipoId))
+                .slice(0, cantidadEquipos);
             const rondas = await tx.rondaPlayoff.createManyAndReturn({
-                data: nombresRonda.map((nombre, index) => ({
-                    nombre,
-                    orden: index + 1,
-                    divisionId,
-                })),
+                data: NOMBRES_RONDAS[cantidadEquipos].map((nombre, index) => ({ nombre, orden: index + 1, divisionId })),
             });
             rondas.sort((a, b) => a.orden - b.orden);
             const primeraRonda = rondas[0];
-            await tx.partido.createMany({
-                data: Array.from({ length: clasificados.length / 2 }, (_, i) => ({
+            await tx.partido.createMany({ data: Array.from({ length: clasificados.length / 2 }, (_, i) => ({
                     equipoLocalId: clasificados[i].equipoId,
                     equipoVisitanteId: clasificados[clasificados.length - 1 - i].equipoId,
                     llave: i + 1,
                     rondaPlayoffId: primeraRonda.id,
                     estado: 'PROGRAMADO',
                     tipoPartido: 'ELIMINATORIA',
-                })),
-            });
+                })) });
             return rondas;
-        });
+        }, 'Las rondas de playoff ya existen o fueron generadas concurrentemente');
     },
-    async advanceWinners(fromRondaPlayoffId) {
-        await database_1.prisma.$transaction(async (tx) => {
-            const currentRound = await tx.rondaPlayoff.findUnique({
-                where: { id: fromRondaPlayoffId },
-                select: {
-                    orden: true,
-                    division: { select: { rondasPlayoff: { select: { id: true, orden: true } } } },
-                },
-            });
-            if (!currentRound)
-                throw new errors_1.NotFoundError('Ronda de playoff');
-            const nextRound = currentRound.division.rondasPlayoff.find((ronda) => ronda.orden === currentRound.orden + 1);
-            if (!nextRound)
-                return;
-            const partidos = await tx.partido.findMany({
-                where: { rondaPlayoffId: { in: [fromRondaPlayoffId, nextRound.id] } },
-                select: {
-                    id: true,
-                    rondaPlayoffId: true,
-                    llave: true,
-                    estado: true,
-                    golesLocal: true,
-                    golesVisitante: true,
-                    penalesLocal: true,
-                    penalesVisitante: true,
-                    equipoLocalId: true,
-                    equipoVisitanteId: true,
-                },
-            });
-            const currentRoundPartidos = partidos.filter((partido) => partido.rondaPlayoffId === fromRondaPlayoffId);
-            const currentPartidos = new Map(currentRoundPartidos.map((partido) => [partido.llave, partido]));
-            const nextPartidos = new Map(partidos
-                .filter((partido) => partido.rondaPlayoffId === nextRound.id)
-                .map((partido) => [partido.llave, partido]));
-            const pairCount = Math.ceil(currentRoundPartidos.length / 2);
-            const creates = [];
-            const updates = [];
-            for (let i = 1; i <= pairCount; i++) {
-                const partidoA = currentPartidos.get(i * 2 - 1);
-                const partidoB = currentPartidos.get(i * 2);
-                if (!partidoA || !partidoB)
+    async syncAdvancement(tx, fromRondaPlayoffId) {
+        const currentRound = await tx.rondaPlayoff.findUnique({
+            where: { id: fromRondaPlayoffId },
+            select: {
+                orden: true,
+                division: { select: { rondasPlayoff: { select: { id: true, orden: true } } } },
+            },
+        });
+        if (!currentRound)
+            throw new errors_1.NotFoundError('Ronda de playoff');
+        const nextRound = currentRound.division.rondasPlayoff.find((ronda) => ronda.orden === currentRound.orden + 1);
+        if (!nextRound)
+            return;
+        const partidos = await tx.partido.findMany({
+            where: { rondaPlayoffId: { in: [fromRondaPlayoffId, nextRound.id] } },
+            select: {
+                id: true,
+                rondaPlayoffId: true,
+                llave: true,
+                estado: true,
+                golesLocal: true,
+                golesVisitante: true,
+                penalesLocal: true,
+                penalesVisitante: true,
+                equipoLocalId: true,
+                equipoVisitanteId: true,
+                jornadaId: true,
+            },
+        });
+        const currentRoundPartidos = partidos.filter((partido) => partido.rondaPlayoffId === fromRondaPlayoffId);
+        const currentPartidos = new Map(currentRoundPartidos.map((partido) => [partido.llave, partido]));
+        const nextPartidos = new Map(partidos
+            .filter((partido) => partido.rondaPlayoffId === nextRound.id)
+            .map((partido) => [partido.llave, partido]));
+        const highestSourceKey = Math.max(0, ...currentRoundPartidos.map((partido) => partido.llave ?? 0));
+        const highestDerivedKey = Math.max(0, ...Array.from(nextPartidos.keys()).filter((llave) => llave != null));
+        const pairCount = Math.max(Math.ceil(highestSourceKey / 2), highestDerivedKey);
+        for (let i = 1; i <= pairCount; i++) {
+            const partidoA = currentPartidos.get(i * 2 - 1);
+            const partidoB = currentPartidos.get(i * 2);
+            const existing = nextPartidos.get(i);
+            const winnerA = partidoA?.estado === 'FINALIZADO' ? getWinner(partidoA) : null;
+            const winnerB = partidoB?.estado === 'FINALIZADO' ? getWinner(partidoB) : null;
+            if (!winnerA || !winnerB) {
+                if (!existing)
                     continue;
-                if (partidoA.estado !== 'FINALIZADO' || partidoB.estado !== 'FINALIZADO')
-                    continue;
-                const winnerA = getWinner(partidoA);
-                const winnerB = getWinner(partidoB);
-                if (!winnerA || !winnerB)
-                    continue;
-                const existing = nextPartidos.get(i);
-                if (existing) {
-                    updates.push({ id: existing.id, equipoLocalId: winnerA, equipoVisitanteId: winnerB });
+                if (existing.estado === 'FINALIZADO' || existing.jornadaId) {
+                    throw new errors_1.ConflictError('No se puede revertir el avance porque el partido derivado ya está finalizado o asignado a una jornada');
                 }
-                else {
-                    creates.push({
+                await tx.partido.delete({ where: { id: existing.id } });
+                continue;
+            }
+            if (existing) {
+                if (existing.equipoLocalId === winnerA && existing.equipoVisitanteId === winnerB)
+                    continue;
+                if (existing.estado === 'FINALIZADO' || existing.jornadaId) {
+                    throw new errors_1.ConflictError('No se puede cambiar el avance porque el partido derivado ya está finalizado o asignado a una jornada');
+                }
+                await tx.partido.update({
+                    where: { id: existing.id },
+                    data: { equipoLocalId: winnerA, equipoVisitanteId: winnerB, estado: 'PROGRAMADO', golesLocal: 0, golesVisitante: 0, penalesLocal: null, penalesVisitante: null, version: { increment: 1 } },
+                });
+                await tx.anotacionPartido.deleteMany({ where: { partidoId: existing.id } });
+            }
+            else {
+                await tx.partido.create({ data: {
                         equipoLocalId: winnerA,
                         equipoVisitanteId: winnerB,
                         llave: i,
                         rondaPlayoffId: nextRound.id,
                         estado: 'PROGRAMADO',
                         tipoPartido: 'ELIMINATORIA',
-                    });
-                }
+                    } });
             }
-            await Promise.all([
-                ...(creates.length ? [tx.partido.createMany({ data: creates })] : []),
-                ...updates.map(({ id, ...data }) => tx.partido.update({
-                    where: { id },
-                    data: { ...data, estado: 'PROGRAMADO', golesLocal: 0, golesVisitante: 0, penalesLocal: null, penalesVisitante: null },
-                })),
-            ]);
-        });
+        }
+    },
+    async advanceWinners(fromRondaPlayoffId) {
+        await serializablePlayoffWrite(async (tx) => {
+            const lockTarget = await tx.rondaPlayoff.findUnique({ where: { id: fromRondaPlayoffId }, select: { division: { select: { ligaId: true } } } });
+            if (!lockTarget)
+                throw new errors_1.NotFoundError('Ronda de playoff');
+            await (0, leagueScheduleLock_1.acquireLeagueScheduleLock)(tx, lockTarget.division.ligaId);
+            await this.syncAdvancement(tx, fromRondaPlayoffId);
+        }, 'El cuadro de playoff cambió durante el avance; vuelve a intentarlo');
     },
 };
 //# sourceMappingURL=service.js.map

@@ -1,0 +1,88 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const service_test_harness_1 = require("./service.test-harness");
+const vitest_1 = require("vitest");
+const mocks = (0, service_test_harness_1.getServiceMocks)();
+let ligaService;
+const courts = [
+    { id: 'court-1', nombre: 'Principal', nombreNormalizado: 'principal', activa: true },
+    { id: 'court-2', nombre: 'Norte', nombreNormalizado: 'norte', activa: true },
+    { id: 'court-3', nombre: 'Historica', nombreNormalizado: 'historica', activa: false },
+];
+(0, vitest_1.beforeAll)(async () => {
+    ligaService = await (0, service_test_harness_1.loadLigaService)();
+});
+(0, vitest_1.describe)('gestion de canchas de liga', () => {
+    (0, vitest_1.beforeEach)(() => {
+        (0, service_test_harness_1.resetServiceMocks)();
+        mocks.findByNormalizedName.mockResolvedValue(null);
+        mocks.findUpdateContext.mockResolvedValue({ ...service_test_harness_1.existingLiga, multiplesCanchas: true, canchas: courts });
+        mocks.findManagementContext.mockResolvedValue({ multiplesCanchas: true, usaArbitros: false });
+        mocks.update.mockImplementation(async (_id, data) => ({ ...service_test_harness_1.existingLiga, ...data }));
+        mocks.canchaFindFirst.mockResolvedValue(null);
+        mocks.canchaCount.mockResolvedValue(2);
+        mocks.canchaCreate.mockResolvedValue({ id: 'court-4' });
+        mocks.divisionCount.mockResolvedValue(0);
+    });
+    (0, vitest_1.it)('actualiza por id, crea nuevas y desactiva las omitidas sin eliminarlas', async () => {
+        await ligaService.update('liga-1', {
+            canchas: [
+                { id: 'court-1', nombre: ' Central ' },
+                { id: 'court-2' },
+                { nombre: 'Sur' },
+            ],
+        }, service_test_harness_1.owner);
+        (0, vitest_1.expect)(mocks.update).toHaveBeenCalledWith('liga-1', {}, [
+            vitest_1.expect.objectContaining({ id: 'court-1', nombre: 'Central', nombreNormalizado: 'central', activa: true }),
+            vitest_1.expect.objectContaining({ id: 'court-2', nombre: 'Norte', activa: true }),
+            vitest_1.expect.objectContaining({ id: 'court-3', nombre: 'Historica', activa: false }),
+            { nombre: 'Sur', nombreNormalizado: 'sur', activa: true },
+        ], undefined);
+    });
+    (0, vitest_1.it)('al deshabilitar multiples canchas conserva y desactiva todos los registros', async () => {
+        await ligaService.update('liga-1', { multiplesCanchas: false }, service_test_harness_1.owner);
+        const writes = mocks.update.mock.calls[0][2];
+        (0, vitest_1.expect)(writes).toHaveLength(3);
+        (0, vitest_1.expect)(writes.every((court) => court.activa === false)).toBe(true);
+        (0, vitest_1.expect)(mocks.update.mock.calls[0][4]).toBe(true);
+    });
+    (0, vitest_1.it)('rechaza ids ajenos y nombres normalizados duplicados', async () => {
+        await (0, vitest_1.expect)(ligaService.update('liga-1', {
+            canchas: [{ id: 'foreign', nombre: 'Otra' }, { id: 'court-1' }],
+        }, service_test_harness_1.owner)).rejects.toThrow('La cancha indicada no pertenece a esta liga');
+        await (0, vitest_1.expect)(ligaService.update('liga-1', {
+            canchas: [{ id: 'court-1' }, { id: 'court-2', nombre: ' principal ' }],
+        }, service_test_harness_1.owner)).rejects.toThrow('Ya existe una cancha con ese nombre en esta liga');
+    });
+    (0, vitest_1.it)('impide desactivar o eliminar una cancha activa si quedaria solo una', async () => {
+        mocks.canchaFindFirst.mockResolvedValue(courts[0]);
+        mocks.canchaCount.mockResolvedValue(1);
+        await (0, vitest_1.expect)(ligaService.updateCancha('liga-1', 'court-1', { activa: false }, service_test_harness_1.owner))
+            .rejects.toThrow('debe conservar al menos 2 canchas activas');
+        await (0, vitest_1.expect)(ligaService.deleteCancha('liga-1', 'court-1', service_test_harness_1.owner))
+            .rejects.toThrow('debe conservar al menos 2 canchas activas');
+    });
+    (0, vitest_1.it)('recorta y normaliza nombres en el CRUD individual', async () => {
+        await ligaService.createCancha('liga-1', { nombre: '  Cancha Sur  ' }, service_test_harness_1.owner);
+        (0, vitest_1.expect)(mocks.canchaCreate).toHaveBeenCalledWith({
+            data: { ligaId: 'liga-1', nombre: 'Cancha Sur', nombreNormalizado: 'cancha sur' },
+        });
+    });
+    (0, vitest_1.it)('desactiva una cancha usada y elimina fisicamente una sin partidos', async () => {
+        mocks.canchaFindFirst.mockResolvedValue(courts[0]);
+        mocks.partidoCount.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+        await ligaService.deleteCancha('liga-1', 'court-1', service_test_harness_1.owner);
+        await ligaService.deleteCancha('liga-1', 'court-1', service_test_harness_1.owner);
+        (0, vitest_1.expect)(mocks.canchaUpdate).toHaveBeenCalledWith({ where: { id: 'court-1' }, data: { activa: false } });
+        (0, vitest_1.expect)(mocks.canchaDelete).toHaveBeenCalledWith({ where: { id: 'court-1' } });
+    });
+    (0, vitest_1.it)('desactiva en lugar de eliminar una cancha fija de una división', async () => {
+        mocks.canchaFindFirst.mockResolvedValue(courts[0]);
+        mocks.partidoCount.mockResolvedValue(0);
+        mocks.divisionCount.mockResolvedValue(1);
+        await ligaService.deleteCancha('liga-1', 'court-1', service_test_harness_1.owner);
+        (0, vitest_1.expect)(mocks.canchaUpdate).toHaveBeenCalledWith({ where: { id: 'court-1' }, data: { activa: false } });
+        (0, vitest_1.expect)(mocks.canchaDelete).not.toHaveBeenCalled();
+    });
+});
+//# sourceMappingURL=service.court-rules.test.js.map

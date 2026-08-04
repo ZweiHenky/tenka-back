@@ -38,6 +38,7 @@ const backendEnvSchema = zod_1.z.object({
     CLOUDINARY_CLOUD_NAME: requiredString,
     CLOUDINARY_API_KEY: requiredString,
     CLOUDINARY_API_SECRET: requiredString,
+    CLOUDINARY_DELIVERY_HOST: zod_1.z.string().trim().min(1).default('res.cloudinary.com'),
     PHONE_OTP_MODE: zod_1.z.enum(['console', 'disabled']),
     LOG_LEVEL: zod_1.z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
     SENTRY_DSN: optionalString(zod_1.z.url()),

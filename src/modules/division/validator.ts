@@ -32,6 +32,7 @@ export const updateDivisionSchema = z.object({
   categoriaId: z.string().optional(),
   tipoId: z.string().optional(),
   tipoCompetenciaId: z.string().optional(),
+  canchaUnicaId: z.string().min(1).nullable().optional(),
 });
 
 export type CreateDivisionInput = z.output<typeof createDivisionSchema>;

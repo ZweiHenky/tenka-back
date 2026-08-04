@@ -29,6 +29,7 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
                 divisiones: vitest_1.expect.objectContaining({
                     where: { estadoLiga: { nombre: { not: 'Borrador' } } },
                 }),
+                canchas: vitest_1.expect.objectContaining({ where: { activa: true } }),
             }),
         }));
     });
@@ -50,6 +51,9 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
                 { liga: { userId: owner.id } },
             ],
         });
+        (0, vitest_1.expect)(query.include.canchas.where).toEqual({
+            OR: [{ activa: true }, { liga: { userId: owner.id } }],
+        });
         (0, vitest_1.expect)(result).not.toHaveProperty('user');
     });
     (0, vitest_1.it)('no aplica filtros de publicacion al administrador', async () => {
@@ -60,6 +64,7 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
             where: { id: 'liga-1' },
             include: { user: false, divisiones: { where: undefined } },
         });
+        (0, vitest_1.expect)(mocks.ligaFindFirst.mock.calls[0][0].include.canchas).not.toHaveProperty('where');
     });
     vitest_1.it.each([
         ['propietario', owner, { id: 'liga-1', userId: owner.id }],
@@ -72,7 +77,7 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
             where,
             select: {
                 canchas: {
-                    select: { id: true, nombre: true, activa: true, createdAt: true, updatedAt: true, ligaId: true },
+                    select: { id: true, nombre: true, nombreNormalizado: true, activa: true, createdAt: true, updatedAt: true, ligaId: true },
                 },
             },
         });
@@ -90,7 +95,7 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
                 canchaPublicId: true,
                 multiplesCanchas: true,
                 usaArbitros: true,
-                canchas: { where: { activa: true }, select: { nombre: true } },
+                canchas: { select: { id: true, nombre: true, nombreNormalizado: true, activa: true } },
                 arbitros: { where: { activo: true }, select: { nombre: true } },
             }],
         ['eliminacion', 'findDeleteContext', {
@@ -125,6 +130,7 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
         mocks.ligaFindFirst.mockResolvedValue({
             id: 'liga-1',
             nombre: 'Liga Centro',
+            multiplesCanchas: true,
             divisiones: [
                 {
                     id: 'division-1',
@@ -157,6 +163,7 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
         (0, vitest_1.expect)(mocks.ligaFindFirst).toHaveBeenCalledTimes(1);
         const query = mocks.ligaFindFirst.mock.calls[0][0];
         (0, vitest_1.expect)(query.where).toEqual({ id: 'liga-1', userId: owner.id });
+        (0, vitest_1.expect)(query.select.multiplesCanchas).toBe(true);
         (0, vitest_1.expect)(query.select.divisiones).toMatchObject({
             orderBy: [{ nombre: 'asc' }, { id: 'asc' }],
             select: {
@@ -174,6 +181,7 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
         });
         (0, vitest_1.expect)(query.select.divisiones.select.jornadas.select.partidos.select).not.toHaveProperty('arbitros');
         (0, vitest_1.expect)(result?.divisiones[0].categoria).toEqual({ id: 'categoria-1', nombre: 'Libre' });
+        (0, vitest_1.expect)(result?.multiplesCanchas).toBe(true);
         (0, vitest_1.expect)(result?.divisiones[0].jornadas[0].partidos[0]).not.toHaveProperty('arbitros');
         (0, vitest_1.expect)(result?.divisiones[1].jornadas).toEqual([]);
     });

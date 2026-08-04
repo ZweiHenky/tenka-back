@@ -51,6 +51,8 @@ describe('tablaPosicionService.recalcular', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     db.transaction.mockImplementation(async (callback) => callback({
+      divisionEquipo: { findMany: db.teamsFindMany },
+      partido: { findMany: db.matchesFindMany },
       tablaPosicion: {
         deleteMany: db.standingsDeleteMany,
         createMany: db.standingsCreateMany,
@@ -161,10 +163,30 @@ describe('tablaPosicionService.recalcular', () => {
     await tablaPosicionService.recalcular(divisionId);
 
     expect(db.transaction).toHaveBeenCalledOnce();
+    expect(db.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'RepeatableRead' });
     expect(db.standingsDeleteMany).toHaveBeenCalledWith({ where: { divisionId } });
     expect(db.standingsCreateMany).toHaveBeenCalledOnce();
     expect(db.standingsCreateMany.mock.invocationCallOrder[0])
       .toBeGreaterThan(db.standingsDeleteMany.mock.invocationCallOrder[0]);
+    expect(db.teamsFindMany.mock.invocationCallOrder[0])
+      .toBeGreaterThan(db.transaction.mock.invocationCallOrder[0]);
+  });
+
+  it('usa directamente el cliente transaccional recibido sin abrir otra transacción', async () => {
+    mockTiedMatch(5, 4);
+    const tx = {
+      divisionEquipo: { findMany: db.teamsFindMany },
+      partido: { findMany: db.matchesFindMany },
+      tablaPosicion: { deleteMany: db.standingsDeleteMany, createMany: db.standingsCreateMany },
+    } as any;
+
+    await tablaPosicionService.recalcular(divisionId, tx);
+
+    expect(db.transaction).not.toHaveBeenCalled();
+    expect(db.teamsFindMany).toHaveBeenCalledOnce();
+    expect(db.matchesFindMany).toHaveBeenCalledOnce();
+    expect(db.standingsDeleteMany).toHaveBeenCalledOnce();
+    expect(db.standingsCreateMany).toHaveBeenCalledOnce();
   });
 
   it('mantiene un presupuesto constante de consultas aunque aumente el número de equipos', async () => {

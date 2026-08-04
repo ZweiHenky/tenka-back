@@ -12,7 +12,7 @@ router.get('/jornada/:jornadaId', authMiddleware_1.optionalAuth, controller_1.pa
 router.get('/ronda-playoff/:rondaPlayoffId', authMiddleware_1.optionalAuth, controller_1.partidoController.findByRondaPlayoff);
 router.get('/:id', authMiddleware_1.optionalAuth, controller_1.partidoController.getById);
 router.use(authMiddleware_1.requireAuth);
-router.post('/', controller_1.partidoController.create);
+router.patch('/:id/resultado', controller_1.partidoController.updateResult);
 router.patch('/:id', controller_1.partidoController.update);
 router.delete('/:id', controller_1.partidoController.delete);
 router.post('/:id/referee-link', controller_2.refereeAccessController.createAccess);

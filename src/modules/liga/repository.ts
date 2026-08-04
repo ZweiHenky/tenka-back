@@ -1,14 +1,20 @@
 import { prisma } from '../../config/database';
 import type { LigaEntity, ProgramacionRecienteLigaDto } from './entity';
-import type { LigaRepository, LigaFilterParams } from './repository.interface';
+import type { LigaRepository, LigaFilterParams, LigaCreateData, LigaCanchaWrite, LigaWriteData } from './repository.interface';
 import type { AuthenticatedUser } from '../../types/auth';
+import type { Prisma } from '../../generated/prisma/client';
 
 const UBICACION_SELECT = {
   select: { id: true, nombreCompleto: true, estado: true, municipio: true, lat: true, lng: true },
 } as const;
 
-const CACHAS_SELECT = {
-  select: { id: true, nombre: true, activa: true, createdAt: true, updatedAt: true, ligaId: true },
+const CANCHAS_SELECT = {
+  select: { id: true, nombre: true, nombreNormalizado: true, activa: true, createdAt: true, updatedAt: true, ligaId: true },
+} as const;
+
+const CANCHAS_PUBLIC_SELECT = {
+  where: { activa: true },
+  select: CANCHAS_SELECT.select,
 } as const;
 
 const ARBITROS_SELECT = {
@@ -34,7 +40,7 @@ const DIVISIONES_INCLUDE = {
       tipoCompetencia: { select: { id: true, nombre: true } },
     },
   },
-  canchas: CACHAS_SELECT,
+  canchas: CANCHAS_SELECT,
   arbitros: ARBITROS_SELECT,
 } as const;
 
@@ -52,7 +58,7 @@ const DIVISIONES_INCLUDE_PUBLIC = {
       tipoCompetencia: { select: { id: true, nombre: true } },
     },
   },
-  canchas: CACHAS_SELECT,
+  canchas: CANCHAS_PUBLIC_SELECT,
   arbitros: ARBITROS_SELECT,
 } as const;
 
@@ -69,7 +75,7 @@ const BASE_INCLUDE = {
       tipoCompetencia: { select: { id: true, nombre: true } },
     },
   },
-  canchas: CACHAS_SELECT,
+  canchas: CANCHAS_SELECT,
   arbitros: ARBITROS_SELECT,
 } as const;
 
@@ -101,6 +107,11 @@ export const ligaRepository: LigaRepository = {
       : actor
         ? { OR: [PUBLIC_DIVISION_WHERE, { liga: { userId: actor.id } }] }
         : PUBLIC_DIVISION_WHERE;
+    const canchas = isAdmin
+      ? CANCHAS_SELECT
+      : actor
+        ? { ...CANCHAS_SELECT, where: { OR: [{ activa: true }, { liga: { userId: actor.id } }] } }
+        : CANCHAS_PUBLIC_SELECT;
 
     const liga = await prisma.liga.findFirst({
       where,
@@ -108,7 +119,7 @@ export const ligaRepository: LigaRepository = {
         ubicacion: UBICACION_SELECT,
         user: isAdmin ? false : DIVISIONES_INCLUDE_PUBLIC.user,
         divisiones: { where: divisionWhere, include: DIVISION_RELATIONS },
-        canchas: CACHAS_SELECT,
+        canchas,
         arbitros: ARBITROS_SELECT,
       },
     });
@@ -135,7 +146,7 @@ export const ligaRepository: LigaRepository = {
         canchaPublicId: true,
         multiplesCanchas: true,
         usaArbitros: true,
-        canchas: { where: { activa: true }, select: { nombre: true } },
+        canchas: { select: { id: true, nombre: true, nombreNormalizado: true, activa: true } },
         arbitros: { where: { activo: true }, select: { nombre: true } },
       },
     });
@@ -158,7 +169,7 @@ export const ligaRepository: LigaRepository = {
   async findManageableCanchas(ligaId: string, actor: AuthenticatedUser) {
     const liga = await prisma.liga.findFirst({
       where: actor.rol === 'ADMINISTRADOR' ? { id: ligaId } : { id: ligaId, userId: actor.id },
-      select: { canchas: CACHAS_SELECT },
+      select: { canchas: CANCHAS_SELECT },
     });
     return liga?.canchas ?? null;
   },
@@ -177,6 +188,7 @@ export const ligaRepository: LigaRepository = {
       select: {
         id: true,
         nombre: true,
+        multiplesCanchas: true,
         divisiones: {
           orderBy: [{ nombre: 'asc' }, { id: 'asc' }],
           select: {
@@ -243,7 +255,7 @@ export const ligaRepository: LigaRepository = {
       divisionFilters.push(borradorFilter);
     }
 
-    const where: Record<string, unknown> = {};
+    const where: Prisma.LigaWhereInput = {};
     if (search) where.nombre = { contains: search, mode: 'insensitive' };
     if (divisionFilters.length > 0) {
       where.divisiones = { some: { AND: divisionFilters } };
@@ -253,45 +265,81 @@ export const ligaRepository: LigaRepository = {
 
     const [rows, total] = await Promise.all([
       prisma.liga.findMany({
-        where: where as any,
+        where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
         include: DIVISIONES_INCLUDE_PUBLIC,
       }),
-      prisma.liga.count({ where: where as any }),
+      prisma.liga.count({ where }),
     ]);
     return { rows, total };
   },
 
-  async create(data: Record<string, unknown>, canchas?: { nombre: string }[], arbitros?: { nombre: string }[]): Promise<LigaEntity> {
-    return prisma.liga.create({
+  async create(data: LigaCreateData, canchas?: LigaCanchaWrite[], arbitros?: { nombre: string }[], tx?: Prisma.TransactionClient): Promise<LigaEntity> {
+    return (tx ?? prisma).liga.create({
       data: {
-        ...(data as any),
-        canchas: canchas ? { create: canchas } : undefined,
+        ...data,
+        canchas: canchas ? {
+          create: canchas.map(({ nombre, nombreNormalizado, activa }) => ({ nombre, nombreNormalizado, activa })),
+        } : undefined,
         arbitros: arbitros ? { create: arbitros } : undefined,
       },
       include: BASE_INCLUDE,
     });
   },
 
-  async update(id: string, data: Record<string, unknown>, canchas?: { nombre: string }[], arbitros?: { nombre: string }[]): Promise<LigaEntity> {
-    if (canchas) {
-      await prisma.ligaCancha.deleteMany({ where: { ligaId: id } });
-      await prisma.ligaCancha.createMany({ data: canchas.map((c) => ({ ...c, ligaId: id })) });
-    }
-    if (arbitros) {
-      await prisma.ligaArbitro.deleteMany({ where: { ligaId: id } });
-      await prisma.ligaArbitro.createMany({ data: arbitros.map((a) => ({ ...a, ligaId: id })) });
-    }
-    return prisma.liga.update({
-      where: { id },
-      data: data as any,
-      include: BASE_INCLUDE,
-    });
+  async update(id: string, data: LigaWriteData, canchas?: LigaCanchaWrite[], arbitros?: { nombre: string }[], clearDivisionCourts?: boolean, transaction?: Prisma.TransactionClient): Promise<LigaEntity> {
+    const execute = async (tx: Prisma.TransactionClient) => {
+      if (clearDivisionCourts) {
+        await tx.division.updateMany({ where: { ligaId: id }, data: { canchaUnicaId: null } });
+      }
+      if (canchas) {
+        const renamed = canchas.filter((cancha) =>
+          cancha.id && cancha.nombreNormalizadoAnterior !== cancha.nombreNormalizado,
+        );
+        for (const cancha of renamed) {
+          await tx.ligaCancha.update({
+            where: { id: cancha.id },
+            data: { nombreNormalizado: `__liga_cancha_tmp_${cancha.id}` },
+          });
+        }
+        for (const cancha of canchas) {
+          if (cancha.id) {
+            await tx.ligaCancha.update({
+              where: { id: cancha.id },
+              data: {
+                nombre: cancha.nombre,
+                nombreNormalizado: cancha.nombreNormalizado,
+                activa: cancha.activa,
+              },
+            });
+          } else {
+            await tx.ligaCancha.create({
+              data: {
+                ligaId: id,
+                nombre: cancha.nombre,
+                nombreNormalizado: cancha.nombreNormalizado,
+                activa: cancha.activa,
+              },
+            });
+          }
+        }
+      }
+      if (arbitros) {
+        await tx.ligaArbitro.deleteMany({ where: { ligaId: id } });
+        await tx.ligaArbitro.createMany({ data: arbitros.map((arbitro) => ({ ...arbitro, ligaId: id })) });
+      }
+      return tx.liga.update({
+        where: { id },
+        data,
+        include: BASE_INCLUDE,
+      });
+    };
+    return transaction ? execute(transaction) : prisma.$transaction(execute);
   },
 
-  async delete(id: string): Promise<void> {
-    await prisma.liga.delete({ where: { id } });
+  async delete(id: string, tx?: Prisma.TransactionClient): Promise<void> {
+    await (tx ?? prisma).liga.delete({ where: { id } });
   },
 };

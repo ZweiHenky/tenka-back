@@ -1,10 +1,12 @@
-import { NotFoundError, ValidationError } from '../../utils/errors';
+import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
 import { prisma } from '../../config/database';
 import { rondaPlayoffRepository } from './repository';
 import type { RondaPlayoffEntity, RondaPlayoffReadEntity } from './entity';
 import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin, isAdmin } from '../../utils/authorization';
 import { assertVisibleDivision, visibleDivisionWhere } from '../../utils/divisionVisibility';
+import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
+import type { Prisma } from '../../generated/prisma/client';
 
 async function assertDivisionOwner(divisionId: string, actor: AuthenticatedUser): Promise<void> {
   const division = await prisma.division.findUnique({
@@ -52,6 +54,33 @@ const NOMBRES_RONDAS: Record<number, string[]> = {
 const CANTIDADES_EQUIPOS = [2, 4, 8, 16, 32];
 const spanishNameCollator = new Intl.Collator('es', { sensitivity: 'base' });
 
+async function serializablePlayoffWrite<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>, conflictMessage: string): Promise<T> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await prisma.$transaction(operation, { isolationLevel: 'Serializable' });
+    } catch (error: any) {
+      if (error?.code === 'P2034' && attempt < 2) continue;
+      if (error?.code === 'P2034' || error?.code === 'P2002') throw new ConflictError(conflictMessage);
+      throw error;
+    }
+  }
+  throw new ConflictError(conflictMessage);
+}
+
+async function lockedDivision(tx: Prisma.TransactionClient, divisionId: string, actor: AuthenticatedUser) {
+  const lockTarget = await tx.division.findUnique({ where: { id: divisionId }, select: { ligaId: true } });
+  if (!lockTarget) throw new NotFoundError('División');
+  await acquireLeagueScheduleLock(tx, lockTarget.ligaId);
+  const division = await tx.division.findUnique({
+    where: { id: divisionId },
+    select: { ligaId: true, liga: { select: { userId: true } } },
+  });
+  if (!division) throw new NotFoundError('División');
+  if (division.ligaId !== lockTarget.ligaId) throw new ConflictError('La división cambió de liga durante la operación; vuelve a intentarlo');
+  assertOwnerOrAdmin(actor, division.liga.userId, 'División');
+  return division;
+}
+
 export const rondaPlayoffService = {
   async list(actor?: AuthenticatedUser): Promise<RondaPlayoffEntity[]> {
     return prisma.rondaPlayoff.findMany({ where: { division: visibleDivisionWhere(actor) } });
@@ -81,93 +110,106 @@ export const rondaPlayoffService = {
   },
 
   async delete(id: string, actor: AuthenticatedUser): Promise<void> {
-    const ronda = await findForWrite(id, actor);
-    await assertDivisionOwner(ronda.divisionId, actor);
-    await rondaPlayoffRepository.delete(id);
+    await serializablePlayoffWrite(async (tx) => {
+      const lockTarget = await tx.rondaPlayoff.findUnique({
+        where: { id },
+        select: { divisionId: true, division: { select: { ligaId: true } } },
+      });
+      if (!lockTarget) throw new NotFoundError('Ronda de playoff');
+      await acquireLeagueScheduleLock(tx, lockTarget.division.ligaId);
+      const ronda = await tx.rondaPlayoff.findUnique({
+        where: { id },
+        select: { orden: true, division: { select: { ligaId: true, liga: { select: { userId: true } }, rondasPlayoff: { orderBy: { orden: 'desc' }, take: 1, select: { id: true } } } } },
+      });
+      if (!ronda) throw new NotFoundError('Ronda de playoff');
+      if (ronda.division.ligaId !== lockTarget.division.ligaId) throw new ConflictError('La ronda cambió de liga durante la eliminación; vuelve a intentarlo');
+      assertOwnerOrAdmin(actor, ronda.division.liga.userId, 'División');
+      if (ronda.division.rondasPlayoff[0]?.id !== id) {
+        throw new ConflictError('Solo se puede eliminar la última ronda de playoff');
+      }
+      await tx.rondaPlayoff.delete({ where: { id } });
+    }, 'Las rondas de playoff cambiaron durante la eliminación; vuelve a intentarlo');
   },
 
   async deleteByDivision(divisionId: string, actor: AuthenticatedUser): Promise<void> {
-    await assertDivisionOwner(divisionId, actor);
-    await rondaPlayoffRepository.deleteByDivision(divisionId);
+    await serializablePlayoffWrite(async (tx) => {
+      await lockedDivision(tx, divisionId, actor);
+      await tx.rondaPlayoff.deleteMany({ where: { divisionId } });
+    }, 'Las rondas de playoff cambiaron durante la eliminación; vuelve a intentarlo');
   },
 
   async generate(divisionId: string, cantidadEquipos: number, actor: AuthenticatedUser): Promise<RondaPlayoffEntity[]> {
-    const division = await prisma.division.findFirst({
-      where: isAdmin(actor) ? { id: divisionId } : { id: divisionId, liga: { userId: actor.id } },
-      select: {
-        equipos: {
-          select: {
-            equipoId: true,
-            equipo: {
-              select: {
-                nombre: true,
-                tablaPosiciones: {
-                  where: { divisionId },
-                  select: { puntos: true, diferenciaGoles: true, ganados: true, golesFavor: true },
+    if (!CANTIDADES_EQUIPOS.includes(cantidadEquipos)) {
+      throw new ValidationError('La cantidad debe ser 2, 4, 8, 16 o 32');
+    }
+    return serializablePlayoffWrite(async (tx) => {
+      const lockTarget = await tx.division.findUnique({ where: { id: divisionId }, select: { ligaId: true } });
+      if (!lockTarget) throw new NotFoundError('División');
+      await acquireLeagueScheduleLock(tx, lockTarget.ligaId);
+      const division = await tx.division.findFirst({
+        where: isAdmin(actor) ? { id: divisionId } : { id: divisionId, liga: { userId: actor.id } },
+        select: {
+          ligaId: true,
+          rondasPlayoff: { take: 1, select: { id: true } },
+          equipos: {
+            select: {
+              equipoId: true,
+              equipo: {
+                select: {
+                  nombre: true,
+                  tablaPosiciones: {
+                    where: { divisionId },
+                    select: { puntos: true, diferenciaGoles: true, ganados: true, golesFavor: true },
+                  },
                 },
               },
             },
           },
         },
-      },
-    });
-    if (!division) throw new NotFoundError('División');
+      });
+      if (!division) throw new NotFoundError('División');
+      if (division.ligaId !== lockTarget.ligaId) throw new ConflictError('La división cambió de liga durante la generación; vuelve a intentarlo');
+      if (division.rondasPlayoff.length > 0) throw new ConflictError('La división ya tiene rondas de playoff');
+      if (division.equipos.length < cantidadEquipos) {
+        throw new ValidationError(`Se necesitan al menos ${cantidadEquipos} equipos asignados a la división`);
+      }
+      const clasificados = division.equipos
+        .map(({ equipoId, equipo }) => ({
+          equipoId,
+          nombre: equipo.nombre,
+          puntos: equipo.tablaPosiciones[0]?.puntos ?? 0,
+          diferenciaGoles: equipo.tablaPosiciones[0]?.diferenciaGoles ?? 0,
+          ganados: equipo.tablaPosiciones[0]?.ganados ?? 0,
+          golesFavor: equipo.tablaPosiciones[0]?.golesFavor ?? 0,
+        }))
+        .sort((a, b) => b.puntos - a.puntos
+          || b.diferenciaGoles - a.diferenciaGoles
+          || b.ganados - a.ganados
+          || b.golesFavor - a.golesFavor
+          || spanishNameCollator.compare(a.nombre, b.nombre)
+          || a.equipoId.localeCompare(b.equipoId))
+        .slice(0, cantidadEquipos);
 
-    if (!CANTIDADES_EQUIPOS.includes(cantidadEquipos)) {
-      throw new ValidationError('La cantidad debe ser 2, 4, 8, 16 o 32');
-    }
-
-    if (division.equipos.length < cantidadEquipos) {
-      throw new ValidationError(`Se necesitan al menos ${cantidadEquipos} equipos asignados a la división`);
-    }
-
-    const clasificados = division.equipos
-      .map(({ equipoId, equipo }) => ({
-        equipoId,
-        nombre: equipo.nombre,
-        puntos: equipo.tablaPosiciones[0]?.puntos ?? 0,
-        diferenciaGoles: equipo.tablaPosiciones[0]?.diferenciaGoles ?? 0,
-        ganados: equipo.tablaPosiciones[0]?.ganados ?? 0,
-        golesFavor: equipo.tablaPosiciones[0]?.golesFavor ?? 0,
-      }))
-      .sort((a, b) =>
-        b.puntos - a.puntos
-        || b.diferenciaGoles - a.diferenciaGoles
-        || b.ganados - a.ganados
-        || b.golesFavor - a.golesFavor
-        || spanishNameCollator.compare(a.nombre, b.nombre)
-        || a.equipoId.localeCompare(b.equipoId),
-      )
-      .slice(0, cantidadEquipos);
-    const nombresRonda = NOMBRES_RONDAS[cantidadEquipos];
-    return prisma.$transaction(async (tx) => {
       const rondas = await tx.rondaPlayoff.createManyAndReturn({
-        data: nombresRonda.map((nombre, index) => ({
-          nombre,
-          orden: index + 1,
-          divisionId,
-        })),
+        data: NOMBRES_RONDAS[cantidadEquipos].map((nombre, index) => ({ nombre, orden: index + 1, divisionId })),
       });
       rondas.sort((a, b) => a.orden - b.orden);
 
       const primeraRonda = rondas[0];
-      await tx.partido.createMany({
-        data: Array.from({ length: clasificados.length / 2 }, (_, i) => ({
+      await tx.partido.createMany({ data: Array.from({ length: clasificados.length / 2 }, (_, i) => ({
           equipoLocalId: clasificados[i].equipoId,
           equipoVisitanteId: clasificados[clasificados.length - 1 - i].equipoId,
           llave: i + 1,
           rondaPlayoffId: primeraRonda.id,
           estado: 'PROGRAMADO' as const,
           tipoPartido: 'ELIMINATORIA' as const,
-        })),
-      });
+        })) });
 
       return rondas;
-    });
+    }, 'Las rondas de playoff ya existen o fueron generadas concurrentemente');
   },
 
-  async advanceWinners(fromRondaPlayoffId: string): Promise<void> {
-    await prisma.$transaction(async (tx) => {
+  async syncAdvancement(tx: Prisma.TransactionClient, fromRondaPlayoffId: string): Promise<void> {
       const currentRound = await tx.rondaPlayoff.findUnique({
         where: { id: fromRondaPlayoffId },
         select: {
@@ -195,6 +237,7 @@ export const rondaPlayoffService = {
           penalesVisitante: true,
           equipoLocalId: true,
           equipoVisitanteId: true,
+          jornadaId: true,
         },
       });
       const currentRoundPartidos = partidos.filter(
@@ -208,42 +251,53 @@ export const rondaPlayoffService = {
           .filter((partido) => partido.rondaPlayoffId === nextRound.id)
           .map((partido) => [partido.llave, partido]),
       );
-      const pairCount = Math.ceil(currentRoundPartidos.length / 2);
-      const creates = [];
-      const updates: Array<{ id: string; equipoLocalId: string; equipoVisitanteId: string }> = [];
+      const highestSourceKey = Math.max(0, ...currentRoundPartidos.map((partido) => partido.llave ?? 0));
+      const highestDerivedKey = Math.max(0, ...Array.from(nextPartidos.keys()).filter((llave): llave is number => llave != null));
+      const pairCount = Math.max(Math.ceil(highestSourceKey / 2), highestDerivedKey);
 
       for (let i = 1; i <= pairCount; i++) {
         const partidoA = currentPartidos.get(i * 2 - 1);
         const partidoB = currentPartidos.get(i * 2);
-        if (!partidoA || !partidoB) continue;
-        if (partidoA.estado !== 'FINALIZADO' || partidoB.estado !== 'FINALIZADO') continue;
-
-        const winnerA = getWinner(partidoA);
-        const winnerB = getWinner(partidoB);
-        if (!winnerA || !winnerB) continue;
-
         const existing = nextPartidos.get(i);
+        const winnerA = partidoA?.estado === 'FINALIZADO' ? getWinner(partidoA) : null;
+        const winnerB = partidoB?.estado === 'FINALIZADO' ? getWinner(partidoB) : null;
+        if (!winnerA || !winnerB) {
+          if (!existing) continue;
+          if (existing.estado === 'FINALIZADO' || existing.jornadaId) {
+            throw new ConflictError('No se puede revertir el avance porque el partido derivado ya está finalizado o asignado a una jornada');
+          }
+          await tx.partido.delete({ where: { id: existing.id } });
+          continue;
+        }
         if (existing) {
-          updates.push({ id: existing.id, equipoLocalId: winnerA, equipoVisitanteId: winnerB });
+          if (existing.equipoLocalId === winnerA && existing.equipoVisitanteId === winnerB) continue;
+          if (existing.estado === 'FINALIZADO' || existing.jornadaId) {
+            throw new ConflictError('No se puede cambiar el avance porque el partido derivado ya está finalizado o asignado a una jornada');
+          }
+          await tx.partido.update({
+            where: { id: existing.id },
+            data: { equipoLocalId: winnerA, equipoVisitanteId: winnerB, estado: 'PROGRAMADO', golesLocal: 0, golesVisitante: 0, penalesLocal: null, penalesVisitante: null, version: { increment: 1 } },
+          });
+          await tx.anotacionPartido.deleteMany({ where: { partidoId: existing.id } });
         } else {
-          creates.push({
+          await tx.partido.create({ data: {
             equipoLocalId: winnerA,
             equipoVisitanteId: winnerB,
             llave: i,
             rondaPlayoffId: nextRound.id,
             estado: 'PROGRAMADO' as const,
             tipoPartido: 'ELIMINATORIA' as const,
-          });
+          } });
         }
       }
+  },
 
-      await Promise.all([
-        ...(creates.length ? [tx.partido.createMany({ data: creates })] : []),
-        ...updates.map(({ id, ...data }) => tx.partido.update({
-          where: { id },
-          data: { ...data, estado: 'PROGRAMADO', golesLocal: 0, golesVisitante: 0, penalesLocal: null, penalesVisitante: null },
-        })),
-      ]);
-    });
+  async advanceWinners(fromRondaPlayoffId: string): Promise<void> {
+    await serializablePlayoffWrite(async (tx) => {
+      const lockTarget = await tx.rondaPlayoff.findUnique({ where: { id: fromRondaPlayoffId }, select: { division: { select: { ligaId: true } } } });
+      if (!lockTarget) throw new NotFoundError('Ronda de playoff');
+      await acquireLeagueScheduleLock(tx, lockTarget.division.ligaId);
+      await this.syncAdvancement(tx, fromRondaPlayoffId);
+    }, 'El cuadro de playoff cambió durante el avance; vuelve a intentarlo');
   },
 };

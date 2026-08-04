@@ -9,8 +9,6 @@ router.get('/division/:divisionId', optionalAuth, jornadaController.findByDivisi
 router.get('/:id', optionalAuth, jornadaController.getById);
 router.use(requireAuth);
 router.post('/generate-next/:divisionId', jornadaController.generateNext);
-router.post('/', jornadaController.create);
-router.patch('/:id', jornadaController.update);
 router.delete('/:id', jornadaController.delete);
 
 export { router as jornadaRouter };

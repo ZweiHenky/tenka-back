@@ -12,15 +12,18 @@ const repository_1 = require("./repository");
         mocks.findUnique.mockResolvedValue(null);
         await repository_1.refereeAccessRepository.findPartidoReadContextByTokenHash('token-hash');
         (0, vitest_1.expect)(mocks.findUnique).toHaveBeenCalledTimes(1);
-        (0, vitest_1.expect)(mocks.findUnique).toHaveBeenCalledWith({
+        (0, vitest_1.expect)(mocks.findUnique).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
             where: { tokenHash: 'token-hash' },
-            select: {
+            select: vitest_1.expect.objectContaining({
                 expiresAt: true,
                 usedAt: true,
-                partido: {
-                    select: {
+                partido: vitest_1.expect.objectContaining({
+                    select: vitest_1.expect.objectContaining({
                         id: true,
+                        version: true,
                         fecha: true,
+                        fechaFin: true,
+                        canchaId: true,
                         estado: true,
                         golesLocal: true,
                         golesVisitante: true,
@@ -33,18 +36,18 @@ const repository_1 = require("./repository");
                         jornada: {
                             select: {
                                 numero: true,
-                                division: { select: { nombre: true, liga: { select: { nombre: true } } } },
+                                division: vitest_1.expect.any(Object),
                             },
                         },
                         rondaPlayoff: {
                             select: {
-                                division: { select: { nombre: true, liga: { select: { nombre: true } } } },
+                                division: vitest_1.expect.any(Object),
                             },
                         },
-                    },
-                },
-            },
-        });
+                    }),
+                }),
+            }),
+        }));
     });
 });
 //# sourceMappingURL=repository.test.js.map

@@ -3,9 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const vitest_1 = require("vitest");
 const mocks = vitest_1.vi.hoisted(() => {
     const tx = {
+        $executeRawUnsafe: vitest_1.vi.fn(),
         rondaPlayoff: { findUnique: vitest_1.vi.fn(), findFirst: vitest_1.vi.fn() },
         partido: { findMany: vitest_1.vi.fn(), deleteMany: vitest_1.vi.fn(), updateMany: vitest_1.vi.fn() },
         partidoRefereeAccess: { deleteMany: vitest_1.vi.fn() },
+        anotacionPartido: { deleteMany: vitest_1.vi.fn() },
         jornada: { delete: vitest_1.vi.fn() },
     };
     return { tx, transaction: vitest_1.vi.fn() };
@@ -41,13 +43,21 @@ const semifinales = [
         golesLocal: 1, golesVisitante: 1, penalesLocal: 4, penalesVisitante: 3,
     },
 ];
+const deleteContext = {
+    divisionId: 'div-1',
+    ligaId: 'liga-1',
+    ligaUserId: owner.id,
+    latestJornadaId: 'j-semis',
+    hasFinalizados: true,
+    playoffPartidos: [],
+};
 (0, vitest_1.beforeEach)(() => {
     vitest_1.vi.clearAllMocks();
+    mocks.tx.jornada.delete.mockReset().mockResolvedValue(undefined);
+    vitest_1.vi.mocked(service_2.tablaPosicionService.recalcular).mockReset().mockResolvedValue(undefined);
     mocks.transaction.mockImplementation(async (callback) => callback(mocks.tx));
     repository_1.jornadaRepository.findDeleteContext.mockResolvedValue({
-        divisionId: 'div-1',
-        latestJornadaId: 'j-semis',
-        hasFinalizados: true,
+        ...deleteContext,
         playoffPartidos: semifinales,
     });
     mocks.tx.rondaPlayoff.findUnique.mockResolvedValue({ divisionId: 'div-1', orden: 1 });
@@ -73,11 +83,19 @@ const semifinales = [
                 fechaFin: null,
                 canchaId: null,
                 jornadaId: null,
+                version: { increment: 1 },
             },
         });
         (0, vitest_1.expect)(mocks.tx.jornada.delete).toHaveBeenCalledWith({ where: { id: 'j-semis' } });
-        (0, vitest_1.expect)(service_2.tablaPosicionService.recalcular).toHaveBeenCalledWith('div-1');
-        (0, vitest_1.expect)(repository_1.jornadaRepository.findDeleteContext).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(service_2.tablaPosicionService.recalcular).toHaveBeenCalledWith('div-1', mocks.tx);
+        (0, vitest_1.expect)(mocks.transaction).toHaveBeenCalledWith(vitest_1.expect.any(Function), { isolationLevel: 'Serializable' });
+        (0, vitest_1.expect)(mocks.tx.$executeRawUnsafe).toHaveBeenCalledWith('SELECT pg_advisory_xact_lock(hashtext($1))', 'liga-1');
+        (0, vitest_1.expect)(repository_1.jornadaRepository.findDeleteContext).toHaveBeenNthCalledWith(1, 'j-semis', owner);
+        (0, vitest_1.expect)(repository_1.jornadaRepository.findDeleteContext).toHaveBeenNthCalledWith(2, 'j-semis', owner, mocks.tx);
+        (0, vitest_1.expect)(mocks.tx.$executeRawUnsafe.mock.invocationCallOrder[0])
+            .toBeLessThan(vitest_1.vi.mocked(repository_1.jornadaRepository.findDeleteContext).mock.invocationCallOrder[1]);
+        (0, vitest_1.expect)(mocks.tx.jornada.delete.mock.invocationCallOrder[0])
+            .toBeLessThan(vitest_1.vi.mocked(service_2.tablaPosicionService.recalcular).mock.invocationCallOrder[0]);
     });
     (0, vitest_1.it)('rejects deletion when the derived match belongs to another jornada', async () => {
         mocks.tx.partido.findMany.mockResolvedValue([{ id: 'final-1', jornadaId: 'j-final' }]);
@@ -88,9 +106,8 @@ const semifinales = [
     });
     (0, vitest_1.it)('restores a final without trying to delete a later phase', async () => {
         repository_1.jornadaRepository.findDeleteContext.mockResolvedValue({
-            divisionId: 'div-1',
+            ...deleteContext,
             latestJornadaId: 'j-final',
-            hasFinalizados: true,
             playoffPartidos: [{ ...semifinales[0], id: 'final-1', rondaPlayoffId: 'ronda-final', llave: 1 }],
         });
         mocks.tx.rondaPlayoff.findUnique.mockResolvedValue({ divisionId: 'div-1', orden: 2 });
@@ -106,15 +123,55 @@ const semifinales = [
         await (0, vitest_1.expect)(service_1.jornadaService.delete('hidden', owner)).rejects.toMatchObject({ statusCode: 404 });
         (0, vitest_1.expect)(mocks.transaction).not.toHaveBeenCalled();
     });
-    (0, vitest_1.it)('enforces the latest-jornada rule from the narrow context', async () => {
-        repository_1.jornadaRepository.findDeleteContext.mockResolvedValue({
-            divisionId: 'div-1',
-            latestJornadaId: 'j-newer',
-            hasFinalizados: false,
-            playoffPartidos: [],
-        });
+    (0, vitest_1.it)('rejects a jornada that became stale using the context reread inside the transaction', async () => {
+        repository_1.jornadaRepository.findDeleteContext
+            .mockResolvedValueOnce({ ...deleteContext, latestJornadaId: 'j-old', playoffPartidos: [] })
+            .mockResolvedValueOnce({ ...deleteContext, latestJornadaId: 'j-newer', playoffPartidos: [] });
         await (0, vitest_1.expect)(service_1.jornadaService.delete('j-old', owner)).rejects.toThrow('última jornada');
-        (0, vitest_1.expect)(mocks.transaction).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(mocks.transaction).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(repository_1.jornadaRepository.findDeleteContext).toHaveBeenNthCalledWith(2, 'j-old', owner, mocks.tx);
+        (0, vitest_1.expect)(mocks.tx.jornada.delete).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(service_2.tablaPosicionService.recalcular).not.toHaveBeenCalled();
+    });
+    (0, vitest_1.it)('does not commit jornada deletion when standings recalculation fails', async () => {
+        const events = [];
+        mocks.tx.jornada.delete.mockImplementation(async () => { events.push('delete'); });
+        vitest_1.vi.mocked(service_2.tablaPosicionService.recalcular).mockImplementation(async () => {
+            events.push('recalculate');
+            throw new Error('injected standings failure');
+        });
+        mocks.transaction.mockImplementation(async (callback) => {
+            events.push('begin');
+            const result = await callback(mocks.tx);
+            events.push('commit');
+            return result;
+        });
+        await (0, vitest_1.expect)(service_1.jornadaService.delete('j-semis', owner)).rejects.toThrow('injected standings failure');
+        (0, vitest_1.expect)(events).toEqual(['begin', 'delete', 'recalculate']);
+        (0, vitest_1.expect)(service_2.tablaPosicionService.recalcular).toHaveBeenCalledWith('div-1', mocks.tx);
+    });
+    (0, vitest_1.it)('retries the complete Serializable deletion up to three times on P2034', async () => {
+        const serializationFailure = Object.assign(new Error('serialization failure'), { code: 'P2034' });
+        vitest_1.vi.mocked(service_2.tablaPosicionService.recalcular)
+            .mockRejectedValueOnce(serializationFailure)
+            .mockRejectedValueOnce(serializationFailure)
+            .mockResolvedValueOnce(undefined);
+        await service_1.jornadaService.delete('j-semis', owner);
+        (0, vitest_1.expect)(mocks.transaction).toHaveBeenCalledTimes(3);
+        (0, vitest_1.expect)(mocks.transaction).toHaveBeenCalledWith(vitest_1.expect.any(Function), { isolationLevel: 'Serializable' });
+        (0, vitest_1.expect)(mocks.tx.$executeRawUnsafe).toHaveBeenCalledTimes(3);
+        (0, vitest_1.expect)(repository_1.jornadaRepository.findDeleteContext).toHaveBeenCalledTimes(4);
+        (0, vitest_1.expect)(mocks.tx.jornada.delete).toHaveBeenCalledTimes(3);
+        (0, vitest_1.expect)(service_2.tablaPosicionService.recalcular).toHaveBeenCalledTimes(3);
+    });
+    (0, vitest_1.it)('stops after three failed P2034 attempts', async () => {
+        const serializationFailure = Object.assign(new Error('serialization failure'), { code: 'P2034' });
+        vitest_1.vi.mocked(service_2.tablaPosicionService.recalcular).mockRejectedValue(serializationFailure);
+        await (0, vitest_1.expect)(service_1.jornadaService.delete('j-semis', owner)).rejects.toBe(serializationFailure);
+        (0, vitest_1.expect)(mocks.transaction).toHaveBeenCalledTimes(3);
+        (0, vitest_1.expect)(mocks.tx.$executeRawUnsafe).toHaveBeenCalledTimes(3);
+        (0, vitest_1.expect)(mocks.tx.jornada.delete).toHaveBeenCalledTimes(3);
+        (0, vitest_1.expect)(service_2.tablaPosicionService.recalcular).toHaveBeenCalledTimes(3);
     });
 });
 //# sourceMappingURL=delete.test.js.map

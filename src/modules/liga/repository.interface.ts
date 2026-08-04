@@ -1,6 +1,7 @@
 import type { LigaEntity, ProgramacionRecienteLigaDto } from './entity';
 import type { LigaArbitroEntity, LigaCanchaEntity } from './entity';
 import type { AuthenticatedUser } from '../../types/auth';
+import type { Prisma } from '../../generated/prisma/client';
 
 export interface LigaFilterParams {
   page: number;
@@ -23,7 +24,7 @@ export interface LigaUpdateContext {
   canchaPublicId: string | null;
   multiplesCanchas: boolean;
   usaArbitros: boolean;
-  canchas: { nombre: string }[];
+  canchas: Array<{ id: string; nombre: string; nombreNormalizado: string; activa: boolean }>;
   arbitros: { nombre: string }[];
 }
 
@@ -37,6 +38,36 @@ export interface LigaDeleteContext {
 export interface LigaManagementContext {
   multiplesCanchas: boolean;
   usaArbitros: boolean;
+}
+
+export interface LigaWriteData {
+  nombre?: string;
+  nombreNormalizado?: string;
+  descripcion?: string;
+  logo?: string | null;
+  logoPublicId?: string | null;
+  cancha?: string | null;
+  canchaPublicId?: string | null;
+  multiplesCanchas?: boolean;
+  usaArbitros?: boolean;
+  ubicacionId?: string;
+  userId?: string;
+}
+
+export interface LigaCreateData extends LigaWriteData {
+  nombre: string;
+  nombreNormalizado: string;
+  descripcion: string;
+  ubicacionId: string;
+  userId: string;
+}
+
+export interface LigaCanchaWrite {
+  id?: string;
+  nombre: string;
+  nombreNormalizado: string;
+  activa: boolean;
+  nombreNormalizadoAnterior?: string;
 }
 
 export interface LigaRepository {
@@ -54,7 +85,7 @@ export interface LigaRepository {
   findByUser(userId: string): Promise<LigaEntity[]>;
   findPublicByUser(userId: string): Promise<LigaEntity[]>;
   findAllPaginated(params: LigaFilterParams): Promise<PaginatedResult<LigaEntity>>;
-  create(data: Record<string, unknown>, canchas?: { nombre: string }[], arbitros?: { nombre: string }[]): Promise<LigaEntity>;
-  update(id: string, data: Record<string, unknown>, canchas?: { nombre: string }[], arbitros?: { nombre: string }[]): Promise<LigaEntity>;
-  delete(id: string): Promise<void>;
+  create(data: LigaCreateData, canchas?: LigaCanchaWrite[], arbitros?: { nombre: string }[], tx?: Prisma.TransactionClient): Promise<LigaEntity>;
+  update(id: string, data: LigaWriteData, canchas?: LigaCanchaWrite[], arbitros?: { nombre: string }[], clearDivisionCourts?: boolean, tx?: Prisma.TransactionClient): Promise<LigaEntity>;
+  delete(id: string, tx?: Prisma.TransactionClient): Promise<void>;
 }

@@ -9,7 +9,7 @@
 * 🟢 You can import this file directly.
 */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PosicionJugador = exports.EstadoPartido = exports.TipoPartido = exports.UserRol = void 0;
+exports.OneSignalTagSyncStatus = exports.NotificationEventType = exports.NotificationOutboxStatus = exports.NotificationAudience = exports.MediaDeletionStatus = exports.MediaStatus = exports.MediaKind = exports.PosicionJugador = exports.LadoMarcador = exports.EstadoPartido = exports.TipoPartido = exports.UserRol = void 0;
 exports.UserRol = {
     CAPITAN: 'CAPITAN',
     LIGA: 'LIGA',
@@ -27,6 +27,10 @@ exports.EstadoPartido = {
     FINALIZADO: 'FINALIZADO',
     SUSPENDIDO: 'SUSPENDIDO'
 };
+exports.LadoMarcador = {
+    LOCAL: 'LOCAL',
+    VISITANTE: 'VISITANTE'
+};
 exports.PosicionJugador = {
     PORTERO: 'PORTERO',
     DEFENSA: 'DEFENSA',
@@ -35,5 +39,45 @@ exports.PosicionJugador = {
     MEDIO: 'MEDIO',
     EXTREMO: 'EXTREMO',
     DELANTERO: 'DELANTERO'
+};
+exports.MediaKind = {
+    LEAGUE_LOGO: 'LEAGUE_LOGO',
+    LEAGUE_COVER: 'LEAGUE_COVER',
+    TEAM_LOGO: 'TEAM_LOGO',
+    ACCOUNT_AVATAR: 'ACCOUNT_AVATAR',
+    PLAYER_PHOTO: 'PLAYER_PHOTO'
+};
+exports.MediaStatus = {
+    PENDING: 'PENDING',
+    UPLOADED: 'UPLOADED',
+    ATTACHED: 'ATTACHED',
+    ABANDONED: 'ABANDONED',
+    DEAD: 'DEAD'
+};
+exports.MediaDeletionStatus = {
+    PENDING: 'PENDING',
+    LEASED: 'LEASED',
+    DEAD: 'DEAD'
+};
+exports.NotificationAudience = {
+    REGISTERED: 'REGISTERED',
+    FOLLOWERS: 'FOLLOWERS'
+};
+exports.NotificationOutboxStatus = {
+    PENDING: 'PENDING',
+    PROCESSING: 'PROCESSING',
+    SENT: 'SENT',
+    DEAD: 'DEAD',
+    CANCELLED: 'CANCELLED'
+};
+exports.NotificationEventType = {
+    JORNADA_GENERATED: 'JORNADA_GENERATED',
+    SCHEDULE_CHANGED: 'SCHEDULE_CHANGED'
+};
+exports.OneSignalTagSyncStatus = {
+    PENDING: 'PENDING',
+    PROCESSING: 'PROCESSING',
+    SYNCED: 'SYNCED',
+    DEAD: 'DEAD'
 };
 //# sourceMappingURL=enums.js.map

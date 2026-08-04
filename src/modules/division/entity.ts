@@ -16,6 +16,7 @@ export interface DivisionEntity {
   categoriaId: string;
   tipoId: string;
   tipoCompetenciaId: string;
+  canchaUnicaId: string | null;
   liga?: { id: string; nombre: string; logo: string | null };
   estadoLiga?: { id: string; nombre: string };
 }

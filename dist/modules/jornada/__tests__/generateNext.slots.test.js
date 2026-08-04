@@ -3,6 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const vitest_1 = require("vitest");
 const generateNextHarness_1 = require("./support/generateNextHarness");
 (0, vitest_1.beforeEach)(generateNextHarness_1.resetGenerateNextHarness);
+const capacitySlots = (count) => Array.from({ length: count }, (_, index) => ({
+    fecha: `2099-02-${String(index + 1).padStart(2, '0')}`,
+    horaInicio: '18:00',
+    horaFin: '19:30',
+}));
 (0, vitest_1.describe)('generateNext slots', () => {
     (0, vitest_1.it)('7 equipos + 1 slot normal completo → slot respetado', async () => {
         (0, generateNextHarness_1.mockDivision)();
@@ -12,6 +17,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(3);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
+            ...capacitySlots(2),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
         (0, vitest_1.expect)(calls.length).toBe(3);
@@ -33,6 +39,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(4);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
+            ...capacitySlots(3),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
         const compMatch = calls.find(([args]) => args.equipoLocalId === 't4');
@@ -86,23 +93,22 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
             { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't1' },
+            ...capacitySlots(2),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
         const compMatch = calls.find(([args]) => args.tipoPartido === 'COMPLEMENTO');
         (0, vitest_1.expect)(compMatch).toBeDefined();
     });
-    (0, vitest_1.it)('más pairings que slots en plan → padding', async () => {
+    (0, vitest_1.it)('más pairings que slots físicos → ValidationError', async () => {
         (0, generateNextHarness_1.mockDivision)();
         (0, generateNextHarness_1.mockTeams)();
         (0, generateNextHarness_1.mockNoPreviousJornadas)();
         (0, generateNextHarness_1.mockJornadaCreated)();
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(4);
-        await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
+        await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
             { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't3' },
-        ]);
-        const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
-        (0, vitest_1.expect)(calls.length).toBe(4);
+        ])).rejects.toThrow('No hay suficientes slots físicos');
     });
     (0, vitest_1.it)('flags correctos: Puntos en complemento suma, Sin puntos no suma', async () => {
         (0, generateNextHarness_1.mockDivision)();
@@ -112,6 +118,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(4);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
+            ...capacitySlots(3),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
         const compMatch = calls.find(([args]) => args.equipoLocalId === 't4');
@@ -127,6 +134,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(4);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't5' },
+            ...capacitySlots(3),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
         const comp = calls.find(([args]) => args.equipoLocalId === 't4' && args.equipoVisitanteId === 't5');
@@ -143,16 +151,11 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
             { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't5' },
+            ...capacitySlots(3),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
-        const t4Comp = calls.find(([args]) => args.equipoLocalId === 't4');
-        (0, vitest_1.expect)(t4Comp).toBeDefined();
-        const [t4Args] = t4Comp;
-        (0, vitest_1.expect)(t4Args.tipoPartido).toBe('COMPLEMENTO');
-        const t5Comp = calls.find(([args]) => args.equipoLocalId === 't5');
-        (0, vitest_1.expect)(t5Comp).toBeDefined();
-        const [t5Args] = t5Comp;
-        (0, vitest_1.expect)(t5Args.tipoPartido).toBe('COMPLEMENTO');
+        const complementos = calls.filter(([args]) => args.tipoPartido === 'COMPLEMENTO');
+        (0, vitest_1.expect)(complementos).toHaveLength(2);
     });
     (0, vitest_1.it)('slots=[] (array vacío) → mismo que undefined', async () => {
         (0, generateNextHarness_1.mockDivision)();
@@ -183,6 +186,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(3);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-08', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1' },
+            ...capacitySlots(2),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
         (0, vitest_1.expect)(calls.length).toBe(3);
@@ -214,6 +218,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(3);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-08', horaInicio: '18:00', horaFin: '19:30', equipoVisitanteId: 't1' },
+            ...capacitySlots(2),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
         (0, vitest_1.expect)(calls.length).toBe(3);
@@ -231,6 +236,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(3);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1' },
+            ...capacitySlots(2),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
         (0, vitest_1.expect)(calls.length).toBe(3);
@@ -251,6 +257,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
             { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
             { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'amistoso', equipoLocalId: 't3', equipoVisitanteId: 't4' },
             { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'complemento', equipoLocalId: 't5', equipoVisitanteId: 't6' },
+            ...capacitySlots(2),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
         // 3 from plan + 1 padding (complemento local blockeado)
@@ -261,7 +268,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         const amistoso = calls.find(([args]) => args.equipoLocalId === 't3' && args.equipoVisitanteId === 't4');
         (0, vitest_1.expect)(amistoso).toBeDefined();
         (0, vitest_1.expect)(amistoso[0].tipoPartido).toBe('AMISTOSO');
-        const complemento = calls.find(([args]) => args.equipoLocalId === 't5' && args.equipoVisitanteId === 't6');
+        const complemento = calls.find(([args]) => args.tipoPartido === 'COMPLEMENTO');
         (0, vitest_1.expect)(complemento).toBeDefined();
         (0, vitest_1.expect)(complemento[0].tipoPartido).toBe('COMPLEMENTO');
     });

@@ -3,7 +3,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.jornadaRepository = void 0;
 const database_1 = require("../../config/database");
 const divisionVisibility_1 = require("../../utils/divisionVisibility");
-const exposeArbitros = (jornada) => ({ ...jornada, partidos: jornada.partidos?.map((partido) => ({ ...partido, arbitros: partido.arbitros?.map((row) => row.arbitro) })) });
+const exposeArbitros = (jornada) => {
+    const { generationKey: _generationKey, generationRequestHash: _generationRequestHash, ...publicJornada } = jornada;
+    return { ...publicJornada, partidos: jornada.partidos?.map((partido) => ({ ...partido, arbitros: partido.arbitros?.map((row) => row.arbitro) })) };
+};
 const partidosInclude = {
     orderBy: { fecha: 'asc' },
     include: {
@@ -15,7 +18,7 @@ const partidosInclude = {
 };
 exports.jornadaRepository = {
     async findAll() {
-        return database_1.prisma.jornada.findMany();
+        return (await database_1.prisma.jornada.findMany()).map(exposeArbitros);
     },
     async findById(id) {
         const jornada = await database_1.prisma.jornada.findUnique({
@@ -44,8 +47,8 @@ exports.jornadaRepository = {
         ]);
         return { rows: rows.map(exposeArbitros), total };
     },
-    async findGenerationHistory(divisionId) {
-        return database_1.prisma.jornada.findMany({
+    async findGenerationHistory(divisionId, client) {
+        return (client ?? database_1.prisma).jornada.findMany({
             where: { divisionId },
             orderBy: { numero: 'desc' },
             select: {
@@ -54,6 +57,7 @@ exports.jornadaRepository = {
                 fechaInicio: true,
                 partidos: {
                     select: {
+                        id: true,
                         equipoLocalId: true,
                         equipoVisitanteId: true,
                         tipoPartido: true,
@@ -80,16 +84,8 @@ exports.jornadaRepository = {
             return null;
         return { rows: division.jornadas.map(exposeArbitros), total: division._count.jornadas };
     },
-    async findUpdateContext(id, actor) {
-        return database_1.prisma.jornada.findFirst({
-            where: actor.rol === 'ADMINISTRADOR'
-                ? { id }
-                : { id, division: { liga: { userId: actor.id } } },
-            select: { id: true },
-        });
-    },
-    async findDeleteContext(id, actor) {
-        const jornada = await database_1.prisma.jornada.findFirst({
+    async findDeleteContext(id, actor, client) {
+        const jornada = await (client ?? database_1.prisma).jornada.findFirst({
             where: actor.rol === 'ADMINISTRADOR'
                 ? { id }
                 : { id, division: { liga: { userId: actor.id } } },
@@ -97,6 +93,8 @@ exports.jornadaRepository = {
                 divisionId: true,
                 division: {
                     select: {
+                        ligaId: true,
+                        liga: { select: { userId: true } },
                         jornadas: {
                             orderBy: { numero: 'desc' },
                             take: 1,
@@ -119,18 +117,14 @@ exports.jornadaRepository = {
             return null;
         return {
             divisionId: jornada.divisionId,
+            ligaId: jornada.division.ligaId,
+            ligaUserId: jornada.division.liga.userId,
             latestJornadaId: jornada.division.jornadas[0]?.id ?? null,
             hasFinalizados: jornada.partidos.some((partido) => partido.estado === 'FINALIZADO'),
             playoffPartidos: jornada.partidos
                 .filter((partido) => (partido.rondaPlayoffId !== null && partido.llave !== null))
                 .map(({ id: partidoId, rondaPlayoffId, llave }) => ({ id: partidoId, rondaPlayoffId, llave })),
         };
-    },
-    async create(data) {
-        return database_1.prisma.jornada.create({ data: data });
-    },
-    async update(id, data) {
-        return database_1.prisma.jornada.update({ where: { id }, data });
     },
     async delete(id) {
         await database_1.prisma.jornada.delete({ where: { id } });

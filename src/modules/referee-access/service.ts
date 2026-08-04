@@ -1,17 +1,16 @@
 import crypto from 'node:crypto'
 import { prisma } from '../../config/database'
-import { NotFoundError, ValidationError } from '../../utils/errors'
+import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors'
 import type { AuthenticatedUser } from '../../types/auth'
 import { assertOwnerOrAdmin } from '../../utils/authorization'
 import { refereeAccessRepository } from './repository'
-import { partidoRepository } from '../partido/repository'
-import { tablaPosicionService } from '../tabla-posicion/service'
-import { rondaPlayoffService } from '../ronda-playoff/service'
+import { exposeAnotacionRead, partidoRepository } from '../partido/repository'
 import type { RefereeResultInput } from './validator'
+import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock'
+import { getResultContext, writeResultInTransaction } from '../partido/resultWriter'
 
 const LINK_EXPIRY_MS = 4 * 60 * 60 * 1000
 const TOKEN_BYTES = 32
-
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex')
 }
@@ -90,16 +89,27 @@ export const refereeAccessService = {
     return {
       id: partido.id,
       fecha: partido.fecha,
+      fechaFin: partido.fechaFin,
       horaInicio: partido.fecha,
       equipoLocal: partido.equipoLocal,
       equipoVisitante: partido.equipoVisitante,
       cancha: partido.cancha,
+      canchaId: partido.canchaId,
+      multiplesCanchas: division?.liga.multiplesCanchas ?? false,
       estado: partido.estado,
+      version: partido.version,
       golesLocal: partido.golesLocal,
       golesVisitante: partido.golesVisitante,
       penalesLocal: partido.penalesLocal,
       penalesVisitante: partido.penalesVisitante,
       tipoPartido: partido.tipoPartido,
+      anotaciones: partido.anotaciones.map(exposeAnotacionRead),
+      jugadoresLocal: (division?.jugadores ?? [])
+        .filter((row) => row.equipoId === partido.equipoLocal?.id)
+        .map((row) => ({ ...row.jugador, dorsal: row.dorsal })) ?? [],
+      jugadoresVisitante: (division?.jugadores ?? [])
+        .filter((row) => row.equipoId === partido.equipoVisitante?.id)
+        .map((row) => ({ ...row.jugador, dorsal: row.dorsal })) ?? [],
       jornadaNumero: jornada?.numero ?? null,
       divisionNombre: division?.nombre ?? '',
       ligaNombre: division?.liga.nombre ?? '',
@@ -110,70 +120,32 @@ export const refereeAccessService = {
     const token = extractBearer(authHeader)
     const tokenHash = hashToken(token)
 
-    return prisma.$transaction(async (tx) => {
-      const access = await tx.partidoRefereeAccess.findUnique({ where: { tokenHash } })
-      if (!access) throw new ValidationError('Enlace no válido o expirado')
-      if (access.usedAt) throw new ValidationError('Enlace no válido o expirado')
-      if (access.expiresAt < new Date()) throw new ValidationError('Enlace no válido o expirado')
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await prisma.$transaction(async (tx) => {
+          const access = await tx.partidoRefereeAccess.findUnique({ where: { tokenHash } })
+          if (!access || access.usedAt || access.expiresAt < new Date()) throw new ValidationError('Enlace no válido o expirado')
+          const initial = await getResultContext(tx, access.partidoId)
+          await acquireLeagueScheduleLock(tx, initial.division.liga.id)
 
-      const old = await tx.partido.findUnique({
-        where: { id: access.partidoId },
-        select: { estado: true, rondaPlayoffId: true, jornadaId: true },
-      })
-      if (!old) throw new NotFoundError('Partido')
-      if (old.estado === 'FINALIZADO') throw new ValidationError('Este partido ya fue finalizado')
-
-      if (old.rondaPlayoffId) {
-        if (data.golesLocal === data.golesVisitante) {
-          if (data.penalesLocal == null || data.penalesVisitante == null || data.penalesLocal === data.penalesVisitante) {
-            throw new ValidationError('El partido de eliminatoria no puede terminar empatado. Define un ganador por penales.')
+          const lockedAccess = await tx.partidoRefereeAccess.findUnique({ where: { tokenHash } })
+          if (!lockedAccess || lockedAccess.usedAt || lockedAccess.expiresAt < new Date()) {
+            throw new ValidationError('Enlace no válido o expirado')
           }
-        }
+          const locked = await getResultContext(tx, lockedAccess.partidoId)
+          if (locked.division.liga.id !== initial.division.liga.id) {
+            throw new ValidationError('El partido cambió durante la actualización; vuelve a intentarlo')
+          }
+          const updated = await writeResultInTransaction(tx, lockedAccess.partidoId, data)
+          await tx.partidoRefereeAccess.update({ where: { id: lockedAccess.id }, data: { usedAt: new Date() } })
+          return updated
+        }, { isolationLevel: 'Serializable' })
+      } catch (error: any) {
+        if (error?.code === 'P2034' && attempt < 2) continue
+        if (error?.code === 'P2034') throw new ConflictError('El resultado cambió durante la actualización; vuelve a intentarlo')
+        throw error
       }
-
-      const updated = await tx.partido.update({
-        where: { id: access.partidoId },
-        data: {
-          golesLocal: data.golesLocal,
-          golesVisitante: data.golesVisitante,
-          penalesLocal: data.penalesLocal ?? null,
-          penalesVisitante: data.penalesVisitante ?? null,
-          estado: data.estado,
-        },
-      })
-
-      await tx.partidoRefereeAccess.update({ where: { id: access.id }, data: { usedAt: new Date() } })
-
-      return {
-        id: updated.id,
-        golesLocal: updated.golesLocal,
-        golesVisitante: updated.golesVisitante,
-        penalesLocal: updated.penalesLocal,
-        penalesVisitante: updated.penalesVisitante,
-        estado: updated.estado,
-        jornadaId: old.jornadaId,
-        rondaPlayoffId: old.rondaPlayoffId,
-      }
-    }).then(async (result) => {
-      if (result.estado === 'FINALIZADO' && result.jornadaId) {
-        const jornada = await prisma.jornada.findUnique({ where: { id: result.jornadaId }, select: { divisionId: true } })
-        if (jornada) {
-          await tablaPosicionService.recalcular(jornada.divisionId)
-        }
-      }
-
-      if (result.estado === 'FINALIZADO' && result.rondaPlayoffId) {
-        await rondaPlayoffService.advanceWinners(result.rondaPlayoffId)
-      }
-
-      return {
-        id: result.id,
-        golesLocal: result.golesLocal,
-        golesVisitante: result.golesVisitante,
-        penalesLocal: result.penalesLocal,
-        penalesVisitante: result.penalesVisitante,
-        estado: result.estado,
-      }
-    })
+    }
+    throw new ConflictError('El resultado cambió durante la actualización; vuelve a intentarlo')
   },
 }

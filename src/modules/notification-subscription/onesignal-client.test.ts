@@ -37,15 +37,15 @@ describe('OneSignal removeTag', () => {
     expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
     expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({
       provider: 'onesignal',
-      operation: 'remove_tag',
+      operation: 'sync_tag',
       timeout: true,
     }), 'Provider operation failed');
-    expect(captureException).toHaveBeenCalledOnce();
+    expect(captureException).not.toHaveBeenCalled();
   });
 
   it('does not read or observe response bodies, credentials, or request values', async () => {
     const text = vi.fn(() => Promise.resolve('api-key=leaked response details'));
-    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: false, status: 401, text })));
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: false, status: 401, text, headers: new Headers() })));
 
     await expect(removeTag('private-subscription-id', 'private-tag')).resolves.toBe(false);
 

@@ -33,5 +33,6 @@ exports.updateDivisionSchema = zod_1.z.object({
     categoriaId: zod_1.z.string().optional(),
     tipoId: zod_1.z.string().optional(),
     tipoCompetenciaId: zod_1.z.string().optional(),
+    canchaUnicaId: zod_1.z.string().min(1).nullable().optional(),
 });
 //# sourceMappingURL=validator.js.map

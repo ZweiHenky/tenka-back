@@ -16,6 +16,7 @@ export interface DivisionConRelaciones {
 export interface LigaCanchaEntity {
   id: string;
   nombre: string;
+  nombreNormalizado: string;
   activa: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -51,6 +52,7 @@ export interface ProgramacionRecienteJornadaDto {
 export interface ProgramacionRecienteLigaDto {
   id: string;
   nombre: string;
+  multiplesCanchas: boolean;
   divisiones: Array<{
     id: string;
     nombre: string;

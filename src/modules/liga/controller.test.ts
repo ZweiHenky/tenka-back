@@ -16,7 +16,7 @@ describe('ligaController.getRecentSchedule', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('responde la programacion reciente con el envelope establecido', async () => {
-    const schedule = { id: 'liga-1', nombre: 'Liga Centro', divisiones: [] };
+    const schedule = { id: 'liga-1', nombre: 'Liga Centro', multiplesCanchas: false, divisiones: [] };
     mocks.getRecentSchedule.mockResolvedValue(schedule);
     const req = { params: { ligaId: 'liga-1' }, user: owner } as unknown as Request;
     const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as unknown as Response;

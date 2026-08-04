@@ -22,12 +22,18 @@ async function assertTeamOwner(equipoId, req) {
         throw new errors_1.NotFoundError('Equipo');
     (0, authorization_1.assertOwnerOrAdmin)(req.user, equipo.userId, 'Equipo');
 }
-async function assertTeamInDivision(divisionId, equipoId) {
+async function assertCanManageDivisionRoster(divisionId, equipoId, req) {
     const membership = await database_1.prisma.divisionEquipo.findUnique({
         where: { divisionId_equipoId: { divisionId, equipoId } },
+        select: {
+            division: { select: { liga: { select: { userId: true } } } },
+        },
     });
     if (!membership)
-        throw new errors_1.NotFoundError('Equipo');
+        throw new errors_1.NotFoundError('Equipo en división');
+    if (!(0, authorization_1.isAdmin)(req.user) && membership.division.liga.userId !== req.user.id) {
+        throw new errors_1.NotFoundError('Equipo en división');
+    }
 }
 const jugadorInclude = {
     equipos: {
@@ -73,17 +79,20 @@ exports.jugadorController = {
             const p = validator_1.createJugadorSchema.safeParse(req.body);
             if (!p.success)
                 throw new errors_1.ValidationError(p.error.issues[0].message);
-            const { equipoId, dorsal, ...jugadorData } = p.data;
+            const { equipoId, dorsal, photoAssetId, ...jugadorData } = p.data;
             await assertTeamOwner(equipoId, req);
             const jugador = await database_1.prisma.$transaction(async (tx) => {
                 const existing = await tx.jugador.findUnique({ where: { telefono: jugadorData.telefono } });
                 if (existing) {
                     await tx.equipoJugador.create({ data: { equipoId, jugadorId: existing.id, dorsal } });
+                    await tx.divisionJugador.updateMany({ where: { equipoId, jugadorId: existing.id }, data: { dorsal } });
                     return tx.jugador.findUniqueOrThrow({ where: { id: existing.id }, include: jugadorInclude });
                 }
+                const media = await service_1.mediaService.prepareAttachment(tx, photoAssetId, req.user.id, 'PLAYER_PHOTO');
                 return tx.jugador.create({
                     data: {
                         ...jugadorData,
+                        ...(media && { foto: media.url, fotoPublicId: media.publicId }),
                         equipos: { create: { equipoId, dorsal } },
                     },
                     include: jugadorInclude,
@@ -103,9 +112,9 @@ exports.jugadorController = {
             const p = validator_1.updateJugadorSchema.safeParse(req.body);
             if (!p.success)
                 throw new errors_1.ValidationError(p.error.issues[0].message);
-            const { equipoId, dorsal, ...jugadorData } = p.data;
+            const { equipoId, dorsal, photoAssetId, ...jugadorData } = p.data;
             if (!(0, authorization_1.isAdmin)(req.user)) {
-                if (!equipoId || dorsal == null || Object.keys(jugadorData).length > 0) {
+                if (!equipoId || dorsal == null || Object.keys(jugadorData).length > 0 || photoAssetId !== undefined) {
                     throw new errors_1.ForbiddenError('Los dueños de equipo solo pueden actualizar el dorsal');
                 }
                 await assertTeamOwner(equipoId, req);
@@ -113,21 +122,19 @@ exports.jugadorController = {
             else if (equipoId) {
                 await assertTeamOwner(equipoId, req);
             }
-            if (jugadorData.foto !== undefined) {
-                const old = await database_1.prisma.jugador.findUnique({ where: { id: req.params.id }, select: { foto: true, fotoPublicId: true } });
-                if (old && jugadorData.foto !== old.foto) {
-                    await service_1.mediaService.scheduleImageCleanup(old.foto, old.fotoPublicId);
-                }
-            }
             const jugador = await database_1.prisma.$transaction(async (tx) => {
+                await service_1.mediaService.lockAttachmentTarget(tx, 'jugador', req.params.id);
+                const old = await tx.jugador.findUniqueOrThrow({ where: { id: req.params.id }, select: { foto: true, fotoPublicId: true } });
+                const media = await service_1.mediaService.prepareAttachment(tx, photoAssetId, req.user.id, 'PLAYER_PHOTO', old.foto, old.fotoPublicId);
                 if (dorsal != null && equipoId) {
                     await tx.equipoJugador.update({
                         where: { equipoId_jugadorId: { equipoId, jugadorId: req.params.id } },
                         data: { dorsal },
                     });
+                    await tx.divisionJugador.updateMany({ where: { equipoId, jugadorId: req.params.id }, data: { dorsal } });
                 }
-                return Object.keys(jugadorData).length > 0
-                    ? tx.jugador.update({ where: { id: req.params.id }, data: jugadorData, include: jugadorInclude })
+                return Object.keys(jugadorData).length > 0 || media
+                    ? tx.jugador.update({ where: { id: req.params.id }, data: { ...jugadorData, ...(media && { foto: media.url, fotoPublicId: media.publicId }) }, include: jugadorInclude })
                     : tx.jugador.findUniqueOrThrow({ where: { id: req.params.id }, include: jugadorInclude });
             });
             (0, response_1.ok)(res, jugador, 'Jugador actualizado exitosamente');
@@ -146,9 +153,10 @@ exports.jugadorController = {
                 throw new errors_1.NotFoundError('Jugador');
             if (!(0, authorization_1.isAdmin)(req.user) && jugador.userId !== req.user.id)
                 throw new errors_1.NotFoundError('Jugador');
-            if (jugador)
-                await service_1.mediaService.scheduleImageCleanup(jugador.foto, jugador.fotoPublicId);
-            await database_1.prisma.jugador.delete({ where: { id: req.params.id } });
+            await database_1.prisma.$transaction(async (tx) => {
+                await service_1.mediaService.scheduleImageCleanup(jugador.foto, jugador.fotoPublicId, tx);
+                await tx.jugador.delete({ where: { id: req.params.id } });
+            });
             (0, response_1.noContent)(res);
         }
         catch (e) {
@@ -161,14 +169,85 @@ exports.jugadorController = {
             if (!p.success)
                 throw new errors_1.ValidationError(p.error.issues[0].message);
             await assertTeamOwner(p.data.equipoId, req);
-            const result = await database_1.prisma.equipoJugador.create({ data: p.data });
+            const result = await database_1.prisma.$transaction(async (tx) => {
+                const jugador = await tx.jugador.findUnique({ where: { id: p.data.jugadorId }, select: { id: true } });
+                if (!jugador)
+                    throw new errors_1.NotFoundError('Jugador');
+                const membership = await tx.equipoJugador.findUnique({
+                    where: { equipoId_jugadorId: { equipoId: p.data.equipoId, jugadorId: p.data.jugadorId } },
+                    select: { jugadorId: true },
+                });
+                if (membership)
+                    throw new errors_1.ConflictError('El jugador ya pertenece a este equipo');
+                const occupiedDorsal = await tx.equipoJugador.findUnique({
+                    where: { equipoId_dorsal: { equipoId: p.data.equipoId, dorsal: p.data.dorsal } },
+                    select: { jugadorId: true },
+                });
+                if (occupiedDorsal)
+                    throw new errors_1.ConflictError('El dorsal ya está ocupado en este equipo');
+                const createdMembership = await tx.equipoJugador.create({ data: p.data });
+                await tx.divisionJugador.updateMany({
+                    where: { equipoId: p.data.equipoId, jugadorId: p.data.jugadorId },
+                    data: { dorsal: p.data.dorsal },
+                });
+                return createdMembership;
+            });
             (0, response_1.created)(res, result, 'Jugador asignado al equipo');
         }
         catch (e) {
-            if (e?.code === 'P2002')
-                next(new errors_1.ConflictError('Ese jugador o dorsal ya está asignado en este equipo'));
-            else
-                next(e);
+            if (e?.code === 'P2002') {
+                const data = validator_1.assignJugadorSchema.safeParse(req.body);
+                if (!data.success)
+                    return next(e);
+                const membership = await database_1.prisma.equipoJugador.findUnique({
+                    where: { equipoId_jugadorId: { equipoId: data.data.equipoId, jugadorId: data.data.jugadorId } },
+                    select: { jugadorId: true },
+                });
+                if (membership)
+                    return next(new errors_1.ConflictError('El jugador ya pertenece a este equipo'));
+                return next(new errors_1.ConflictError('El dorsal ya está ocupado en este equipo'));
+            }
+            if (e?.code === 'P2003')
+                return next(new errors_1.NotFoundError('Jugador'));
+            next(e);
+        }
+    },
+    async lookupByPhone(req, res, next) {
+        try {
+            const p = validator_1.lookupJugadorByPhoneSchema.safeParse(req.body);
+            if (!p.success)
+                throw new errors_1.ValidationError(p.error.issues[0].message);
+            await assertTeamOwner(req.params.equipoId, req);
+            const jugador = await database_1.prisma.jugador.findFirst({
+                where: {
+                    user: { is: { phoneNumber: p.data.telefono, phoneNumberVerified: true } },
+                },
+                select: {
+                    id: true,
+                    nombre: true,
+                    foto: true,
+                    posicion: true,
+                    equipos: {
+                        where: { equipoId: req.params.equipoId },
+                        select: { dorsal: true },
+                        take: 1,
+                    },
+                },
+            });
+            if (!jugador)
+                throw new errors_1.AppError(404, 'No encontramos un perfil de jugador con este teléfono');
+            const membership = jugador.equipos[0];
+            (0, response_1.ok)(res, {
+                id: jugador.id,
+                nombre: jugador.nombre,
+                foto: jugador.foto,
+                posicion: jugador.posicion,
+                yaPertenece: Boolean(membership),
+                dorsal: membership?.dorsal ?? null,
+            });
+        }
+        catch (e) {
+            next(e);
         }
     },
     async removeFromTeam(req, res, next) {
@@ -229,9 +308,14 @@ exports.jugadorController = {
             const p = validator_1.divisionJugadorSchema.safeParse(req.body);
             if (!p.success)
                 throw new errors_1.ValidationError(p.error.issues[0].message);
-            await assertTeamOwner(p.data.equipoId, req);
-            await assertTeamInDivision(p.data.divisionId, p.data.equipoId);
-            const result = await database_1.prisma.divisionJugador.create({ data: p.data, include: { jugador: true } });
+            await assertCanManageDivisionRoster(p.data.divisionId, p.data.equipoId, req);
+            const teamPlayer = await database_1.prisma.equipoJugador.findUnique({
+                where: { equipoId_jugadorId: { equipoId: p.data.equipoId, jugadorId: p.data.jugadorId } },
+                select: { jugadorId: true, dorsal: true },
+            });
+            if (!teamPlayer)
+                throw new errors_1.ValidationError('El jugador debe pertenecer al equipo');
+            const result = await database_1.prisma.divisionJugador.create({ data: { ...p.data, dorsal: teamPlayer.dorsal }, include: { jugador: true } });
             (0, response_1.created)(res, { ...result, jugador: sanitizePublic(result.jugador) }, 'Jugador habilitado en división');
         }
         catch (e) {
@@ -245,8 +329,7 @@ exports.jugadorController = {
     },
     async removeFromDivision(req, res, next) {
         try {
-            await assertTeamOwner(req.params.equipoId, req);
-            await assertTeamInDivision(req.params.divisionId, req.params.equipoId);
+            await assertCanManageDivisionRoster(req.params.divisionId, req.params.equipoId, req);
             await database_1.prisma.divisionJugador.delete({
                 where: { divisionId_equipoId_jugadorId: { divisionId: req.params.divisionId, equipoId: req.params.equipoId, jugadorId: req.params.jugadorId } },
             });
@@ -287,16 +370,25 @@ exports.jugadorController = {
             if (byPhone) {
                 if (byPhone.userId)
                     throw new errors_1.ConflictError('Este perfil ya está vinculado a otra cuenta');
-                const linked = await database_1.prisma.jugador.update({
-                    where: { id: byPhone.id },
-                    data: { userId: user.id },
-                    include: jugadorInclude,
+                const linked = await database_1.prisma.$transaction(async (tx) => {
+                    await service_1.mediaService.lockAttachmentTarget(tx, 'jugador', byPhone.id);
+                    const current = await tx.jugador.findUniqueOrThrow({ where: { id: byPhone.id }, select: { foto: true, fotoPublicId: true } });
+                    const media = await service_1.mediaService.prepareAttachment(tx, p.data.photoAssetId, user.id, 'PLAYER_PHOTO', current.foto, current.fotoPublicId);
+                    return tx.jugador.update({
+                        where: { id: byPhone.id },
+                        data: { userId: user.id, ...(media && { foto: media.url, fotoPublicId: media.publicId }) },
+                        include: jugadorInclude,
+                    });
                 });
                 return (0, response_1.ok)(res, linked, 'Perfil de jugador vinculado');
             }
-            const jugador = await database_1.prisma.jugador.create({
-                data: { ...p.data, telefono: user.phoneNumber, userId: user.id },
-                include: jugadorInclude,
+            const { photoAssetId, ...profileData } = p.data;
+            const jugador = await database_1.prisma.$transaction(async (tx) => {
+                const media = await service_1.mediaService.prepareAttachment(tx, photoAssetId, user.id, 'PLAYER_PHOTO');
+                return tx.jugador.create({
+                    data: { ...profileData, telefono: user.phoneNumber, userId: user.id, ...(media && { foto: media.url, fotoPublicId: media.publicId }) },
+                    include: jugadorInclude,
+                });
             });
             (0, response_1.created)(res, jugador, 'Perfil de jugador creado');
         }
@@ -315,13 +407,16 @@ exports.jugadorController = {
             const p = validator_1.updateMeSchema.safeParse(req.body);
             if (!p.success)
                 throw new errors_1.ValidationError(p.error.issues[0].message);
-            if (p.data.foto !== undefined && p.data.foto !== jugador.foto) {
-                await service_1.mediaService.scheduleImageCleanup(jugador.foto, jugador.fotoPublicId);
-            }
-            const updated = await database_1.prisma.jugador.update({
-                where: { id: jugador.id },
-                data: p.data,
-                include: jugadorInclude,
+            const { photoAssetId, ...profileData } = p.data;
+            const updated = await database_1.prisma.$transaction(async (tx) => {
+                await service_1.mediaService.lockAttachmentTarget(tx, 'jugador', jugador.id);
+                const current = await tx.jugador.findUniqueOrThrow({ where: { id: jugador.id }, select: { foto: true, fotoPublicId: true } });
+                const media = await service_1.mediaService.prepareAttachment(tx, photoAssetId, req.user.id, 'PLAYER_PHOTO', current.foto, current.fotoPublicId);
+                return tx.jugador.update({
+                    where: { id: jugador.id },
+                    data: { ...profileData, ...(media && { foto: media.url, fotoPublicId: media.publicId }) },
+                    include: jugadorInclude,
+                });
             });
             (0, response_1.ok)(res, updated, 'Perfil actualizado');
         }

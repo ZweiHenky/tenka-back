@@ -1,9 +1,19 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.partidoRepository = exports.PARTIDO_READ_INCLUDE = exports.exposePartidoRead = void 0;
+exports.partidoRepository = exports.PARTIDO_READ_INCLUDE = exports.exposePartidoRead = exports.exposeAnotacionRead = void 0;
 const database_1 = require("../../config/database");
 const divisionVisibility_1 = require("../../utils/divisionVisibility");
-const exposePartidoRead = (partido) => ({ ...partido, arbitros: partido.arbitros?.map((row) => row.arbitro) });
+const exposeAnotacionRead = (anotacion) => ({
+    ...anotacion,
+    jugadorId: anotacion.jugadorId ?? anotacion.jugadorIdSnapshot ?? null,
+    equipoId: anotacion.equipoId ?? anotacion.equipoIdSnapshot ?? null,
+});
+exports.exposeAnotacionRead = exposeAnotacionRead;
+const exposePartidoRead = (partido) => ({
+    ...partido,
+    arbitros: partido.arbitros?.map((row) => row.arbitro),
+    anotaciones: partido.anotaciones?.map(exports.exposeAnotacionRead),
+});
 exports.exposePartidoRead = exposePartidoRead;
 exports.PARTIDO_READ_INCLUDE = {
     equipoLocal: { select: { id: true, nombre: true, logo: true } },
@@ -11,12 +21,17 @@ exports.PARTIDO_READ_INCLUDE = {
     cancha: { select: { id: true, nombre: true } },
     arbitros: { include: { arbitro: { select: { id: true, nombre: true } } } },
 };
+const PARTIDO_DETAIL_INCLUDE = {
+    ...exports.PARTIDO_READ_INCLUDE,
+    anotaciones: { orderBy: [{ ladoMarcador: 'asc' }, { jugadorNombre: 'asc' }, { id: 'asc' }] },
+};
 exports.partidoRepository = {
-    async findAuthorizationContext(id) {
-        const partido = await database_1.prisma.partido.findUnique({
+    async findAuthorizationContext(id, client = database_1.prisma) {
+        const partido = await client.partido.findUnique({
             where: { id },
             select: {
                 id: true,
+                version: true,
                 estado: true,
                 golesLocal: true,
                 golesVisitante: true,
@@ -24,13 +39,14 @@ exports.partidoRepository = {
                 penalesVisitante: true,
                 fecha: true,
                 fechaFin: true,
+                canchaId: true,
                 tipoPartido: true,
                 equipoLocalId: true,
                 equipoVisitanteId: true,
                 jornadaId: true,
                 rondaPlayoffId: true,
-                jornada: { select: { division: { select: { id: true, liga: { select: { userId: true } } } } } },
-                rondaPlayoff: { select: { division: { select: { id: true, liga: { select: { userId: true } } } } } },
+                jornada: { select: { division: { select: { id: true, ligaId: true, liga: { select: { userId: true, multiplesCanchas: true } } } } } },
+                rondaPlayoff: { select: { division: { select: { id: true, ligaId: true, liga: { select: { userId: true, multiplesCanchas: true } } } } } },
             },
         });
         if (!partido)
@@ -38,7 +54,9 @@ exports.partidoRepository = {
         const division = partido.jornada?.division ?? partido.rondaPlayoff?.division;
         return {
             id: partido.id,
+            version: partido.version,
             ligaUserId: division?.liga.userId ?? '',
+            ligaId: division?.ligaId ?? '',
             estado: partido.estado,
             golesLocal: partido.golesLocal,
             golesVisitante: partido.golesVisitante,
@@ -52,6 +70,8 @@ exports.partidoRepository = {
             equipoVisitanteId: partido.equipoVisitanteId,
             fecha: partido.fecha,
             fechaFin: partido.fechaFin,
+            canchaId: partido.canchaId,
+            multiplesCanchas: division?.liga.multiplesCanchas ?? false,
         };
     },
     async findAllVisible(actor) {
@@ -70,7 +90,7 @@ exports.partidoRepository = {
     async findById(id) {
         const partido = await database_1.prisma.partido.findUnique({
             where: { id },
-            include: exports.PARTIDO_READ_INCLUDE,
+            include: PARTIDO_DETAIL_INCLUDE,
         });
         return partido ? (0, exports.exposePartidoRead)(partido) : null;
     },
@@ -84,7 +104,7 @@ exports.partidoRepository = {
                     { rondaPlayoff: { division: divisionWhere } },
                 ],
             },
-            include: exports.PARTIDO_READ_INCLUDE,
+            include: PARTIDO_DETAIL_INCLUDE,
         });
         return partido ? (0, exports.exposePartidoRead)(partido) : null;
     },
@@ -119,16 +139,17 @@ exports.partidoRepository = {
     async create(data) {
         return database_1.prisma.partido.create({ data: data });
     },
-    async update(id, data) {
-        const partido = await database_1.prisma.partido.update({
+    async update(id, data, client = database_1.prisma) {
+        const partido = await client.partido.update({
             where: { id },
             data,
             include: exports.PARTIDO_READ_INCLUDE,
         });
         return (0, exports.exposePartidoRead)(partido);
     },
-    async delete(id) {
-        await database_1.prisma.partido.delete({ where: { id } });
+    async delete(id, client = database_1.prisma) {
+        const partido = await client.partido.delete({ where: { id }, include: exports.PARTIDO_READ_INCLUDE });
+        return (0, exports.exposePartidoRead)(partido);
     },
 };
 //# sourceMappingURL=repository.js.map

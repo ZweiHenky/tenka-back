@@ -14,6 +14,7 @@ describe('startWorker', () => {
     const run = vi.fn(() => new Promise<void>((resolve) => { resolveRun = resolve; }));
     const stop = startWorker('test', run, 1000);
 
+    await flushPromises();
     await vi.advanceTimersByTimeAsync(5000);
     expect(run).toHaveBeenCalledTimes(1);
 
@@ -36,7 +37,7 @@ describe('startWorker', () => {
     await stop();
     await vi.advanceTimersByTimeAsync(5000);
 
-    expect(run).not.toHaveBeenCalled();
+    expect(run).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
   });
 });

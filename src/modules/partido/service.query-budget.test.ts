@@ -17,34 +17,41 @@ import {
 beforeEach(resetServiceTestHarness);
 
 describe('partidoService private query budgets', () => {
-  it('updates a score with only the authorization-context read and update write', async () => {
+  it('updates a jornada score with preflight and transactional authorization reads', async () => {
     const updated = { ...partido, golesLocal: 2 };
     vi.mocked(partidoRepository.update).mockResolvedValue(updated as any);
 
     await expect(partidoService.update('partido-1', { golesLocal: 2 }, owner)).resolves.toEqual(updated);
 
-    expect(partidoRepository.findAuthorizationContext).toHaveBeenCalledOnce();
+    expect(partidoRepository.findAuthorizationContext).toHaveBeenCalledTimes(2);
+    expect(partidoRepository.findAuthorizationContext).toHaveBeenNthCalledWith(2, 'partido-1', prisma);
     expect(partidoRepository.update).toHaveBeenCalledOnce();
+    expect(partidoRepository.update).toHaveBeenCalledWith('partido-1', { golesLocal: 2 }, prisma);
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
     expect(partidoRepository.findById).not.toHaveBeenCalled();
     expect(partidoRepository.findVisibleById).not.toHaveBeenCalled();
   });
 
-  it('deletes with only the authorization-context read and delete write', async () => {
+  it('deletes a jornada partido with preflight and transactional authorization reads', async () => {
     await partidoService.delete('partido-1', owner);
 
-    expect(partidoRepository.findAuthorizationContext).toHaveBeenCalledOnce();
+    expect(partidoRepository.findAuthorizationContext).toHaveBeenCalledTimes(2);
+    expect(partidoRepository.findAuthorizationContext).toHaveBeenNthCalledWith(2, 'partido-1', prisma);
     expect(partidoRepository.delete).toHaveBeenCalledOnce();
-    expect(partidoRepository.delete).toHaveBeenCalledWith('partido-1');
+    expect(partidoRepository.delete).toHaveBeenCalledWith('partido-1', prisma);
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
     expect(partidoRepository.findById).not.toHaveBeenCalled();
     expect(partidoRepository.findVisibleById).not.toHaveBeenCalled();
   });
 
-  it('uses one conflict read and one transactional schedule snapshot for a replacement', async () => {
+  it('keeps all replacement reads except authorization preflight inside one transaction', async () => {
     await partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, owner);
 
-    expect(partidoRepository.findAuthorizationContext).toHaveBeenCalledOnce();
+    expect(partidoRepository.findAuthorizationContext).toHaveBeenCalledTimes(2);
+    expect(partidoRepository.findAuthorizationContext).toHaveBeenNthCalledWith(1, 'partido-1');
+    expect(partidoRepository.findAuthorizationContext).toHaveBeenNthCalledWith(2, 'partido-1', prisma);
     expect(prisma.divisionEquipo.count).toHaveBeenCalledOnce();
-    expect(prisma.partido.findMany).toHaveBeenCalledOnce();
+    expect(prisma.partido.findMany).not.toHaveBeenCalled();
     expect(prisma.partido.findFirst).toHaveBeenCalledOnce();
     expect(prisma.$transaction).toHaveBeenCalledOnce();
     expect(prisma.jornada.findMany).toHaveBeenCalledOnce();
@@ -52,6 +59,11 @@ describe('partidoService private query budgets', () => {
       where: { divisionId: 'division-1' },
     }));
     expect(prisma.jornada.findUnique).not.toHaveBeenCalled();
-    expect(prisma.partido.update).toHaveBeenCalledTimes(2);
+    expect(prisma.$executeRawUnsafe).toHaveBeenCalledOnce();
+    expect(vi.mocked(prisma.$executeRawUnsafe).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(partidoRepository.findAuthorizationContext).mock.invocationCallOrder[1]);
+    expect(prisma.partido.updateMany).toHaveBeenCalledTimes(2);
+    expect(prisma.partido.findUnique).toHaveBeenCalledOnce();
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
   });
 });

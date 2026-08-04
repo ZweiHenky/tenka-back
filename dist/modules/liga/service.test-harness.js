@@ -60,9 +60,11 @@ const mocks = vitest_1.vi.hoisted(() => ({
     canchaFindUnique: vitest_1.vi.fn(),
     canchaFindFirst: vitest_1.vi.fn(),
     canchaCreate: vitest_1.vi.fn(),
+    canchaCount: vitest_1.vi.fn(),
     canchaUpdate: vitest_1.vi.fn(),
     canchaDelete: vitest_1.vi.fn(),
     partidoCount: vitest_1.vi.fn(),
+    divisionCount: vitest_1.vi.fn(),
     partidoArbitroCount: vitest_1.vi.fn(),
 }));
 vitest_1.vi.mock('./repository', () => ({
@@ -95,11 +97,15 @@ vitest_1.vi.mock('../../config/database', () => ({
             findUnique: mocks.canchaFindUnique,
             findFirst: mocks.canchaFindFirst,
             create: mocks.canchaCreate,
+            count: mocks.canchaCount,
             update: mocks.canchaUpdate,
             delete: mocks.canchaDelete,
         },
         partido: {
             count: mocks.partidoCount,
+        },
+        division: {
+            count: mocks.divisionCount,
         },
         partidoArbitro: {
             count: mocks.partidoArbitroCount,

@@ -47,7 +47,7 @@ describe('nombre global unico de liga', () => {
     expect(mocks.findByNormalizedName).toHaveBeenCalledWith('liga centro', 'liga-1');
     expect(mocks.update).toHaveBeenCalledWith('liga-1', {
       nombre: 'LIGA CENTRO', nombreNormalizado: 'liga centro',
-    }, undefined, undefined);
+    }, [], undefined);
   });
 
   it('rechaza una colision al renombrar', async () => {

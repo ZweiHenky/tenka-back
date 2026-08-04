@@ -8,9 +8,15 @@ const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
   roundCreateManyAndReturn: vi.fn(),
   roundFindUnique: vi.fn(),
+  roundDelete: vi.fn(),
+  roundDeleteMany: vi.fn(),
   partidoCreateMany: vi.fn(),
   partidoFindMany: vi.fn(),
+  partidoCreate: vi.fn(),
+  partidoDelete: vi.fn(),
   partidoUpdate: vi.fn(),
+  anotacionDeleteMany: vi.fn(),
+  executeRaw: vi.fn(),
 }));
 
 vi.mock('./repository', () => ({ rondaPlayoffRepository: mocks }));
@@ -64,26 +70,45 @@ describe('rondaPlayoffService public reads', () => {
 
 describe('rondaPlayoffService batch writes', () => {
   const tx = {
+    $executeRawUnsafe: mocks.executeRaw,
+    division: {
+      findUnique: mocks.divisionFindUnique,
+      findFirst: async (...args: any[]) => {
+        const division = await mocks.divisionFindFirst(...args);
+        return division ? { ligaId: 'league-1', ...division } : division;
+      },
+    },
     rondaPlayoff: {
       createManyAndReturn: mocks.roundCreateManyAndReturn,
       findUnique: mocks.roundFindUnique,
+      delete: mocks.roundDelete,
+      deleteMany: mocks.roundDeleteMany,
     },
     partido: {
       createMany: mocks.partidoCreateMany,
+      create: mocks.partidoCreate,
+      delete: mocks.partidoDelete,
       findMany: mocks.partidoFindMany,
       update: mocks.partidoUpdate,
     },
+    anotacionPartido: { deleteMany: mocks.anotacionDeleteMany },
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.divisionFindUnique.mockResolvedValue({ liga: { userId: owner.id } });
+    mocks.divisionFindUnique.mockResolvedValue({ ligaId: 'league-1', liga: { userId: owner.id } });
     mocks.divisionFindFirst.mockResolvedValue({
+      rondasPlayoff: [],
       equipos: Array.from({ length: 8 }, (_, index) => assignedTeam(`team-${index + 1}`, `Team ${index + 1}`)),
     });
     mocks.transaction.mockImplementation((callback) => callback(tx));
     mocks.partidoCreateMany.mockResolvedValue({ count: 0 });
+    mocks.partidoCreate.mockResolvedValue({});
+    mocks.partidoDelete.mockResolvedValue({});
     mocks.partidoUpdate.mockResolvedValue({});
+    mocks.roundDelete.mockResolvedValue({});
+    mocks.roundDeleteMany.mockResolvedValue({ count: 0 });
+    mocks.executeRaw.mockResolvedValue(0);
   });
 
   it('generates all rounds and first-round matches atomically within a four-query budget', async () => {
@@ -97,10 +122,12 @@ describe('rondaPlayoffService batch writes', () => {
 
     expect(result.map((round) => round.id)).toEqual(['quarters', 'semis', 'final']);
     expect(mocks.divisionFindFirst).toHaveBeenCalledTimes(1);
-    expect(mocks.divisionFindUnique).not.toHaveBeenCalled();
+    expect(mocks.divisionFindUnique).toHaveBeenCalledWith({ where: { id: 'division-1' }, select: { ligaId: true } });
     expect(mocks.divisionFindFirst).toHaveBeenCalledWith({
       where: { id: 'division-1', liga: { userId: owner.id } },
       select: {
+        ligaId: true,
+        rondasPlayoff: { take: 1, select: { id: true } },
         equipos: {
           select: {
             equipoId: true,
@@ -132,7 +159,7 @@ describe('rondaPlayoffService batch writes', () => {
 
   it('generates a two-team final', async () => {
     mocks.divisionFindFirst.mockResolvedValue({
-      equipos: [assignedTeam('team-2', 'Segundo'), assignedTeam('team-1', 'Primero')],
+      rondasPlayoff: [], equipos: [assignedTeam('team-2', 'Segundo'), assignedTeam('team-1', 'Primero')],
     });
     mocks.roundCreateManyAndReturn.mockResolvedValue([
       { id: 'final', nombre: 'Final', orden: 1, divisionId: 'division-1' },
@@ -150,7 +177,7 @@ describe('rondaPlayoffService batch writes', () => {
 
   it('generates all five rounds and 16 initial matches for 32 teams', async () => {
     mocks.divisionFindFirst.mockResolvedValue({
-      equipos: Array.from({ length: 32 }, (_, index) => assignedTeam(`team-${String(index + 1).padStart(2, '0')}`, `Team ${String(index + 1).padStart(2, '0')}`, { puntos: 32 - index })),
+      rondasPlayoff: [], equipos: Array.from({ length: 32 }, (_, index) => assignedTeam(`team-${String(index + 1).padStart(2, '0')}`, `Team ${String(index + 1).padStart(2, '0')}`, { puntos: 32 - index })),
     });
     mocks.roundCreateManyAndReturn.mockResolvedValue(
       ['Dieciseisavos', 'Octavos', 'Cuartos', 'Semifinal', 'Final'].map((nombre, index) => ({
@@ -173,7 +200,7 @@ describe('rondaPlayoffService batch writes', () => {
 
   it('uses zero defaults for assigned teams without standings', async () => {
     mocks.divisionFindFirst.mockResolvedValue({
-      equipos: [assignedTeam('team-b', 'Beta', { puntos: 0 }), assignedTeam('team-a', 'Alfa')],
+      rondasPlayoff: [], equipos: [assignedTeam('team-b', 'Beta', { puntos: 0 }), assignedTeam('team-a', 'Alfa')],
     });
     mocks.roundCreateManyAndReturn.mockResolvedValue([
       { id: 'final', nombre: 'Final', orden: 1, divisionId: 'division-1' },
@@ -187,7 +214,7 @@ describe('rondaPlayoffService batch writes', () => {
   });
 
   it('ranks mixed standings by every statistic before pairing first versus last', async () => {
-    mocks.divisionFindFirst.mockResolvedValue({ equipos: [
+    mocks.divisionFindFirst.mockResolvedValue({ rondasPlayoff: [], equipos: [
       assignedTeam('team-1', 'Zulu', { puntos: 10, diferenciaGoles: 5, ganados: 3, golesFavor: 10 }),
       assignedTeam('team-2', 'Alfa', { puntos: 10, diferenciaGoles: 5, ganados: 3, golesFavor: 11 }),
       assignedTeam('team-3', 'Beta', { puntos: 10, diferenciaGoles: 6, ganados: 1, golesFavor: 2 }),
@@ -207,7 +234,7 @@ describe('rondaPlayoffService batch writes', () => {
   });
 
   it('breaks full statistical ties by Spanish base name and then team id', async () => {
-    mocks.divisionFindFirst.mockResolvedValue({ equipos: [
+    mocks.divisionFindFirst.mockResolvedValue({ rondasPlayoff: [], equipos: [
       assignedTeam('team-z', 'Zeta'),
       assignedTeam('team-b', 'Águila'),
       assignedTeam('team-a', 'aguila'),
@@ -235,13 +262,13 @@ describe('rondaPlayoffService batch writes', () => {
   });
 
   it('rejects a bracket larger than the assigned team set', async () => {
-    mocks.divisionFindFirst.mockResolvedValue({ equipos: [assignedTeam('team-1', 'Alfa')] });
+    mocks.divisionFindFirst.mockResolvedValue({ rondasPlayoff: [], equipos: [assignedTeam('team-1', 'Alfa')] });
 
     await expect(rondaPlayoffService.generate('division-1', 2, owner)).rejects.toMatchObject({
       statusCode: 422,
       message: 'Se necesitan al menos 2 equipos asignados a la división',
     });
-    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
   });
 
   it('uses the same not-found response for missing and unauthorized divisions', async () => {
@@ -258,7 +285,7 @@ describe('rondaPlayoffService batch writes', () => {
 
   it('propagates a first-round insert failure so the transaction rolls back its round insert', async () => {
     mocks.divisionFindFirst.mockResolvedValue({
-      equipos: Array.from({ length: 4 }, (_, index) => assignedTeam(`team-${index + 1}`, `Team ${index + 1}`)),
+      rondasPlayoff: [], equipos: Array.from({ length: 4 }, (_, index) => assignedTeam(`team-${index + 1}`, `Team ${index + 1}`)),
     });
     mocks.roundCreateManyAndReturn.mockResolvedValue([
       { id: 'semis', nombre: 'Semifinal', orden: 1, divisionId: 'division-1' },
@@ -272,10 +299,52 @@ describe('rondaPlayoffService batch writes', () => {
     expect(mocks.transaction).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects duplicate bracket generation after rereading rounds under the league lock', async () => {
+    mocks.divisionFindFirst.mockResolvedValue({ rondasPlayoff: [{ id: 'existing' }], equipos: [] });
+
+    await expect(rondaPlayoffService.generate('division-1', 2, owner)).rejects.toMatchObject({
+      statusCode: 409,
+      message: 'La división ya tiene rondas de playoff',
+    });
+
+    expect(mocks.executeRaw).toHaveBeenCalledWith('SELECT pg_advisory_xact_lock(hashtext($1))', 'league-1');
+    expect(mocks.roundCreateManyAndReturn).not.toHaveBeenCalled();
+  });
+
+  it('maps a concurrent unique collision during generation to conflict', async () => {
+    mocks.divisionFindFirst.mockResolvedValue({
+      rondasPlayoff: [],
+      equipos: [assignedTeam('team-1', 'Uno'), assignedTeam('team-2', 'Dos')],
+    });
+    mocks.roundCreateManyAndReturn.mockRejectedValue(Object.assign(new Error('unique'), { code: 'P2002' }));
+
+    await expect(rondaPlayoffService.generate('division-1', 2, owner)).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('deletes an individual round only when it is the latest round', async () => {
+    mocks.roundFindUnique
+      .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1' } })
+      .mockResolvedValueOnce({ orden: 2, division: { ligaId: 'league-1', liga: { userId: owner.id }, rondasPlayoff: [{ id: 'latest' }] } });
+
+    await rondaPlayoffService.delete('latest', owner);
+
+    expect(mocks.roundDelete).toHaveBeenCalledWith({ where: { id: 'latest' } });
+    expect(mocks.executeRaw.mock.invocationCallOrder[0]).toBeLessThan(mocks.roundDelete.mock.invocationCallOrder[0]);
+  });
+
+  it('rejects deletion of a non-latest round without deleting it', async () => {
+    mocks.roundFindUnique
+      .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1' } })
+      .mockResolvedValueOnce({ orden: 1, division: { ligaId: 'league-1', liga: { userId: owner.id }, rondasPlayoff: [{ id: 'latest' }] } });
+
+    await expect(rondaPlayoffService.delete('earlier', owner)).rejects.toMatchObject({ statusCode: 409 });
+    expect(mocks.roundDelete).not.toHaveBeenCalled();
+  });
+
   it('advances winners with two reads, one batched insert, and concurrent existing-match updates', async () => {
     mocks.roundFindUnique.mockResolvedValue({
       orden: 1,
-      division: { rondasPlayoff: [{ id: 'current', orden: 1 }, { id: 'next', orden: 2 }] },
+      division: { ligaId: 'league-1', rondasPlayoff: [{ id: 'current', orden: 1 }, { id: 'next', orden: 2 }] },
     });
     mocks.partidoFindMany.mockResolvedValue([
       finishedMatch('a', 'current', 1, 'team-1', 'team-8', 2, 0),
@@ -287,11 +356,11 @@ describe('rondaPlayoffService batch writes', () => {
 
     await rondaPlayoffService.advanceWinners('current');
 
-    expect(mocks.roundFindUnique).toHaveBeenCalledTimes(1);
+    expect(mocks.roundFindUnique).toHaveBeenCalledTimes(2);
     expect(mocks.partidoFindMany).toHaveBeenCalledTimes(1);
-    expect(mocks.partidoCreateMany).toHaveBeenCalledTimes(1);
-    expect(mocks.partidoCreateMany).toHaveBeenCalledWith({
-      data: [expect.objectContaining({ llave: 2, equipoLocalId: 'team-3', equipoVisitanteId: 'team-5' })],
+    expect(mocks.partidoCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.partidoCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ llave: 2, equipoLocalId: 'team-3', equipoVisitanteId: 'team-5' }),
     });
     expect(mocks.partidoUpdate).toHaveBeenCalledTimes(1);
     expect(mocks.partidoUpdate).toHaveBeenCalledWith(expect.objectContaining({
@@ -303,7 +372,7 @@ describe('rondaPlayoffService batch writes', () => {
   it('propagates an advancement update failure from the transaction for atomic rollback', async () => {
     mocks.roundFindUnique.mockResolvedValue({
       orden: 1,
-      division: { rondasPlayoff: [{ id: 'current', orden: 1 }, { id: 'next', orden: 2 }] },
+      division: { ligaId: 'league-1', rondasPlayoff: [{ id: 'current', orden: 1 }, { id: 'next', orden: 2 }] },
     });
     mocks.partidoFindMany.mockResolvedValue([
       finishedMatch('a', 'current', 1, 'team-1', 'team-4', 2, 0),
@@ -315,6 +384,40 @@ describe('rondaPlayoffService batch writes', () => {
     await expect(rondaPlayoffService.advanceWinners('current')).rejects.toThrow('advance update failed');
     expect(mocks.transaction).toHaveBeenCalledTimes(1);
     expect(mocks.partidoUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes an unattached derived match when its source pair is no longer finalized', async () => {
+    mocks.roundFindUnique.mockResolvedValue({
+      orden: 1,
+      division: { rondasPlayoff: [{ id: 'current', orden: 1 }, { id: 'next', orden: 2 }] },
+    });
+    mocks.partidoFindMany.mockResolvedValue([
+      finishedMatch('a', 'current', 1, 'team-1', 'team-4', 2, 0),
+      { ...finishedMatch('b', 'current', 2, 'team-2', 'team-3', 0, 1), estado: 'SUSPENDIDO' },
+      { id: 'derived', rondaPlayoffId: 'next', llave: 1, estado: 'PROGRAMADO', jornadaId: null },
+    ]);
+
+    await rondaPlayoffService.syncAdvancement(tx as any, 'current');
+
+    expect(mocks.partidoDelete).toHaveBeenCalledWith({ where: { id: 'derived' } });
+  });
+
+  it.each([
+    { estado: 'FINALIZADO', jornadaId: null },
+    { estado: 'PROGRAMADO', jornadaId: 'jornada-1' },
+  ])('rejects advancement reversal for protected derived match %#', async (protection) => {
+    mocks.roundFindUnique.mockResolvedValue({
+      orden: 1,
+      division: { rondasPlayoff: [{ id: 'current', orden: 1 }, { id: 'next', orden: 2 }] },
+    });
+    mocks.partidoFindMany.mockResolvedValue([
+      finishedMatch('a', 'current', 1, 'team-1', 'team-4', 2, 0),
+      { ...finishedMatch('b', 'current', 2, 'team-2', 'team-3', 0, 1), estado: 'SUSPENDIDO' },
+      { id: 'derived', rondaPlayoffId: 'next', llave: 1, ...protection },
+    ]);
+
+    await expect(rondaPlayoffService.syncAdvancement(tx as any, 'current')).rejects.toMatchObject({ statusCode: 409 });
+    expect(mocks.partidoDelete).not.toHaveBeenCalled();
   });
 });
 

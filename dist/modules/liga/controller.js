@@ -5,6 +5,10 @@ const service_1 = require("./service");
 const validator_1 = require("./validator");
 const response_1 = require("../../utils/response");
 const errors_1 = require("../../utils/errors");
+function publicLiga(liga) {
+    const { logoPublicId: _logo, canchaPublicId: _cover, ...safe } = liga;
+    return safe;
+}
 exports.ligaController = {
     async list(req, res, next) {
         try {
@@ -18,15 +22,15 @@ exports.ligaController = {
                     tipoId: tipoId,
                     estadoLigaId: estadoLigaId,
                 });
-                (0, response_1.ok)(res, result);
+                (0, response_1.ok)(res, { ...result, rows: result.rows.map(publicLiga) });
             }
             else if (userId) {
                 const ligas = await service_1.ligaService.listByUser(userId, req.user);
-                (0, response_1.ok)(res, ligas);
+                (0, response_1.ok)(res, ligas.map(publicLiga));
             }
             else {
                 const ligas = await service_1.ligaService.list();
-                (0, response_1.ok)(res, ligas);
+                (0, response_1.ok)(res, ligas.map(publicLiga));
             }
         }
         catch (err) {
@@ -36,7 +40,7 @@ exports.ligaController = {
     async getById(req, res, next) {
         try {
             const liga = await service_1.ligaService.getById(req.params.id, req.user);
-            (0, response_1.ok)(res, liga);
+            (0, response_1.ok)(res, publicLiga(liga));
         }
         catch (err) {
             next(err);
@@ -51,7 +55,7 @@ exports.ligaController = {
                 ...parsed.data,
                 userId: req.user.id,
             });
-            (0, response_1.created)(res, liga, 'Liga creada exitosamente');
+            (0, response_1.created)(res, publicLiga(liga), 'Liga creada exitosamente');
         }
         catch (err) {
             next(err);
@@ -63,7 +67,7 @@ exports.ligaController = {
             if (!parsed.success)
                 throw new errors_1.ValidationError(parsed.error.issues[0].message);
             const liga = await service_1.ligaService.update(req.params.id, parsed.data, req.user);
-            (0, response_1.ok)(res, liga, 'Liga actualizada exitosamente');
+            (0, response_1.ok)(res, publicLiga(liga), 'Liga actualizada exitosamente');
         }
         catch (err) {
             next(err);

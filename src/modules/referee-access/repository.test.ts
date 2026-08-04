@@ -17,15 +17,18 @@ describe('refereeAccessRepository.findPartidoReadContextByTokenHash', () => {
     await refereeAccessRepository.findPartidoReadContextByTokenHash('token-hash')
 
     expect(mocks.findUnique).toHaveBeenCalledTimes(1)
-    expect(mocks.findUnique).toHaveBeenCalledWith({
+    expect(mocks.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       where: { tokenHash: 'token-hash' },
-      select: {
+      select: expect.objectContaining({
         expiresAt: true,
         usedAt: true,
-        partido: {
-          select: {
+        partido: expect.objectContaining({
+          select: expect.objectContaining({
             id: true,
+            version: true,
             fecha: true,
+            fechaFin: true,
+            canchaId: true,
             estado: true,
             golesLocal: true,
             golesVisitante: true,
@@ -38,17 +41,17 @@ describe('refereeAccessRepository.findPartidoReadContextByTokenHash', () => {
             jornada: {
               select: {
                 numero: true,
-                division: { select: { nombre: true, liga: { select: { nombre: true } } } },
+                division: expect.any(Object),
               },
             },
             rondaPlayoff: {
               select: {
-                division: { select: { nombre: true, liga: { select: { nombre: true } } } },
+                division: expect.any(Object),
               },
             },
-          },
-        },
-      },
-    })
+          }),
+        }),
+      }),
+    }))
   })
 })

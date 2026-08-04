@@ -27,6 +27,11 @@ enum EstadoPartido {
   SUSPENDIDO
 }
 
+enum LadoMarcador {
+  LOCAL
+  VISITANTE
+}
+
 enum PosicionJugador {
   PORTERO
   DEFENSA
@@ -35,6 +40,53 @@ enum PosicionJugador {
   MEDIO
   EXTREMO
   DELANTERO
+}
+
+enum MediaKind {
+  LEAGUE_LOGO
+  LEAGUE_COVER
+  TEAM_LOGO
+  ACCOUNT_AVATAR
+  PLAYER_PHOTO
+}
+
+enum MediaStatus {
+  PENDING
+  UPLOADED
+  ATTACHED
+  ABANDONED
+  DEAD
+}
+
+enum MediaDeletionStatus {
+  PENDING
+  LEASED
+  DEAD
+}
+
+enum NotificationAudience {
+  REGISTERED
+  FOLLOWERS
+}
+
+enum NotificationOutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  DEAD
+  CANCELLED
+}
+
+enum NotificationEventType {
+  JORNADA_GENERATED
+  SCHEDULE_CHANGED
+}
+
+enum OneSignalTagSyncStatus {
+  PENDING
+  PROCESSING
+  SYNCED
+  DEAD
 }
 
 model User {
@@ -54,11 +106,13 @@ model User {
   jugadorId String?  @unique
   jugador   Jugador? @relation("UserJugador")
 
-  accounts             Account[]
-  sessions             Session[]
-  ligas                Liga[]
-  equipos              Equipo[]
-  partidoRefereeAccess PartidoRefereeAccess[]
+  accounts                  Account[]
+  sessions                  Session[]
+  ligas                     Liga[]
+  equipos                   Equipo[]
+  partidoRefereeAccess      PartidoRefereeAccess[]
+  mediaAssets               MediaAsset[]
+  notificationSubscriptions DivisionNotificationSubscription[]
 }
 
 model Account {
@@ -188,18 +242,20 @@ model Liga {
 }
 
 model LigaCancha {
-  id        String   @id @default(cuid())
-  nombre    String
-  activa    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                String   @id @default(cuid())
+  nombre            String
+  nombreNormalizado String
+  activa            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   ligaId String
   liga   Liga   @relation(fields: [ligaId], references: [id], onDelete: Cascade)
 
-  partidos Partido[]
+  partidos        Partido[]
+  divisionesFijas Division[] @relation("DivisionCanchaUnica")
 
-  @@unique([ligaId, nombre])
+  @@unique([ligaId, nombreNormalizado])
   @@index([ligaId])
   @@map("ligas_canchas")
 }
@@ -240,12 +296,14 @@ model Division {
   categoriaId       String
   tipoId            String
   tipoCompetenciaId String
+  canchaUnicaId     String?
 
   liga            Liga            @relation(fields: [ligaId], references: [id], onDelete: Cascade)
   estadoLiga      EstadoLiga      @relation(fields: [estadoLigaId], references: [id])
   categoria       Categoria       @relation(fields: [categoriaId], references: [id])
   tipo            Tipo            @relation(fields: [tipoId], references: [id])
   tipoCompetencia TipoCompetencia @relation(fields: [tipoCompetenciaId], references: [id])
+  canchaUnica     LigaCancha?     @relation("DivisionCanchaUnica", fields: [canchaUnicaId], references: [id], onDelete: SetNull)
 
   equipos                   DivisionEquipo[]
   jugadores                 DivisionJugador[]
@@ -254,8 +312,10 @@ model Division {
   rondasPlayoff             RondaPlayoff[]
   tablaPosiciones           TablaPosicion[]
   notificationSubscriptions DivisionNotificationSubscription[]
+  notificationOutbox        NotificationOutbox[]
 
   @@index([ligaId, createdAt])
+  @@index([canchaUnicaId])
   @@map("divisiones")
 }
 
@@ -275,6 +335,7 @@ model Equipo {
   partidosLocal     Partido[]         @relation("local")
   partidosVisitante Partido[]         @relation("visitante")
   tablaPosiciones   TablaPosicion[]
+  anotaciones       AnotacionPartido[]
 
   @@unique([userId, nombreNormalizado])
   @@map("equipos")
@@ -296,6 +357,7 @@ model Jugador {
 
   equipos    EquipoJugador[]
   divisiones DivisionJugador[]
+  anotaciones AnotacionPartido[]
 
   @@map("jugadores")
 }
@@ -308,8 +370,6 @@ model EquipoJugador {
 
   equipo  Equipo  @relation(fields: [equipoId], references: [id], onDelete: Cascade)
   jugador Jugador @relation(fields: [jugadorId], references: [id], onDelete: Cascade)
-
-  divisionJugadores DivisionJugador[]
 
   @@id([equipoId, jugadorId])
   @@unique([equipoId, dorsal])
@@ -335,6 +395,7 @@ model DivisionJugador {
   divisionId String
   equipoId   String
   jugadorId  String
+  dorsal     Int
   createdAt  DateTime @default(now())
 
   division Division @relation(fields: [divisionId], references: [id], onDelete: Cascade)
@@ -342,7 +403,6 @@ model DivisionJugador {
   jugador  Jugador  @relation(fields: [jugadorId], references: [id], onDelete: Cascade)
 
   divisionEquipo DivisionEquipo @relation(fields: [divisionId, equipoId], references: [divisionId, equipoId], onDelete: Cascade)
-  equipoJugador  EquipoJugador  @relation(fields: [equipoId, jugadorId], references: [equipoId, jugadorId], onDelete: Cascade)
 
   @@id([divisionId, equipoId, jugadorId])
   @@index([jugadorId, createdAt])
@@ -366,18 +426,22 @@ model Premio {
 }
 
 model Jornada {
-  id          String    @id @default(cuid())
-  numero      Int
-  fechaInicio DateTime?
-  fechaFin    DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                    String    @id @default(cuid())
+  numero                Int
+  fechaInicio           DateTime?
+  fechaFin              DateTime?
+  generationKey         String?
+  generationRequestHash String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  divisionId String
-  division   Division  @relation(fields: [divisionId], references: [id], onDelete: Cascade)
-  partidos   Partido[]
+  divisionId         String
+  division           Division             @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  partidos           Partido[]
+  notificationOutbox NotificationOutbox[]
 
-  @@index([divisionId, numero])
+  @@unique([divisionId, numero])
+  @@unique([divisionId, generationKey])
   @@map("jornadas")
 }
 
@@ -392,7 +456,7 @@ model RondaPlayoff {
   division   Division  @relation(fields: [divisionId], references: [id], onDelete: Cascade)
   partidos   Partido[]
 
-  @@index([divisionId, orden])
+  @@unique([divisionId, orden])
   @@map("rondas_playoff")
 }
 
@@ -411,6 +475,7 @@ model Partido {
   exhibicionVisitante Boolean        @default(false)
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
+  version             Int            @default(0)
 
   jornadaId         String?
   rondaPlayoffId    String?
@@ -426,6 +491,7 @@ model Partido {
   arbitros        PartidoArbitro[]
   tandas          TandaArbitralPartido[]
   refereeAccess   PartidoRefereeAccess[]
+  anotaciones     AnotacionPartido[]
 
   @@index([jornadaId])
   @@index([jornadaId, fecha])
@@ -433,6 +499,31 @@ model Partido {
   @@index([rondaPlayoffId, fecha])
   @@index([canchaId])
   @@map("partidos")
+}
+
+model AnotacionPartido {
+  id             String       @id @default(cuid())
+  partidoId      String
+  jugadorId      String?
+  equipoId       String?
+  ladoMarcador   LadoMarcador
+  cantidad       Int
+  jugadorIdSnapshot String?
+  equipoIdSnapshot  String?
+  jugadorNombre  String?
+  equipoNombre   String?
+  dorsal         Int?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  partido Partido @relation(fields: [partidoId], references: [id], onDelete: Cascade)
+  jugador Jugador? @relation(fields: [jugadorId], references: [id], onDelete: SetNull)
+  equipo  Equipo?  @relation(fields: [equipoId], references: [id], onDelete: SetNull)
+
+  @@index([partidoId, ladoMarcador])
+  @@index([jugadorId])
+  @@index([equipoId])
+  @@map("anotaciones_partido")
 }
 
 model PartidoArbitro {
@@ -513,16 +604,44 @@ model TablaPosicion {
 }
 
 model MediaDeletionJob {
-  id        String   @id @default(cuid())
-  publicId  String
-  attempts  Int      @default(0)
-  lastError String?
-  nextTryAt DateTime @default(now())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String              @id @default(cuid())
+  publicId    String              @unique
+  status      MediaDeletionStatus @default(PENDING)
+  leaseUntil  DateTime?
+  lockedBy    String?
+  attempts    Int                 @default(0)
+  maxAttempts Int                 @default(8)
+  lastError   String?
+  deadAt      DateTime?
+  nextTryAt   DateTime            @default(now())
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
 
-  @@index([nextTryAt])
+  @@index([status, nextTryAt, leaseUntil])
   @@map("media_deletion_jobs")
+}
+
+model MediaAsset {
+  id         String      @id @default(cuid())
+  ownerId    String
+  kind       MediaKind
+  publicId   String      @unique
+  secureUrl  String?
+  format     String?
+  bytes      Int?
+  width      Int?
+  height     Int?
+  status     MediaStatus @default(PENDING)
+  expiresAt  DateTime
+  attachedAt DateTime?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, status])
+  @@index([status, expiresAt])
+  @@map("media_assets")
 }
 
 model DivisionNotificationSubscription {
@@ -530,27 +649,69 @@ model DivisionNotificationSubscription {
   divisionId         String
   oneSignalId        String
   pushSubscriptionId String?
+  userId             String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   division Division @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  user     User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@unique([divisionId, oneSignalId])
+  @@unique([divisionId, pushSubscriptionId])
   @@index([oneSignalId])
+  @@index([divisionId, userId])
+  @@index([pushSubscriptionId])
   @@map("division_notification_subscriptions")
 }
 
 model OneSignalTagCleanupJob {
-  id          String   @id @default(cuid())
+  id          String                 @id @default(cuid())
   oneSignalId String
   tag         String
-  attempts    Int      @default(0)
+  desired     Boolean
+  status      OneSignalTagSyncStatus @default(PENDING)
+  leaseUntil  DateTime?
+  lockedBy    String?
+  attempts    Int                    @default(0)
+  maxAttempts Int                    @default(8)
   lastError   String?
-  nextTryAt   DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  deadAt      DateTime?
+  nextTryAt   DateTime               @default(now())
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
 
   @@unique([oneSignalId, tag])
-  @@index([nextTryAt])
+  @@index([status, nextTryAt, leaseUntil])
   @@map("onesignal_tag_cleanup_jobs")
+}
+
+model NotificationOutbox {
+  id                     String                   @id @default(cuid())
+  eventKey               String                   @unique
+  jornadaId              String?
+  divisionId             String
+  audience               NotificationAudience
+  eventType              NotificationEventType  @default(JORNADA_GENERATED)
+  aggregationKey         String?                 @unique
+  payload                Json?
+  targetUserIds          Json?
+  providerIdempotencyKey String                   @unique
+  status                 NotificationOutboxStatus @default(PENDING)
+  attempts               Int                      @default(0)
+  maxAttempts            Int                      @default(8)
+  nextAttemptAt          DateTime                 @default(now())
+  leaseUntil             DateTime?
+  lockedBy               String?
+  lastErrorCode          String?
+  sentAt                 DateTime?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+
+  jornada  Jornada? @relation(fields: [jornadaId], references: [id], onDelete: SetNull)
+  division Division @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt, leaseUntil])
+  @@index([jornadaId])
+  @@index([divisionId, audience])
+  @@map("notification_outbox")
 }

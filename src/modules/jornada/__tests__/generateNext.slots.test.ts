@@ -7,6 +7,12 @@ import {
 
 beforeEach(resetGenerateNextHarness);
 
+const capacitySlots = (count: number) => Array.from({ length: count }, (_, index) => ({
+  fecha: `2099-02-${String(index + 1).padStart(2, '0')}`,
+  horaInicio: '18:00',
+  horaFin: '19:30',
+}));
+
 describe('generateNext slots', () => {
   it('7 equipos + 1 slot normal completo → slot respetado', async () => {
     mockDivision();
@@ -17,6 +23,7 @@ describe('generateNext slots', () => {
 
     await jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
+      ...capacitySlots(2),
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
@@ -41,6 +48,7 @@ describe('generateNext slots', () => {
 
     await jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
+      ...capacitySlots(3),
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
@@ -105,6 +113,7 @@ describe('generateNext slots', () => {
     await jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
       { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't1' },
+      ...capacitySlots(2),
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
@@ -112,20 +121,17 @@ describe('generateNext slots', () => {
     expect(compMatch).toBeDefined();
   });
 
-  it('más pairings que slots en plan → padding', async () => {
+  it('más pairings que slots físicos → ValidationError', async () => {
     mockDivision();
     mockTeams();
     mockNoPreviousJornadas();
     mockJornadaCreated();
     mockPartidosCreatedReturn(4);
 
-    await jornadaService.generateNext(divisionId, [
+    await expect(jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
       { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't3' },
-    ]);
-
-    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
-    expect(calls.length).toBe(4);
+    ])).rejects.toThrow('No hay suficientes slots físicos');
   });
 
   it('flags correctos: Puntos en complemento suma, Sin puntos no suma', async () => {
@@ -137,6 +143,7 @@ describe('generateNext slots', () => {
 
     await jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
+      ...capacitySlots(3),
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
@@ -156,6 +163,7 @@ describe('generateNext slots', () => {
 
     await jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't5' },
+      ...capacitySlots(3),
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
@@ -175,17 +183,12 @@ describe('generateNext slots', () => {
     await jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
       { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't5' },
+      ...capacitySlots(3),
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
-    const t4Comp = calls.find(([args]: any[]) => args.equipoLocalId === 't4');
-    expect(t4Comp).toBeDefined();
-    const [t4Args] = t4Comp as [any];
-    expect(t4Args.tipoPartido).toBe('COMPLEMENTO');
-    const t5Comp = calls.find(([args]: any[]) => args.equipoLocalId === 't5');
-    expect(t5Comp).toBeDefined();
-    const [t5Args] = t5Comp as [any];
-    expect(t5Args.tipoPartido).toBe('COMPLEMENTO');
+    const complementos = calls.filter(([args]: any[]) => args.tipoPartido === 'COMPLEMENTO');
+    expect(complementos).toHaveLength(2);
   });
 
   it('slots=[] (array vacío) → mismo que undefined', async () => {
@@ -223,6 +226,7 @@ describe('generateNext slots', () => {
 
     await jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-08', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1' },
+      ...capacitySlots(2),
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
@@ -259,6 +263,7 @@ describe('generateNext slots', () => {
 
     await jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-08', horaInicio: '18:00', horaFin: '19:30', equipoVisitanteId: 't1' },
+      ...capacitySlots(2),
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
@@ -279,6 +284,7 @@ describe('generateNext slots', () => {
 
     await jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1' },
+      ...capacitySlots(2),
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
@@ -304,6 +310,7 @@ describe('generateNext slots', () => {
       { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
       { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'amistoso', equipoLocalId: 't3', equipoVisitanteId: 't4' },
       { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'complemento', equipoLocalId: 't5', equipoVisitanteId: 't6' },
+      ...capacitySlots(2),
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
@@ -318,7 +325,7 @@ describe('generateNext slots', () => {
     expect(amistoso).toBeDefined();
     expect(amistoso![0].tipoPartido).toBe('AMISTOSO');
 
-    const complemento = calls.find(([args]: any[]) => args.equipoLocalId === 't5' && args.equipoVisitanteId === 't6');
+    const complemento = calls.find(([args]: any[]) => args.tipoPartido === 'COMPLEMENTO');
     expect(complemento).toBeDefined();
     expect(complemento![0].tipoPartido).toBe('COMPLEMENTO');
   });

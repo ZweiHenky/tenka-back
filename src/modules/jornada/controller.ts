@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { jornadaService } from './service';
-import { createSchema, updateSchema } from './validator';
+import { generateNextSchema, idempotencyKeySchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 
@@ -22,22 +22,20 @@ export const jornadaController = {
     } catch (e) { next(e); }
   },
 
-  async create(req: Request, res: Response, next: NextFunction) {
-    try { const p = createSchema.safeParse(req.body); if (!p.success) throw new ValidationError(p.error.issues[0].message); created(res, await jornadaService.create(p.data, req.user!), 'Jornada creada exitosamente'); } catch (e) { next(e); }
-  },
-
-  async update(req: Request, res: Response, next: NextFunction) {
-    try { const p = updateSchema.safeParse(req.body); if (!p.success) throw new ValidationError(p.error.issues[0].message); ok(res, await jornadaService.update(req.params.id, p.data, req.user!), 'Jornada actualizada exitosamente'); } catch (e) { next(e); }
-  },
-
   async delete(req: Request, res: Response, next: NextFunction) {
     try { await jornadaService.delete(req.params.id, req.user!); noContent(res); } catch (e) { next(e); }
   },
 
   async generateNext(req: Request, res: Response, next: NextFunction) {
     try {
-      const jornada = await jornadaService.generateNext(req.params.divisionId, req.user!, req.body.slots, req.body.equipoIds, req.body.descansoEquipoId);
-      created(res, jornada, 'Jornada generada exitosamente');
+      const parsed = generateNextSchema.safeParse(req.body);
+      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      const parsedKey = idempotencyKeySchema.safeParse(req.get('Idempotency-Key'));
+      if (!parsedKey.success) throw new ValidationError(parsedKey.error.issues[0].message);
+      const jornada = await jornadaService.generateNext(req.params.divisionId, req.user!, parsed.data.slots, parsed.data.equipoIds, parsed.data.descansoEquipoId, parsedKey.data);
+      const { idempotencyReplayed, ...response } = jornada;
+      if (idempotencyReplayed) ok(res, response, 'Jornada generada previamente');
+      else created(res, response, 'Jornada generada exitosamente');
     } catch (e) { next(e); }
   },
 };

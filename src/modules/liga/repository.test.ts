@@ -36,6 +36,7 @@ describe('consultas de lectura de liga', () => {
         divisiones: expect.objectContaining({
           where: { estadoLiga: { nombre: { not: 'Borrador' } } },
         }),
+        canchas: expect.objectContaining({ where: { activa: true } }),
       }),
     }));
   });
@@ -60,6 +61,9 @@ describe('consultas de lectura de liga', () => {
         { liga: { userId: owner.id } },
       ],
     });
+    expect(query.include.canchas.where).toEqual({
+      OR: [{ activa: true }, { liga: { userId: owner.id } }],
+    });
     expect(result).not.toHaveProperty('user');
   });
 
@@ -73,6 +77,7 @@ describe('consultas de lectura de liga', () => {
       where: { id: 'liga-1' },
       include: { user: false, divisiones: { where: undefined } },
     });
+    expect(mocks.ligaFindFirst.mock.calls[0][0].include.canchas).not.toHaveProperty('where');
   });
 
   it.each([
@@ -88,7 +93,7 @@ describe('consultas de lectura de liga', () => {
       where,
       select: {
         canchas: {
-          select: { id: true, nombre: true, activa: true, createdAt: true, updatedAt: true, ligaId: true },
+          select: { id: true, nombre: true, nombreNormalizado: true, activa: true, createdAt: true, updatedAt: true, ligaId: true },
         },
       },
     });
@@ -109,7 +114,7 @@ describe('consultas de lectura de liga', () => {
       canchaPublicId: true,
       multiplesCanchas: true,
       usaArbitros: true,
-      canchas: { where: { activa: true }, select: { nombre: true } },
+      canchas: { select: { id: true, nombre: true, nombreNormalizado: true, activa: true } },
       arbitros: { where: { activo: true }, select: { nombre: true } },
     }],
     ['eliminacion', 'findDeleteContext', {
@@ -150,6 +155,7 @@ describe('consultas de lectura de liga', () => {
     mocks.ligaFindFirst.mockResolvedValue({
       id: 'liga-1',
       nombre: 'Liga Centro',
+      multiplesCanchas: true,
       divisiones: [
         {
           id: 'division-1',
@@ -184,6 +190,7 @@ describe('consultas de lectura de liga', () => {
     expect(mocks.ligaFindFirst).toHaveBeenCalledTimes(1);
     const query = mocks.ligaFindFirst.mock.calls[0][0];
     expect(query.where).toEqual({ id: 'liga-1', userId: owner.id });
+    expect(query.select.multiplesCanchas).toBe(true);
     expect(query.select.divisiones).toMatchObject({
       orderBy: [{ nombre: 'asc' }, { id: 'asc' }],
       select: {
@@ -201,6 +208,7 @@ describe('consultas de lectura de liga', () => {
     });
     expect(query.select.divisiones.select.jornadas.select.partidos.select).not.toHaveProperty('arbitros');
     expect(result?.divisiones[0].categoria).toEqual({ id: 'categoria-1', nombre: 'Libre' });
+    expect(result?.multiplesCanchas).toBe(true);
     expect(result?.divisiones[0].jornadas[0].partidos[0]).not.toHaveProperty('arbitros');
     expect(result?.divisiones[1].jornadas).toEqual([]);
   });

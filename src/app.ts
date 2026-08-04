@@ -31,6 +31,8 @@ import { jugadorRouter } from './modules/jugador/routes';
 import { mediaRouter } from './modules/media/routes';
 import { notificationSubscriptionRouter } from './modules/notification-subscription/routes';
 import { refereeAccessRouter } from './modules/referee-access/routes';
+import { disponibilidadCanchaRouter } from './modules/disponibilidad-cancha/routes';
+import { goleadoresRouter } from './modules/goleadores/routes';
 
 export function createApp() {
   const app = express();
@@ -77,6 +79,7 @@ export function createApp() {
   });
 
   app.use('/api/categorias', categoriaRouter);
+  app.use('/api/ligas', disponibilidadCanchaRouter);
   app.use('/api/ligas', ligaRouter);
   app.use('/api/tipos', tipoRouter);
   app.use('/api/ubicaciones', ubicacionRouter);
@@ -95,6 +98,7 @@ export function createApp() {
   app.use('/api/media', mediaRouter);
   app.use('/api/notification-subscriptions', notificationSubscriptionRouter);
   app.use('/api/referee', refereeAccessRouter);
+  app.use('/api/goleadores', goleadoresRouter);
 
   app.use((_req, _res, next) => next(new NotFoundError('Ruta')));
 

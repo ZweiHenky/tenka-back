@@ -3,8 +3,22 @@ import { z } from 'zod';
 const nombreSchema = z.string().trim().min(1).max(20);
 const descripcionSchema = z.string().max(150);
 
-const canchaItemSchema = z.object({
+const createCanchaItemSchema = z.object({
   nombre: z.string().trim().min(1).max(50),
+});
+
+const updateCanchaItemSchema = z.object({
+  id: z.string().min(1).optional(),
+  nombre: z.string().trim().min(1).max(50).optional(),
+  activa: z.boolean().optional(),
+}).superRefine((cancha, ctx) => {
+  if (!cancha.id && !cancha.nombre) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['nombre'],
+      message: 'Una cancha nueva debe tener nombre',
+    });
+  }
 });
 
 const arbitroItemSchema = z.object({
@@ -12,10 +26,11 @@ const arbitroItemSchema = z.object({
 });
 
 function validateCanchas(
-  data: { multiplesCanchas?: boolean; canchas?: { nombre: string }[] },
+  data: { multiplesCanchas?: boolean; canchas?: { nombre?: string; activa?: boolean }[] },
   ctx: z.RefinementCtx,
 ) {
-  if (data.multiplesCanchas && (data.canchas?.length ?? 0) < 2) {
+  const activeNamed = data.canchas?.filter((cancha) => cancha.activa !== false && cancha.nombre) ?? [];
+  if (data.multiplesCanchas && activeNamed.length < 2) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['canchas'],
@@ -24,7 +39,8 @@ function validateCanchas(
   }
 
   if (data.canchas) {
-    const nombres = data.canchas.map((cancha) => cancha.nombre.toLocaleLowerCase());
+    const nombres = data.canchas
+      .flatMap((cancha) => cancha.nombre ? [cancha.nombre.toLowerCase()] : []);
     if (new Set(nombres).size !== nombres.length) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -62,12 +78,10 @@ function validateArbitros(
 export const createLigaSchema = z.object({
   nombre: nombreSchema,
   descripcion: descripcionSchema,
-  logo: z.string().optional(),
-  logoPublicId: z.string().optional(),
-  cancha: z.string().optional(),
-  canchaPublicId: z.string().optional(),
+  logoAssetId: z.string().min(1).nullable().optional(),
+  coverAssetId: z.string().min(1).nullable().optional(),
   multiplesCanchas: z.boolean().optional(),
-  canchas: z.array(canchaItemSchema).optional(),
+  canchas: z.array(createCanchaItemSchema).optional(),
   usaArbitros: z.boolean().optional(),
   arbitros: z.array(arbitroItemSchema).optional(),
   ubicacionId: z.string(),
@@ -76,27 +90,25 @@ export const createLigaSchema = z.object({
 export const updateLigaSchema = z.object({
   nombre: nombreSchema.optional(),
   descripcion: descripcionSchema.optional(),
-  logo: z.string().optional(),
-  logoPublicId: z.string().optional(),
-  cancha: z.string().optional(),
-  canchaPublicId: z.string().optional(),
+  logoAssetId: z.string().min(1).nullable().optional(),
+  coverAssetId: z.string().min(1).nullable().optional(),
   multiplesCanchas: z.boolean().optional(),
-  canchas: z.array(canchaItemSchema).optional(),
+  canchas: z.array(updateCanchaItemSchema).optional(),
   usaArbitros: z.boolean().optional(),
   arbitros: z.array(arbitroItemSchema).optional(),
   ubicacionId: z.string().optional(),
 }).superRefine((data, ctx) => {
-  if (data.canchas) validateCanchas(data, ctx);
+  if (data.canchas) validateCanchas({ ...data, multiplesCanchas: undefined }, ctx);
 }).superRefine((data, ctx) => {
   if (data.arbitros) validateArbitros(data, ctx);
 });
 
 export const createCanchaSchema = z.object({
-  nombre: z.string().min(1).max(50),
+  nombre: z.string().trim().min(1).max(50),
 });
 
 export const updateCanchaSchema = z.object({
-  nombre: z.string().min(1).max(50).optional(),
+  nombre: z.string().trim().min(1).max(50).optional(),
   activa: z.boolean().optional(),
 });
 

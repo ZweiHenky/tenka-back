@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   divisionId, jornadaRepository, jornadaService, mockDivision, mockJornadaCreated,
-  mockNoPreviousJornadas, mockTeams, notificationService, partidoRepository,
+  mockNoPreviousJornadas, mockTeams, partidoRepository,
   prisma, resetGenerateNextHarness,
 } from './support/generateNextHarness';
 
@@ -44,22 +44,34 @@ describe('generateNext playoff mode — amistosos auto-fill', () => {
     });
   }
 
-  it('incluye eliminatorias en conflictos de la misma cancha y excluye el propio partido de la consulta', async () => {
+  it('rejects a slot without an explicit friendly or playoff type', async () => {
     mockDivision({ maxEquipos: 10, diasPartido: null });
+    mockPlayoffMode();
+
+    await expect(jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30' },
+    ])).rejects.toThrow('Solo se permiten partidos amistosos o de eliminatoria');
+  });
+
+  it('incluye eliminatorias en conflictos de la misma cancha y excluye el propio partido de la consulta', async () => {
+    mockDivision({ maxEquipos: 10, diasPartido: null, multiplesCanchas: true });
     mockPlayoffMode();
     mockTenTeams();
     mockEliminatoriaPartidos();
     mockNoPreviousJornadas();
     mockJornadaCreated();
-    (prisma.ligaCancha.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'c1', nombre: 'Cancha 1' }]);
+    (prisma.ligaCancha.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: 'c1', nombre: 'Cancha 1' },
+      { id: 'c2', nombre: 'Cancha 2' },
+    ]);
     (prisma.partido.findMany as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce([{ id: 'p1', equipoLocalId: 't1', equipoVisitanteId: 't2', jornadaId: null }])
       .mockResolvedValueOnce([]);
 
     await expect(jornadaService.generateNext(divisionId, [
       { ...ELIM_SLOTS[0], canchaId: 'c1' },
-      { fecha: '2099-01-01', horaInicio: '18:30', horaFin: '19:00', tipo: 'amistoso', equipoLocalId: 't3', equipoVisitanteId: 't4', canchaId: 'c1' },
-    ])).rejects.toThrow('horarios solapados');
+      { fecha: '2099-01-01', horaInicio: '18:30', horaFin: '20:00', tipo: 'amistoso', equipoLocalId: 't3', equipoVisitanteId: 't4', canchaId: 'c1' },
+    ])).rejects.toThrow('ya tiene otro partido programado');
 
     expect(prisma.partido.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: { notIn: ['p1'] } }),
@@ -321,7 +333,7 @@ describe('generateNext playoff mode — amistosos auto-fill', () => {
   });
 
   it('amistosos automáticos no repiten una pareja de la jornada anterior', async () => {
-    mockDivision({ maxEquipos: 4, diasPartido: null });
+    mockDivision({ maxEquipos: 4, diasPartido: null, duracionPartido: 60 });
     mockPlayoffMode();
     mockTeams(['t1', 't2', 't3', 't4']);
     (jornadaRepository.findByDivision as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -343,7 +355,7 @@ describe('generateNext playoff mode — amistosos auto-fill', () => {
   });
 
   it('rechaza un amistoso manual repetido mientras quedan parejas nuevas', async () => {
-    mockDivision({ maxEquipos: 4, diasPartido: null });
+    mockDivision({ maxEquipos: 4, diasPartido: null, duracionPartido: 60 });
     mockPlayoffMode();
     mockTeams(['t1', 't2', 't3', 't4']);
     (jornadaRepository.findByDivision as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -360,7 +372,7 @@ describe('generateNext playoff mode — amistosos auto-fill', () => {
   });
 
   it('inicia un nuevo ciclo amistoso después de agotar todas las parejas', async () => {
-    mockDivision({ maxEquipos: 4, diasPartido: null });
+    mockDivision({ maxEquipos: 4, diasPartido: null, duracionPartido: 60 });
     mockPlayoffMode();
     mockTeams(['t1', 't2', 't3', 't4']);
     const allPairs = [
@@ -412,6 +424,26 @@ describe('generateNext playoff mode — amistosos auto-fill', () => {
     expect(prisma.$transaction).toHaveBeenCalledOnce();
     expect(prisma.partido.deleteMany).not.toHaveBeenCalled();
     expect(jornadaRepository.delete).not.toHaveBeenCalled();
-    expect(notificationService.notifyJornadaGenerated).not.toHaveBeenCalled();
+    expect(prisma.notificationOutbox.createMany).not.toHaveBeenCalled();
+  });
+
+  it('recalcula si un partido de playoff deja de estar libre bajo el lock', async () => {
+    mockDivision({ maxEquipos: 10, diasPartido: null });
+    mockPlayoffMode();
+    mockTenTeams();
+    mockEliminatoriaPartidos();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    (prisma.partido.updateMany as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValue({ count: 1 });
+
+    await jornadaService.generateNext(divisionId, ELIM_SLOTS);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.partido.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'p1', jornadaId: null },
+    }));
+    expect(prisma.notificationOutbox.createMany).toHaveBeenCalledOnce();
   });
 });

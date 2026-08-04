@@ -4,7 +4,10 @@ import type { JornadaRepository, PaginatedResult } from './repository.interface'
 import type { AuthenticatedUser } from '../../types/auth';
 import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 
-const exposeArbitros = (jornada: any): JornadaEntity => ({ ...jornada, partidos: jornada.partidos?.map((partido: any) => ({ ...partido, arbitros: partido.arbitros?.map((row: any) => row.arbitro) })) });
+const exposeArbitros = (jornada: any): JornadaEntity => {
+  const { generationKey: _generationKey, generationRequestHash: _generationRequestHash, ...publicJornada } = jornada;
+  return { ...publicJornada, partidos: jornada.partidos?.map((partido: any) => ({ ...partido, arbitros: partido.arbitros?.map((row: any) => row.arbitro) })) };
+};
 
 const partidosInclude = {
   orderBy: { fecha: 'asc' as const },
@@ -18,7 +21,7 @@ const partidosInclude = {
 
 export const jornadaRepository: JornadaRepository = {
   async findAll(): Promise<JornadaEntity[]> {
-    return prisma.jornada.findMany();
+    return (await prisma.jornada.findMany()).map(exposeArbitros);
   },
 
   async findById(id: string): Promise<JornadaEntity | null> {
@@ -51,8 +54,8 @@ export const jornadaRepository: JornadaRepository = {
     return { rows: rows.map(exposeArbitros), total };
   },
 
-  async findGenerationHistory(divisionId) {
-    return prisma.jornada.findMany({
+  async findGenerationHistory(divisionId, client) {
+    return (client ?? prisma).jornada.findMany({
       where: { divisionId },
       orderBy: { numero: 'desc' },
       select: {
@@ -61,6 +64,7 @@ export const jornadaRepository: JornadaRepository = {
         fechaInicio: true,
         partidos: {
           select: {
+            id: true,
             equipoLocalId: true,
             equipoVisitanteId: true,
             tipoPartido: true,
@@ -88,17 +92,8 @@ export const jornadaRepository: JornadaRepository = {
     return { rows: division.jornadas.map(exposeArbitros), total: division._count.jornadas };
   },
 
-  async findUpdateContext(id: string, actor: AuthenticatedUser) {
-    return prisma.jornada.findFirst({
-      where: actor.rol === 'ADMINISTRADOR'
-        ? { id }
-        : { id, division: { liga: { userId: actor.id } } },
-      select: { id: true },
-    });
-  },
-
-  async findDeleteContext(id: string, actor: AuthenticatedUser) {
-    const jornada = await prisma.jornada.findFirst({
+  async findDeleteContext(id: string, actor: AuthenticatedUser, client) {
+    const jornada = await (client ?? prisma).jornada.findFirst({
       where: actor.rol === 'ADMINISTRADOR'
         ? { id }
         : { id, division: { liga: { userId: actor.id } } },
@@ -106,6 +101,8 @@ export const jornadaRepository: JornadaRepository = {
         divisionId: true,
         division: {
           select: {
+            ligaId: true,
+            liga: { select: { userId: true } },
             jornadas: {
               orderBy: { numero: 'desc' },
               take: 1,
@@ -128,6 +125,8 @@ export const jornadaRepository: JornadaRepository = {
 
     return {
       divisionId: jornada.divisionId,
+      ligaId: jornada.division.ligaId,
+      ligaUserId: jornada.division.liga.userId,
       latestJornadaId: jornada.division.jornadas[0]?.id ?? null,
       hasFinalizados: jornada.partidos.some((partido) => partido.estado === 'FINALIZADO'),
       playoffPartidos: jornada.partidos
@@ -136,14 +135,6 @@ export const jornadaRepository: JornadaRepository = {
         ))
         .map(({ id: partidoId, rondaPlayoffId, llave }) => ({ id: partidoId, rondaPlayoffId, llave })),
     };
-  },
-
-  async create(data: Record<string, unknown>): Promise<JornadaEntity> {
-    return prisma.jornada.create({ data: data as any });
-  },
-
-  async update(id: string, data: Record<string, unknown>): Promise<JornadaEntity> {
-    return prisma.jornada.update({ where: { id }, data });
   },
 
   async delete(id: string): Promise<void> {

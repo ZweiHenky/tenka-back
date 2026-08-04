@@ -45,6 +45,8 @@ function createdRow(equipoId) {
     (0, vitest_1.beforeEach)(() => {
         vitest_1.vi.clearAllMocks();
         db.transaction.mockImplementation(async (callback) => callback({
+            divisionEquipo: { findMany: db.teamsFindMany },
+            partido: { findMany: db.matchesFindMany },
             tablaPosicion: {
                 deleteMany: db.standingsDeleteMany,
                 createMany: db.standingsCreateMany,
@@ -140,10 +142,27 @@ function createdRow(equipoId) {
         mockTiedMatch(5, 4);
         await service_1.tablaPosicionService.recalcular(divisionId);
         (0, vitest_1.expect)(db.transaction).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(db.transaction).toHaveBeenCalledWith(vitest_1.expect.any(Function), { isolationLevel: 'RepeatableRead' });
         (0, vitest_1.expect)(db.standingsDeleteMany).toHaveBeenCalledWith({ where: { divisionId } });
         (0, vitest_1.expect)(db.standingsCreateMany).toHaveBeenCalledOnce();
         (0, vitest_1.expect)(db.standingsCreateMany.mock.invocationCallOrder[0])
             .toBeGreaterThan(db.standingsDeleteMany.mock.invocationCallOrder[0]);
+        (0, vitest_1.expect)(db.teamsFindMany.mock.invocationCallOrder[0])
+            .toBeGreaterThan(db.transaction.mock.invocationCallOrder[0]);
+    });
+    (0, vitest_1.it)('usa directamente el cliente transaccional recibido sin abrir otra transacción', async () => {
+        mockTiedMatch(5, 4);
+        const tx = {
+            divisionEquipo: { findMany: db.teamsFindMany },
+            partido: { findMany: db.matchesFindMany },
+            tablaPosicion: { deleteMany: db.standingsDeleteMany, createMany: db.standingsCreateMany },
+        };
+        await service_1.tablaPosicionService.recalcular(divisionId, tx);
+        (0, vitest_1.expect)(db.transaction).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(db.teamsFindMany).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(db.matchesFindMany).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(db.standingsDeleteMany).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(db.standingsCreateMany).toHaveBeenCalledOnce();
     });
     (0, vitest_1.it)('mantiene un presupuesto constante de consultas aunque aumente el número de equipos', async () => {
         db.teamsFindMany.mockResolvedValue(Array.from({ length: 100 }, (_, index) => ({ equipoId: `team-${index}` })));

@@ -2,14 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   jornadaFindFirst: vi.fn(),
-  jornadaUpdate: vi.fn(),
 }));
 
 vi.mock('../../../config/database', () => ({
   prisma: {
     jornada: {
       findFirst: mocks.jornadaFindFirst,
-      update: mocks.jornadaUpdate,
     },
   },
 }));
@@ -19,55 +17,19 @@ vi.mock('../../tabla-posicion/service', () => ({ tablaPosicionService: {} }));
 vi.mock('../../notification/service', () => ({ notificationService: {} }));
 
 import { jornadaRepository } from '../repository';
-import { jornadaService } from '../service';
 import type { AuthenticatedUser } from '../../../types/auth';
 
 const owner: AuthenticatedUser = { id: 'owner-1', email: 'owner@test.com', rol: 'LIGA' };
-const admin: AuthenticatedUser = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
 describe('jornada private contexts', () => {
-  it('updates with one narrow authorization query and preserves the update response', async () => {
-    const updated = { id: 'j-1', numero: 4, divisionId: 'd-1' };
-    mocks.jornadaFindFirst.mockResolvedValue({ id: 'j-1' });
-    mocks.jornadaUpdate.mockResolvedValue(updated);
-
-    await expect(jornadaService.update('j-1', { numero: 4 }, owner)).resolves.toBe(updated);
-
-    expect(mocks.jornadaFindFirst).toHaveBeenCalledOnce();
-    expect(mocks.jornadaFindFirst).toHaveBeenCalledWith({
-      where: { id: 'j-1', division: { liga: { userId: 'owner-1' } } },
-      select: { id: true },
-    });
-    expect(mocks.jornadaUpdate).toHaveBeenCalledOnce();
-  });
-
-  it('returns 404 and does not update when ownership filtering finds no jornada', async () => {
-    mocks.jornadaFindFirst.mockResolvedValue(null);
-
-    await expect(jornadaService.update('hidden', { numero: 4 }, owner)).rejects.toMatchObject({ statusCode: 404 });
-
-    expect(mocks.jornadaUpdate).not.toHaveBeenCalled();
-  });
-
-  it('allows an admin context lookup without an owner predicate', async () => {
-    mocks.jornadaFindFirst.mockResolvedValue({ id: 'j-1' });
-
-    await jornadaRepository.findUpdateContext('j-1', admin);
-
-    expect(mocks.jornadaFindFirst).toHaveBeenCalledWith({
-      where: { id: 'j-1' },
-      select: { id: true },
-    });
-  });
-
   it('loads deletion authorization, latest ID, and repair fields in one narrow query', async () => {
     mocks.jornadaFindFirst.mockResolvedValue({
       divisionId: 'd-1',
-      division: { jornadas: [{ id: 'j-2' }] },
+      division: { ligaId: 'liga-1', liga: { userId: 'owner-1' }, jornadas: [{ id: 'j-2' }] },
       partidos: [
         { id: 'regular-final', estado: 'FINALIZADO', rondaPlayoffId: null, llave: null },
         { id: 'playoff', estado: 'PROGRAMADO', rondaPlayoffId: 'r-1', llave: 2 },
@@ -83,6 +45,8 @@ describe('jornada private contexts', () => {
         divisionId: true,
         division: {
           select: {
+            ligaId: true,
+            liga: { select: { userId: true } },
             jornadas: { orderBy: { numero: 'desc' }, take: 1, select: { id: true } },
           },
         },
@@ -99,9 +63,21 @@ describe('jornada private contexts', () => {
     });
     expect(result).toEqual({
       divisionId: 'd-1',
+      ligaId: 'liga-1',
+      ligaUserId: 'owner-1',
       latestJornadaId: 'j-2',
       hasFinalizados: true,
       playoffPartidos: [{ id: 'playoff', rondaPlayoffId: 'r-1', llave: 2 }],
     });
+  });
+
+  it('uses the supplied transaction client for the authoritative deletion context', async () => {
+    const transactionFindFirst = vi.fn().mockResolvedValue(null);
+    const tx = { jornada: { findFirst: transactionFindFirst } } as any;
+
+    await jornadaRepository.findDeleteContext('j-2', owner, tx);
+
+    expect(transactionFindFirst).toHaveBeenCalledOnce();
+    expect(mocks.jornadaFindFirst).not.toHaveBeenCalled();
   });
 });

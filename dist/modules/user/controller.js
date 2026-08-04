@@ -12,8 +12,7 @@ const phoneVisibilitySchema = zod_1.z.object({
 });
 const updateMeSchema = zod_1.z.object({
     name: zod_1.z.string().min(1).max(50).optional(),
-    image: zod_1.z.string().nullable().optional(),
-    imagePublicId: zod_1.z.string().nullable().optional(),
+    avatarAssetId: zod_1.z.string().min(1).nullable().optional(),
 });
 exports.userController = {
     async activateLeagueRole(req, res, next) {
@@ -46,16 +45,15 @@ exports.userController = {
             const parsed = updateMeSchema.safeParse(req.body);
             if (!parsed.success)
                 throw new errors_1.ValidationError(parsed.error.issues[0].message);
-            if (parsed.data.image !== undefined) {
-                const old = await database_1.prisma.user.findUnique({ where: { id: req.user.id }, select: { image: true, imagePublicId: true } });
-                if (old && parsed.data.image !== old.image) {
-                    await service_1.mediaService.scheduleImageCleanup(old.image, old.imagePublicId);
-                }
-            }
-            const user = await database_1.prisma.user.update({
-                where: { id: req.user.id },
-                data: parsed.data,
-                select: { id: true, name: true, image: true, imagePublicId: true },
+            const user = await database_1.prisma.$transaction(async (tx) => {
+                await service_1.mediaService.lockAttachmentTarget(tx, 'user', req.user.id);
+                const old = await tx.user.findUniqueOrThrow({ where: { id: req.user.id }, select: { image: true, imagePublicId: true } });
+                const media = await service_1.mediaService.prepareAttachment(tx, parsed.data.avatarAssetId, req.user.id, 'ACCOUNT_AVATAR', old.image, old.imagePublicId);
+                return tx.user.update({
+                    where: { id: req.user.id },
+                    data: { name: parsed.data.name, ...(media && { image: media.url, imagePublicId: media.publicId }) },
+                    select: { id: true, name: true, image: true },
+                });
             });
             (0, response_1.ok)(res, user, 'Perfil actualizado');
         }

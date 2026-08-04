@@ -22,6 +22,15 @@ async function assertDivisionOwner(id, actor) {
     if (!division)
         throw new errors_1.NotFoundError('Division');
 }
+async function getDivisionUpdateContext(id, actor) {
+    const division = await database_1.prisma.division.findFirst({
+        where: (0, authorization_1.isAdmin)(actor) ? { id } : { id, liga: { userId: actor.id } },
+        select: { id: true, ligaId: true, canchaUnicaId: true },
+    });
+    if (!division)
+        throw new errors_1.NotFoundError('Division');
+    return division;
+}
 exports.divisionService = {
     async list(actor) {
         return database_1.prisma.division.findMany({ where: (0, divisionVisibility_1.visibleDivisionWhere)(actor), orderBy: { createdAt: 'desc' } });
@@ -47,10 +56,29 @@ exports.divisionService = {
         return repository_1.divisionRepository.create({ ...data, estadoLigaId });
     },
     async update(id, data, actor) {
-        await assertDivisionOwner(id, actor);
+        const division = await getDivisionUpdateContext(id, actor);
         if (data.ligaId)
             await assertLigaOwner(data.ligaId, actor);
-        return repository_1.divisionRepository.update(id, data);
+        const ligaId = data.ligaId ?? division.ligaId;
+        let updateData = data;
+        if (data.ligaId && data.canchaUnicaId === undefined && division.canchaUnicaId) {
+            updateData = { ...data, canchaUnicaId: null };
+        }
+        if (data.canchaUnicaId) {
+            const cancha = await database_1.prisma.ligaCancha.findFirst({
+                where: { id: data.canchaUnicaId },
+                select: { ligaId: true, activa: true, liga: { select: { multiplesCanchas: true } } },
+            });
+            if (!cancha || cancha.ligaId !== ligaId) {
+                throw new errors_1.ValidationError('La cancha indicada no pertenece a esta liga');
+            }
+            if (!cancha.liga.multiplesCanchas) {
+                throw new errors_1.ValidationError('La liga no tiene múltiples canchas habilitadas');
+            }
+            if (!cancha.activa)
+                throw new errors_1.ValidationError('La cancha seleccionada no está activa');
+        }
+        return repository_1.divisionRepository.update(id, updateData);
     },
     async delete(id, actor) {
         await assertDivisionOwner(id, actor);
@@ -61,10 +89,13 @@ exports.divisionService = {
             });
             if (subscriptions.length) {
                 const tag = `division_${id}`;
-                await tx.oneSignalTagCleanupJob.createMany({
-                    data: subscriptions.map(({ oneSignalId }) => ({ oneSignalId, tag })),
-                    skipDuplicates: true,
-                });
+                for (const { oneSignalId } of subscriptions) {
+                    await tx.oneSignalTagCleanupJob.upsert({
+                        where: { oneSignalId_tag: { oneSignalId, tag } },
+                        create: { oneSignalId, tag, desired: false },
+                        update: { desired: false, status: 'PENDING', attempts: 0, lastError: null, deadAt: null, leaseUntil: null, lockedBy: null, nextTryAt: new Date() },
+                    });
+                }
             }
             await repository_1.divisionRepository.delete(id, tx);
         });

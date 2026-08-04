@@ -4,6 +4,8 @@ import { mediaService } from '../media/service';
 import type { EquipoEntity } from './entity';
 import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
+import { prisma } from '../../config/database';
+import { runInTransaction } from '../../utils/transaction';
 
 const DUPLICATE_NAME_MESSAGE = 'Ya tienes un equipo con ese nombre';
 
@@ -26,14 +28,23 @@ export const equipoService = {
     return t;
   },
 
-  async create(data: { nombre: string; logo?: string; logoPublicId?: string; userId: string }): Promise<EquipoEntity> {
+  async create(data: { nombre: string; logoAssetId?: string | null; userId: string }): Promise<EquipoEntity> {
     const nombre = data.nombre.trim();
     const nombreNormalizado = nombre.toLowerCase();
     if (await equipoRepository.findByNormalizedName(data.userId, nombreNormalizado)) {
       throw new ConflictError(DUPLICATE_NAME_MESSAGE);
     }
     try {
-      return await equipoRepository.create({ ...data, nombre, nombreNormalizado });
+      if (data.logoAssetId === undefined) return await equipoRepository.create({ nombre, nombreNormalizado, userId: data.userId });
+      return await runInTransaction(async (tx) => {
+        const media = data.logoAssetId !== undefined ? await mediaService.prepareAttachment(tx, data.logoAssetId, data.userId, 'TEAM_LOGO') : undefined;
+        return equipoRepository.create({
+            nombre,
+            nombreNormalizado,
+            userId: data.userId,
+            ...(media && { logo: media.url, logoPublicId: media.publicId }),
+        }, tx);
+      });
     } catch (error) {
       if (isUniqueConstraintError(error)) throw new ConflictError(DUPLICATE_NAME_MESSAGE);
       throw error;
@@ -43,7 +54,7 @@ export const equipoService = {
   async update(id: string, data: Record<string, unknown>, actor: AuthenticatedUser): Promise<EquipoEntity> {
     const old = await this.getById(id);
     assertOwnerOrAdmin(actor, old.userId, 'Equipo');
-    const updateData = { ...data };
+    const { logoAssetId, ...updateData } = data as { logoAssetId?: string | null; [key: string]: unknown };
     if (typeof data.nombre === 'string') {
       const nombre = data.nombre.trim();
       const nombreNormalizado = nombre.toLowerCase();
@@ -55,13 +66,16 @@ export const equipoService = {
     }
     let updated: EquipoEntity;
     try {
-      updated = await equipoRepository.update(id, updateData);
+      if (logoAssetId === undefined) return await equipoRepository.update(id, updateData);
+      updated = await runInTransaction(async (tx) => {
+        await mediaService.lockAttachmentTarget(tx, 'equipo', id);
+        const current = await tx.equipo.findUniqueOrThrow({ where: { id }, select: { logo: true, logoPublicId: true } });
+        const media = logoAssetId !== undefined ? await mediaService.prepareAttachment(tx, logoAssetId, actor.id, 'TEAM_LOGO', current.logo, current.logoPublicId) : undefined;
+        return equipoRepository.update(id, { ...updateData, ...(media && { logo: media.url, logoPublicId: media.publicId }) }, tx);
+      });
     } catch (error) {
       if (isUniqueConstraintError(error)) throw new ConflictError(DUPLICATE_NAME_MESSAGE);
       throw error;
-    }
-    if (data.logo !== undefined && data.logo !== old.logo) {
-      await mediaService.scheduleImageCleanup(old.logo, old.logoPublicId);
     }
     return updated;
   },
@@ -69,7 +83,13 @@ export const equipoService = {
   async delete(id: string, actor: AuthenticatedUser): Promise<void> {
     const old = await this.getById(id);
     assertOwnerOrAdmin(actor, old.userId, 'Equipo');
-    await equipoRepository.delete(id);
-    await mediaService.scheduleImageCleanup(old.logo, old.logoPublicId);
+    if (!old.logo) {
+      await equipoRepository.delete(id);
+      return;
+    }
+    await runInTransaction(async (tx) => {
+      await mediaService.scheduleImageCleanup(old.logo, old.logoPublicId, tx);
+      await equipoRepository.delete(id, tx);
+    });
   },
 };
