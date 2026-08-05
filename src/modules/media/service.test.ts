@@ -60,9 +60,8 @@ describe('mediaService upload lifecycle', () => {
     expect(result.uploadParams).toMatchObject({
       public_id: result.publicId,
       allowed_formats: 'jpg,jpeg,png,webp,heic',
-      max_file_size: 5 * 1024 * 1024,
       overwrite: false,
-      transformation: 'c_fill,g_auto,w_200,h_200',
+      transformation: 'c_fill,g_center,w_200,h_200',
     });
     expect(mocks.sign).toHaveBeenCalledWith(result.uploadParams, 'test-cloudinary-api-secret');
     expect(mocks.assetCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ ownerId: 'user-1', kind: 'TEAM_LOGO', publicId: result.publicId }) }));

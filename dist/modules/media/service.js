@@ -63,13 +63,13 @@ async function createUploadIntent(ownerId, kind) {
     const policy = POLICIES[kind];
     const publicId = `myleague/${env_1.env.APP_ENV}/${ownerId}/${kind.toLowerCase()}/${(0, crypto_1.randomUUID)()}`;
     const timestamp = Math.floor(Date.now() / 1000);
+    const gravity = kind === 'LEAGUE_LOGO' || kind === 'TEAM_LOGO' ? 'g_center' : 'g_auto';
     const uploadParams = {
         public_id: publicId,
         timestamp,
         allowed_formats: ALLOWED_FORMATS.join(','),
-        max_file_size: MAX_BYTES,
         overwrite: false,
-        transformation: `c_fill,g_auto,w_${policy.width},h_${policy.height}`,
+        transformation: `c_fill,${gravity},w_${policy.width},h_${policy.height}`,
     };
     const signature = cloudinary_1.v2.utils.api_sign_request(uploadParams, env_1.env.CLOUDINARY_API_SECRET);
     const intent = await database_1.prisma.mediaAsset.create({
