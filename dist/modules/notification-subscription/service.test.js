@@ -31,8 +31,19 @@ const service_1 = require("./service");
     (0, vitest_1.it)('atomically subscribes with the device identity and authenticated user', async () => {
         await service_1.notificationSubscriptionService.subscribe({ divisionId: 'division-1', oneSignalId: 'one-1', pushSubscriptionId: 'push-1', userId: 'user-1' });
         (0, vitest_1.expect)(mocks.subscriptionUpsert).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
-            where: { divisionId_pushSubscriptionId: { divisionId: 'division-1', pushSubscriptionId: 'push-1' } },
-            create: vitest_1.expect.objectContaining({ userId: 'user-1', pushSubscriptionId: 'push-1' }),
+            where: { divisionId_oneSignalId: { divisionId: 'division-1', oneSignalId: 'one-1' } },
+            create: vitest_1.expect.objectContaining({ userId: 'user-1', oneSignalId: 'one-1', pushSubscriptionId: 'push-1' }),
+            update: vitest_1.expect.objectContaining({ pushSubscriptionId: 'push-1', userId: 'user-1' }),
+        }));
+    });
+    (0, vitest_1.it)('updates the push subscription id when the same device resubscribes with a rotated id', async () => {
+        await service_1.notificationSubscriptionService.subscribe({ divisionId: 'division-1', oneSignalId: 'one-1', pushSubscriptionId: 'push-2' });
+        (0, vitest_1.expect)(mocks.subscriptionUpsert).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
+            where: { divisionId_oneSignalId: { divisionId: 'division-1', oneSignalId: 'one-1' } },
+            update: vitest_1.expect.objectContaining({ pushSubscriptionId: 'push-2' }),
+        }));
+        (0, vitest_1.expect)(mocks.subscriptionUpsert).not.toHaveBeenCalledWith(vitest_1.expect.objectContaining({
+            where: { divisionId_pushSubscriptionId: vitest_1.expect.anything() },
         }));
     });
     (0, vitest_1.it)('uses idempotent device deleteMany and does not swallow failures', async () => {

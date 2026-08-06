@@ -18,7 +18,7 @@ export const notificationSubscriptionService = {
       if (!division) throw new NotFoundError('Division');
 
       const subscription = await tx.divisionNotificationSubscription.upsert({
-        where: { divisionId_pushSubscriptionId: { divisionId: data.divisionId, pushSubscriptionId: data.pushSubscriptionId } },
+        where: { divisionId_oneSignalId: { divisionId: data.divisionId, oneSignalId: data.oneSignalId } },
         create: {
           divisionId: data.divisionId,
           oneSignalId: data.oneSignalId,
@@ -26,7 +26,7 @@ export const notificationSubscriptionService = {
           userId: data.userId ?? null,
         },
         update: {
-          oneSignalId: data.oneSignalId,
+          pushSubscriptionId: data.pushSubscriptionId,
           ...(data.userId ? { userId: data.userId } : {}),
         },
       });

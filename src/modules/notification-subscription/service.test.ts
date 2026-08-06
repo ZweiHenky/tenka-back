@@ -35,8 +35,20 @@ describe('notification subscriptions by device', () => {
   it('atomically subscribes with the device identity and authenticated user', async () => {
     await notificationSubscriptionService.subscribe({ divisionId: 'division-1', oneSignalId: 'one-1', pushSubscriptionId: 'push-1', userId: 'user-1' });
     expect(mocks.subscriptionUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      where: { divisionId_pushSubscriptionId: { divisionId: 'division-1', pushSubscriptionId: 'push-1' } },
-      create: expect.objectContaining({ userId: 'user-1', pushSubscriptionId: 'push-1' }),
+      where: { divisionId_oneSignalId: { divisionId: 'division-1', oneSignalId: 'one-1' } },
+      create: expect.objectContaining({ userId: 'user-1', oneSignalId: 'one-1', pushSubscriptionId: 'push-1' }),
+      update: expect.objectContaining({ pushSubscriptionId: 'push-1', userId: 'user-1' }),
+    }));
+  });
+
+  it('updates the push subscription id when the same device resubscribes with a rotated id', async () => {
+    await notificationSubscriptionService.subscribe({ divisionId: 'division-1', oneSignalId: 'one-1', pushSubscriptionId: 'push-2' });
+    expect(mocks.subscriptionUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { divisionId_oneSignalId: { divisionId: 'division-1', oneSignalId: 'one-1' } },
+      update: expect.objectContaining({ pushSubscriptionId: 'push-2' }),
+    }));
+    expect(mocks.subscriptionUpsert).not.toHaveBeenCalledWith(expect.objectContaining({
+      where: { divisionId_pushSubscriptionId: expect.anything() },
     }));
   });
 
