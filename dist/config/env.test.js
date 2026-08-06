@@ -37,6 +37,39 @@ const validEnv = {
         (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...validEnv, APP_ENV: 'preview' })).toThrow('PHONE_OTP_MODE');
         (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...validEnv, APP_ENV: 'production', BETTER_AUTH_URL: 'https://api.example.com' })).toThrow('PHONE_OTP_MODE');
     });
+    (0, vitest_1.it)('allows twilio OTP outside local when the twilio vars are set', () => {
+        const withTwilio = {
+            ...validEnv,
+            APP_ENV: 'preview',
+            PHONE_OTP_MODE: 'twilio',
+            TWILIO_ACCOUNT_SID: 'AC00000000000000000000000000000000',
+            TWILIO_AUTH_TOKEN: 'twilio-auth-token',
+            TWILIO_PHONE_NUMBER: '+15551234567',
+        };
+        (0, vitest_1.expect)((0, env_1.parseBackendEnv)(withTwilio).PHONE_OTP_MODE).toBe('twilio');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...validEnv, PHONE_OTP_MODE: 'twilio' })).toThrow('TWILIO_ACCOUNT_SID');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({
+            ...withTwilio,
+            TWILIO_ACCOUNT_SID: undefined,
+        })).toThrow('TWILIO_ACCOUNT_SID');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({
+            ...withTwilio,
+            TWILIO_AUTH_TOKEN: undefined,
+        })).toThrow('TWILIO_AUTH_TOKEN');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({
+            ...withTwilio,
+            TWILIO_PHONE_NUMBER: undefined,
+        })).toThrow('TWILIO_PHONE_NUMBER');
+    });
+    (0, vitest_1.it)('rejects an invalid twilio phone number', () => {
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({
+            ...validEnv,
+            PHONE_OTP_MODE: 'twilio',
+            TWILIO_ACCOUNT_SID: 'AC00000000000000000000000000000000',
+            TWILIO_AUTH_TOKEN: 'twilio-auth-token',
+            TWILIO_PHONE_NUMBER: '15551234567',
+        })).toThrow('TWILIO_PHONE_NUMBER');
+    });
     vitest_1.it.each([
         'http://api.example.com', 'https://localhost:3000', 'https://127.0.0.1',
         'https://10.0.0.1', 'https://172.16.0.1', 'https://192.168.1.1',

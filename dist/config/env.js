@@ -33,13 +33,21 @@ const backendEnvSchema = zod_1.z.object({
     BETTER_AUTH_URL: zod_1.z.url(),
     GOOGLE_CLIENT_ID: requiredString,
     GOOGLE_CLIENT_SECRET: requiredString,
+    APPLE_CLIENT_ID: optionalString(zod_1.z.string().trim().min(1)),
+    APPLE_TEAM_ID: optionalString(zod_1.z.string().trim().min(1)),
+    APPLE_KEY_ID: optionalString(zod_1.z.string().trim().min(1)),
+    APPLE_PRIVATE_KEY: optionalString(zod_1.z.string().trim().min(1)),
+    APPLE_APP_BUNDLE_IDENTIFIER: optionalString(zod_1.z.string().trim().min(1)),
     ONESIGNAL_APP_ID: requiredString,
     ONESIGNAL_REST_API_KEY: requiredString,
     CLOUDINARY_CLOUD_NAME: requiredString,
     CLOUDINARY_API_KEY: requiredString,
     CLOUDINARY_API_SECRET: requiredString,
     CLOUDINARY_DELIVERY_HOST: zod_1.z.string().trim().min(1).default('res.cloudinary.com'),
-    PHONE_OTP_MODE: zod_1.z.enum(['console', 'disabled']),
+    PHONE_OTP_MODE: zod_1.z.enum(['console', 'twilio', 'disabled']),
+    TWILIO_ACCOUNT_SID: optionalString(zod_1.z.string().trim().min(1)),
+    TWILIO_AUTH_TOKEN: optionalString(zod_1.z.string().trim().min(1)),
+    TWILIO_PHONE_NUMBER: optionalString(zod_1.z.string().regex(/^\+[1-9]\d{7,14}$/, 'must be an E.164 phone number')),
     LOG_LEVEL: zod_1.z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
     SENTRY_DSN: optionalString(zod_1.z.url()),
     SENTRY_RELEASE: optionalString(zod_1.z.string().trim().min(1)),
@@ -60,8 +68,19 @@ const backendEnvSchema = zod_1.z.object({
     HTTP_HEADERS_TIMEOUT_MS: zod_1.z.coerce.number().int().min(1000).max(120000).default(35000),
     HTTP_KEEP_ALIVE_TIMEOUT_MS: zod_1.z.coerce.number().int().min(1000).max(60000).default(5000),
 }).superRefine((values, context) => {
-    if (values.APP_ENV !== 'local' && values.PHONE_OTP_MODE !== 'disabled') {
-        context.addIssue({ code: 'custom', path: ['PHONE_OTP_MODE'], message: 'must be disabled outside the local app environment' });
+    if (values.APP_ENV !== 'local' && !['twilio', 'disabled'].includes(values.PHONE_OTP_MODE)) {
+        context.addIssue({ code: 'custom', path: ['PHONE_OTP_MODE'], message: 'must be disabled or twilio outside the local app environment' });
+    }
+    if (values.PHONE_OTP_MODE === 'twilio') {
+        if (!values.TWILIO_ACCOUNT_SID) {
+            context.addIssue({ code: 'custom', path: ['TWILIO_ACCOUNT_SID'], message: 'is required when PHONE_OTP_MODE is twilio' });
+        }
+        if (!values.TWILIO_AUTH_TOKEN) {
+            context.addIssue({ code: 'custom', path: ['TWILIO_AUTH_TOKEN'], message: 'is required when PHONE_OTP_MODE is twilio' });
+        }
+        if (!values.TWILIO_PHONE_NUMBER) {
+            context.addIssue({ code: 'custom', path: ['TWILIO_PHONE_NUMBER'], message: 'is required when PHONE_OTP_MODE is twilio' });
+        }
     }
     if (values.APP_ENV !== 'local' && !values.SENTRY_DSN) {
         context.addIssue({ code: 'custom', path: ['SENTRY_DSN'], message: 'is required outside the local app environment' });

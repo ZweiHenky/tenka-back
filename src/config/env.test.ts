@@ -43,6 +43,41 @@ describe('parseBackendEnv', () => {
     expect(() => parseBackendEnv({ ...validEnv, APP_ENV: 'production', BETTER_AUTH_URL: 'https://api.example.com' })).toThrow('PHONE_OTP_MODE');
   });
 
+  it('allows twilio OTP outside local when the twilio vars are set', () => {
+    const withTwilio = {
+      ...validEnv,
+      APP_ENV: 'preview',
+      PHONE_OTP_MODE: 'twilio',
+      TWILIO_ACCOUNT_SID: 'AC00000000000000000000000000000000',
+      TWILIO_AUTH_TOKEN: 'twilio-auth-token',
+      TWILIO_PHONE_NUMBER: '+15551234567',
+    };
+    expect(parseBackendEnv(withTwilio).PHONE_OTP_MODE).toBe('twilio');
+    expect(() => parseBackendEnv({ ...validEnv, PHONE_OTP_MODE: 'twilio' })).toThrow('TWILIO_ACCOUNT_SID');
+    expect(() => parseBackendEnv({
+      ...withTwilio,
+      TWILIO_ACCOUNT_SID: undefined,
+    })).toThrow('TWILIO_ACCOUNT_SID');
+    expect(() => parseBackendEnv({
+      ...withTwilio,
+      TWILIO_AUTH_TOKEN: undefined,
+    })).toThrow('TWILIO_AUTH_TOKEN');
+    expect(() => parseBackendEnv({
+      ...withTwilio,
+      TWILIO_PHONE_NUMBER: undefined,
+    })).toThrow('TWILIO_PHONE_NUMBER');
+  });
+
+  it('rejects an invalid twilio phone number', () => {
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      PHONE_OTP_MODE: 'twilio',
+      TWILIO_ACCOUNT_SID: 'AC00000000000000000000000000000000',
+      TWILIO_AUTH_TOKEN: 'twilio-auth-token',
+      TWILIO_PHONE_NUMBER: '15551234567',
+    })).toThrow('TWILIO_PHONE_NUMBER');
+  });
+
   it.each([
     'http://api.example.com', 'https://localhost:3000', 'https://127.0.0.1',
     'https://10.0.0.1', 'https://172.16.0.1', 'https://192.168.1.1',
