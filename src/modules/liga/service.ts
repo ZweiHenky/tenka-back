@@ -2,7 +2,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../../utils/error
 import { ligaRepository } from './repository';
 import { mediaService } from '../media/service';
 import { prisma } from '../../config/database';
-import type { LigaEntity, LigaCanchaEntity, LigaArbitroEntity, ProgramacionRecienteLigaDto } from './entity';
+import type { LigaEntity, LigaCanchaEntity, LigaArbitroEntity, ProgramacionRecienteLigaDto, LigaReglaItem } from './entity';
 import type { LigaCanchaWrite, LigaFilterParams, LigaWriteData } from './repository.interface';
 import type { AuthenticatedUser } from '../../types/auth';
 import { runInTransaction } from '../../utils/transaction';
@@ -126,6 +126,7 @@ export const ligaService = {
     canchas?: { nombre: string }[];
     usaArbitros?: boolean;
     arbitros?: { nombre: string }[];
+    reglas?: LigaReglaItem[];
     ubicacionId: string;
     userId: string;
   }): Promise<LigaEntity> {
@@ -172,6 +173,7 @@ export const ligaService = {
     canchas?: Array<{ id?: string; nombre?: string; activa?: boolean }>;
     usaArbitros?: boolean;
     arbitros?: { nombre: string }[];
+    reglas?: LigaReglaItem[];
     ubicacionId?: string;
   }, actor: AuthenticatedUser): Promise<LigaEntity> {
     const old = await ligaRepository.findUpdateContext(id, actor);

@@ -222,6 +222,7 @@ model Liga {
   canchaPublicId    String?
   multiplesCanchas  Boolean  @default(false)
   usaArbitros       Boolean  @default(false)
+  reglas            Json?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

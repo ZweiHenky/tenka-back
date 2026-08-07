@@ -25,6 +25,34 @@ const arbitroItemSchema = z.object({
   nombre: z.string().trim().min(1).max(50),
 });
 
+const reglaItemSchema = z.object({
+  titulo: z.string().trim().min(1, 'El título de la regla es obligatorio').max(60, 'El título no puede superar los 60 caracteres'),
+  detalle: z.string().trim().min(1, 'El detalle de la regla es obligatorio').max(500, 'El detalle no puede superar los 500 caracteres'),
+});
+
+function validateReglas(
+  data: { reglas?: { titulo: string; detalle: string }[] },
+  ctx: z.RefinementCtx,
+) {
+  if (!data.reglas) return;
+  if (data.reglas.length > 30) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['reglas'],
+      message: 'Máximo 30 reglas o directivas',
+    });
+    return;
+  }
+  const titulos = data.reglas.map((regla) => regla.titulo.trim().toLowerCase());
+  if (new Set(titulos).size !== titulos.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['reglas'],
+      message: 'Los títulos de las reglas no pueden repetirse',
+    });
+  }
+}
+
 function validateCanchas(
   data: { multiplesCanchas?: boolean; canchas?: { nombre?: string; activa?: boolean }[] },
   ctx: z.RefinementCtx,
@@ -84,8 +112,9 @@ export const createLigaSchema = z.object({
   canchas: z.array(createCanchaItemSchema).optional(),
   usaArbitros: z.boolean().optional(),
   arbitros: z.array(arbitroItemSchema).optional(),
+  reglas: z.array(reglaItemSchema).max(30).optional(),
   ubicacionId: z.string(),
-}).superRefine(validateCanchas).superRefine(validateArbitros);
+}).superRefine(validateCanchas).superRefine(validateArbitros).superRefine(validateReglas);
 
 export const updateLigaSchema = z.object({
   nombre: nombreSchema.optional(),
@@ -96,11 +125,14 @@ export const updateLigaSchema = z.object({
   canchas: z.array(updateCanchaItemSchema).optional(),
   usaArbitros: z.boolean().optional(),
   arbitros: z.array(arbitroItemSchema).optional(),
+  reglas: z.array(reglaItemSchema).max(30).optional(),
   ubicacionId: z.string().optional(),
 }).superRefine((data, ctx) => {
   if (data.canchas) validateCanchas({ ...data, multiplesCanchas: undefined }, ctx);
 }).superRefine((data, ctx) => {
   if (data.arbitros) validateArbitros(data, ctx);
+}).superRefine((data, ctx) => {
+  if (data.reglas) validateReglas(data, ctx);
 });
 
 export const createCanchaSchema = z.object({

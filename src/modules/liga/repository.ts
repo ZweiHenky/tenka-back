@@ -21,6 +21,14 @@ const ARBITROS_SELECT = {
   select: { id: true, nombre: true, activo: true, createdAt: true, updatedAt: true, ligaId: true },
 } as const;
 
+function toLigaEntity<T>(row: T): LigaEntity {
+  return row as unknown as LigaEntity;
+}
+
+function toLigaEntityList<T>(rows: PromiseLike<T[]> | T[]): Promise<LigaEntity[]> {
+  return Promise.resolve(rows).then((r) => r as unknown as LigaEntity[]);
+}
+
 const PUBLIC_DIVISION_WHERE = { estadoLiga: { nombre: { not: 'Borrador' } } } as const;
 
 const DIVISION_RELATIONS = {
@@ -81,18 +89,22 @@ const BASE_INCLUDE = {
 
 export const ligaRepository: LigaRepository = {
   async findAll(): Promise<LigaEntity[]> {
-    return prisma.liga.findMany({
-      where: { divisiones: { some: { estadoLiga: { nombre: { not: "Borrador" } } } } },
-      orderBy: { createdAt: 'desc' },
-      include: DIVISIONES_INCLUDE_PUBLIC,
-    });
+    return toLigaEntityList(
+      prisma.liga.findMany({
+        where: { divisiones: { some: { estadoLiga: { nombre: { not: "Borrador" } } } } },
+        orderBy: { createdAt: 'desc' },
+        include: DIVISIONES_INCLUDE_PUBLIC,
+      }),
+    );
   },
 
   async findById(id: string): Promise<LigaEntity | null> {
-    return prisma.liga.findUnique({
-      where: { id },
-      include: DIVISIONES_INCLUDE,
-    });
+    return toLigaEntity(
+      prisma.liga.findUnique({
+        where: { id },
+        include: DIVISIONES_INCLUDE,
+      }),
+    );
   },
 
   async findVisibleById(id: string, actor?: AuthenticatedUser): Promise<LigaEntity | null> {
@@ -126,14 +138,16 @@ export const ligaRepository: LigaRepository = {
 
     // Keep the established managed-detail response, which does not expose the user relation.
     if (liga && actor && liga.userId === actor.id) delete (liga as LigaEntity).user;
-    return liga;
+    return toLigaEntity(liga);
   },
 
   async findPublicById(id: string): Promise<LigaEntity | null> {
-    return prisma.liga.findFirst({
-      where: { id, divisiones: { some: { estadoLiga: { nombre: { not: 'Borrador' } } } } },
-      include: DIVISIONES_INCLUDE_PUBLIC,
-    });
+    return toLigaEntity(
+      prisma.liga.findFirst({
+        where: { id, divisiones: { some: { estadoLiga: { nombre: { not: 'Borrador' } } } } },
+        include: DIVISIONES_INCLUDE_PUBLIC,
+      }),
+    );
   },
 
   async findUpdateContext(id: string, actor: AuthenticatedUser) {
@@ -233,15 +247,17 @@ export const ligaRepository: LigaRepository = {
   },
 
   async findByUser(userId: string): Promise<LigaEntity[]> {
-    return prisma.liga.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, include: DIVISIONES_INCLUDE });
+    return toLigaEntityList(prisma.liga.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, include: DIVISIONES_INCLUDE }));
   },
 
   async findPublicByUser(userId: string): Promise<LigaEntity[]> {
-    return prisma.liga.findMany({
-      where: { userId, divisiones: { some: { estadoLiga: { nombre: { not: 'Borrador' } } } } },
-      orderBy: { createdAt: 'desc' },
-      include: DIVISIONES_INCLUDE_PUBLIC,
-    });
+    return toLigaEntityList(
+      prisma.liga.findMany({
+        where: { userId, divisiones: { some: { estadoLiga: { nombre: { not: 'Borrador' } } } } },
+        orderBy: { createdAt: 'desc' },
+        include: DIVISIONES_INCLUDE_PUBLIC,
+      }),
+    );
   },
 
   async findAllPaginated({ page, limit, search, categoriaId, tipoId, estadoLigaId }: LigaFilterParams) {
@@ -273,20 +289,22 @@ export const ligaRepository: LigaRepository = {
       }),
       prisma.liga.count({ where }),
     ]);
-    return { rows, total };
+    return { rows: await toLigaEntityList(rows), total };
   },
 
   async create(data: LigaCreateData, canchas?: LigaCanchaWrite[], arbitros?: { nombre: string }[], tx?: Prisma.TransactionClient): Promise<LigaEntity> {
-    return (tx ?? prisma).liga.create({
-      data: {
-        ...data,
-        canchas: canchas ? {
-          create: canchas.map(({ nombre, nombreNormalizado, activa }) => ({ nombre, nombreNormalizado, activa })),
-        } : undefined,
-        arbitros: arbitros ? { create: arbitros } : undefined,
-      },
-      include: BASE_INCLUDE,
-    });
+    return toLigaEntity(
+      (tx ?? prisma).liga.create({
+        data: {
+          ...data,
+          canchas: canchas ? {
+            create: canchas.map(({ nombre, nombreNormalizado, activa }) => ({ nombre, nombreNormalizado, activa })),
+          } : undefined,
+          arbitros: arbitros ? { create: arbitros } : undefined,
+        },
+        include: BASE_INCLUDE,
+      }),
+    );
   },
 
   async update(id: string, data: LigaWriteData, canchas?: LigaCanchaWrite[], arbitros?: { nombre: string }[], clearDivisionCourts?: boolean, transaction?: Prisma.TransactionClient): Promise<LigaEntity> {
@@ -330,11 +348,13 @@ export const ligaRepository: LigaRepository = {
         await tx.ligaArbitro.deleteMany({ where: { ligaId: id } });
         await tx.ligaArbitro.createMany({ data: arbitros.map((arbitro) => ({ ...arbitro, ligaId: id })) });
       }
-      return tx.liga.update({
-        where: { id },
-        data,
-        include: BASE_INCLUDE,
-      });
+      return toLigaEntity(
+        tx.liga.update({
+          where: { id },
+          data: data as Prisma.LigaUncheckedUpdateInput,
+          include: BASE_INCLUDE,
+        }),
+      );
     };
     return transaction ? execute(transaction) : prisma.$transaction(execute);
   },

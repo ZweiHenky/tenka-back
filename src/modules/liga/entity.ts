@@ -61,6 +61,11 @@ export interface ProgramacionRecienteLigaDto {
   }>;
 }
 
+export interface LigaReglaItem {
+  titulo: string;
+  detalle: string;
+}
+
 export interface LigaEntity {
   id: string;
   nombre: string;
@@ -72,6 +77,7 @@ export interface LigaEntity {
   canchaPublicId: string | null;
   multiplesCanchas: boolean;
   usaArbitros: boolean;
+  reglas?: LigaReglaItem[] | null;
   createdAt: Date;
   updatedAt: Date;
   ubicacionId: string;

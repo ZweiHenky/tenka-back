@@ -15,6 +15,12 @@ const CANCHAS_PUBLIC_SELECT = {
 const ARBITROS_SELECT = {
     select: { id: true, nombre: true, activo: true, createdAt: true, updatedAt: true, ligaId: true },
 };
+function toLigaEntity(row) {
+    return row;
+}
+function toLigaEntityList(rows) {
+    return Promise.resolve(rows).then((r) => r);
+}
 const PUBLIC_DIVISION_WHERE = { estadoLiga: { nombre: { not: 'Borrador' } } };
 const DIVISION_RELATIONS = {
     categoria: { select: { id: true, nombre: true } },
@@ -70,17 +76,17 @@ const BASE_INCLUDE = {
 };
 exports.ligaRepository = {
     async findAll() {
-        return database_1.prisma.liga.findMany({
+        return toLigaEntityList(database_1.prisma.liga.findMany({
             where: { divisiones: { some: { estadoLiga: { nombre: { not: "Borrador" } } } } },
             orderBy: { createdAt: 'desc' },
             include: DIVISIONES_INCLUDE_PUBLIC,
-        });
+        }));
     },
     async findById(id) {
-        return database_1.prisma.liga.findUnique({
+        return toLigaEntity(database_1.prisma.liga.findUnique({
             where: { id },
             include: DIVISIONES_INCLUDE,
-        });
+        }));
     },
     async findVisibleById(id, actor) {
         const isAdmin = actor?.rol === 'ADMINISTRADOR';
@@ -112,13 +118,13 @@ exports.ligaRepository = {
         // Keep the established managed-detail response, which does not expose the user relation.
         if (liga && actor && liga.userId === actor.id)
             delete liga.user;
-        return liga;
+        return toLigaEntity(liga);
     },
     async findPublicById(id) {
-        return database_1.prisma.liga.findFirst({
+        return toLigaEntity(database_1.prisma.liga.findFirst({
             where: { id, divisiones: { some: { estadoLiga: { nombre: { not: 'Borrador' } } } } },
             include: DIVISIONES_INCLUDE_PUBLIC,
-        });
+        }));
     },
     async findUpdateContext(id, actor) {
         return database_1.prisma.liga.findFirst({
@@ -210,14 +216,14 @@ exports.ligaRepository = {
         });
     },
     async findByUser(userId) {
-        return database_1.prisma.liga.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, include: DIVISIONES_INCLUDE });
+        return toLigaEntityList(database_1.prisma.liga.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, include: DIVISIONES_INCLUDE }));
     },
     async findPublicByUser(userId) {
-        return database_1.prisma.liga.findMany({
+        return toLigaEntityList(database_1.prisma.liga.findMany({
             where: { userId, divisiones: { some: { estadoLiga: { nombre: { not: 'Borrador' } } } } },
             orderBy: { createdAt: 'desc' },
             include: DIVISIONES_INCLUDE_PUBLIC,
-        });
+        }));
     },
     async findAllPaginated({ page, limit, search, categoriaId, tipoId, estadoLigaId }) {
         const divisionFilters = [];
@@ -250,10 +256,10 @@ exports.ligaRepository = {
             }),
             database_1.prisma.liga.count({ where }),
         ]);
-        return { rows, total };
+        return { rows: await toLigaEntityList(rows), total };
     },
     async create(data, canchas, arbitros, tx) {
-        return (tx ?? database_1.prisma).liga.create({
+        return toLigaEntity((tx ?? database_1.prisma).liga.create({
             data: {
                 ...data,
                 canchas: canchas ? {
@@ -262,7 +268,7 @@ exports.ligaRepository = {
                 arbitros: arbitros ? { create: arbitros } : undefined,
             },
             include: BASE_INCLUDE,
-        });
+        }));
     },
     async update(id, data, canchas, arbitros, clearDivisionCourts, transaction) {
         const execute = async (tx) => {
@@ -304,11 +310,11 @@ exports.ligaRepository = {
                 await tx.ligaArbitro.deleteMany({ where: { ligaId: id } });
                 await tx.ligaArbitro.createMany({ data: arbitros.map((arbitro) => ({ ...arbitro, ligaId: id })) });
             }
-            return tx.liga.update({
+            return toLigaEntity(tx.liga.update({
                 where: { id },
-                data,
+                data: data,
                 include: BASE_INCLUDE,
-            });
+            }));
         };
         return transaction ? execute(transaction) : database_1.prisma.$transaction(execute);
     },

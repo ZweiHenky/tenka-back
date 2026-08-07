@@ -230,6 +230,7 @@ exports.LigaScalarFieldEnum = {
     canchaPublicId: 'canchaPublicId',
     multiplesCanchas: 'multiplesCanchas',
     usaArbitros: 'usaArbitros',
+    reglas: 'reglas',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     ubicacionId: 'ubicacionId',

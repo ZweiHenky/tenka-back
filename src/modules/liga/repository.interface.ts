@@ -50,6 +50,7 @@ export interface LigaWriteData {
   canchaPublicId?: string | null;
   multiplesCanchas?: boolean;
   usaArbitros?: boolean;
+  reglas?: Array<{ titulo: string; detalle: string }>;
   ubicacionId?: string;
   userId?: string;
 }
