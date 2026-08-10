@@ -2,13 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   partidoFindMany: vi.fn(),
+  partidoFindUnique: vi.fn(),
+  partidoFindFirst: vi.fn(),
   jornadaFindFirst: vi.fn(),
   rondaPlayoffFindFirst: vi.fn(),
 }));
 
 vi.mock('../../config/database', () => ({
   prisma: {
-    partido: { findMany: mocks.partidoFindMany },
+    partido: { findMany: mocks.partidoFindMany, findUnique: mocks.partidoFindUnique, findFirst: mocks.partidoFindFirst },
     jornada: { findFirst: mocks.jornadaFindFirst },
     rondaPlayoff: { findFirst: mocks.rondaPlayoffFindFirst },
   },
@@ -18,6 +20,7 @@ import { partidoRepository } from './repository';
 import type { AuthenticatedUser } from '../../types/auth';
 
 const owner: AuthenticatedUser = { id: 'owner-1', email: 'owner@test.com', rol: 'LIGA' };
+const other: AuthenticatedUser = { id: 'other-1', email: 'other@test.com', rol: 'LIGA' };
 const admin: AuthenticatedUser = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
 const published = { estadoLiga: { nombre: { not: 'Borrador' } } };
 const partido = {
@@ -34,6 +37,8 @@ describe('partidoRepository public reads', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.partidoFindMany.mockResolvedValue([partido]);
+    mocks.partidoFindUnique.mockResolvedValue(partido);
+    mocks.partidoFindFirst.mockResolvedValue(partido);
     mocks.jornadaFindFirst.mockResolvedValue({ partidos: [partido] });
     mocks.rondaPlayoffFindFirst.mockResolvedValue({ partidos: [partido] });
   });
@@ -91,5 +96,55 @@ describe('partidoRepository public reads', () => {
 
     await expect(method('visible')).resolves.toEqual([]);
     await expect(method('hidden-or-missing')).resolves.toBeNull();
+  });
+
+  it('exposes participaciones with snapshot id fallback in detail reads', async () => {
+    mocks.partidoFindUnique.mockResolvedValue({
+      ...partido,
+      participaciones: [{
+        id: 'part-1',
+        jugadorId: null,
+        equipoId: null,
+        jugadorIdSnapshot: 'player-1',
+        equipoIdSnapshot: 'team-1',
+        ladoMarcador: 'LOCAL',
+        jugadorNombre: 'Ana',
+        equipoNombre: 'Locales',
+        dorsal: 9,
+      }],
+    });
+
+    const result = await partidoRepository.findById('partido-1');
+
+    expect(mocks.partidoFindUnique).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({ participaciones: expect.any(Object) }),
+    }));
+    expect(result?.participaciones).toEqual([expect.objectContaining({ jugadorId: 'player-1', equipoId: 'team-1' })]);
+  });
+
+  it('exposes private notas only to the league owner and strips them from other reads', async () => {
+    const withNotas = {
+      ...partido,
+      notas: 'Solo dueño y árbitro',
+      jornada: { division: { liga: { userId: 'owner-1' } } },
+    };
+
+    mocks.partidoFindFirst.mockResolvedValue(withNotas);
+    const ownerResult = await partidoRepository.findVisibleById('partido-1', owner);
+    expect(ownerResult?.notas).toBe('Solo dueño y árbitro');
+
+    mocks.partidoFindFirst.mockResolvedValue({ ...withNotas, jornada: { division: { liga: { userId: 'someone-else' } } } });
+    const stranger = await partidoRepository.findVisibleById('partido-1', other);
+    expect(stranger?.notas).toBeUndefined();
+
+    mocks.partidoFindFirst.mockResolvedValue(withNotas);
+    const anonymous = await partidoRepository.findVisibleById('partido-1', undefined);
+    expect(anonymous?.notas).toBeUndefined();
+  });
+
+  it('strips notas in the generic detail read', async () => {
+    mocks.partidoFindUnique.mockResolvedValue({ ...partido, notas: 'privada' });
+    const result = await partidoRepository.findById('partido-1');
+    expect(result?.notas).toBeUndefined();
   });
 });

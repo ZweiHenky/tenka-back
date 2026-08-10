@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.refereeWriteLimiter = exports.refereeReadLimiter = exports.uploadLimiter = exports.subscriptionLimiter = exports.otpVerifyLimiter = exports.otpSendLimiter = exports.authLimiter = exports.globalApiLimiter = void 0;
+exports.refereeWriteLimiter = exports.refereeReadLimiter = exports.playerPhoneLookupLimiter = exports.uploadLimiter = exports.subscriptionLimiter = exports.otpVerifyLimiter = exports.otpSendLimiter = exports.authLimiter = exports.globalApiLimiter = void 0;
 exports.createRateLimiter = createRateLimiter;
 const express_rate_limit_1 = require("express-rate-limit");
 const env_1 = require("../config/env");
@@ -23,6 +23,11 @@ exports.subscriptionLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, limi
 exports.uploadLimiter = createRateLimiter({
     windowMs: 15 * 60 * 1000,
     limit: env_1.env.UPLOAD_RATE_LIMIT,
+    keyGenerator: (req) => req.user?.id ? `user:${req.user.id}` : (0, express_rate_limit_1.ipKeyGenerator)(req.ip ?? req.socket.remoteAddress ?? 'unknown'),
+});
+exports.playerPhoneLookupLimiter = createRateLimiter({
+    windowMs: 10 * 60 * 1000,
+    limit: 10,
     keyGenerator: (req) => req.user?.id ? `user:${req.user.id}` : (0, express_rate_limit_1.ipKeyGenerator)(req.ip ?? req.socket.remoteAddress ?? 'unknown'),
 });
 exports.refereeReadLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, limit: 30 });

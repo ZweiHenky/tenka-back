@@ -8,6 +8,53 @@ import {
 beforeEach(resetGenerateNextHarness);
 
 describe('generateNext regular pairings', () => {
+  it('recalcula todo el plan cuando otra jornada gana el lock primero', async () => {
+    mockDivision({ maxEquipos: 4, diasPartido: null });
+    mockTeams(['t1', 't2', 't3', 't4']);
+    (jornadaRepository.findByDivision as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValue({
+        rows: [{
+          id: 'jornada-concurrente',
+          numero: 1,
+          fechaInicio: null,
+          partidos: [{ equipoLocalId: 't1', equipoVisitanteId: 't2', tipoPartido: 'REGULAR', fecha: null }],
+        }],
+      });
+    mockJornadaCreated(2);
+
+    await jornadaService.generateNext(divisionId);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect((jornadaRepository as any).create).toHaveBeenCalledOnce();
+    expect((jornadaRepository as any).create).toHaveBeenCalledWith(expect.objectContaining({ numero: 2 }));
+  });
+
+  it('recalcula el plan si cambian participantes con el mismo número de jornada', async () => {
+    mockDivision({ maxEquipos: 4, diasPartido: null });
+    mockTeams(['t1', 't2', 't3', 't4']);
+    const originalHistory = {
+      id: 'jornada-1',
+      numero: 1,
+      fechaInicio: null,
+      partidos: [{ id: 'partido-1', equipoLocalId: 't1', equipoVisitanteId: 't2', tipoPartido: 'REGULAR', fecha: null }],
+    };
+    const changedHistory = {
+      ...originalHistory,
+      partidos: [{ id: 'partido-1', equipoLocalId: 't1', equipoVisitanteId: 't3', tipoPartido: 'REGULAR', fecha: null }],
+    };
+    (jornadaRepository.findByDivision as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ rows: [originalHistory] })
+      .mockResolvedValue({ rows: [changedHistory] });
+    mockJornadaCreated(2);
+
+    await jornadaService.generateNext(divisionId);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect((jornadaRepository as any).create).toHaveBeenCalledOnce();
+    expect((jornadaRepository as any).create).toHaveBeenCalledWith(expect.objectContaining({ numero: 2 }));
+  });
+
   it('lanza ValidationError si hay menos de 2 equipos', async () => {
     mockDivision();
     mockTeams(['t1']);
@@ -114,6 +161,8 @@ describe('generateNext regular pairings', () => {
 
     await jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-08', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1' },
+      { fecha: '2099-01-09', horaInicio: '18:00', horaFin: '19:30' },
+      { fecha: '2099-01-10', horaInicio: '18:00', horaFin: '19:30' },
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;

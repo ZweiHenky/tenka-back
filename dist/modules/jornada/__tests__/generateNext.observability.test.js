@@ -25,32 +25,31 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, generateNextHarness_1.mockNoPreviousJornadas)();
         (0, generateNextHarness_1.mockJornadaCreated)();
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId);
-        (0, vitest_1.expect)(generateNextHarness_1.prisma.division.findUnique).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(generateNextHarness_1.prisma.division.findUnique).toHaveBeenCalledTimes(2);
         (0, vitest_1.expect)(generateNextHarness_1.prisma.rondaPlayoff.findFirst).toHaveBeenCalledOnce();
-        (0, vitest_1.expect)(generateNextHarness_1.jornadaRepository.findGenerationHistory).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(generateNextHarness_1.jornadaRepository.findGenerationHistory).toHaveBeenCalledTimes(2);
         (0, vitest_1.expect)(generateNextHarness_1.prisma.divisionEquipo.findMany).toHaveBeenCalledOnce();
         (0, vitest_1.expect)(generateNextHarness_1.prisma.partido.findMany).not.toHaveBeenCalled();
         (0, vitest_1.expect)(generateNextHarness_1.prisma.$transaction).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(generateNextHarness_1.prisma.$executeRawUnsafe).toHaveBeenCalledWith('SELECT pg_advisory_xact_lock(hashtext($1))', 'liga-1');
         (0, vitest_1.expect)(generateNextHarness_1.prisma.partido.createMany).toHaveBeenCalledOnce();
         (0, vitest_1.expect)(generateNextHarness_1.partidoRepository.findById).not.toHaveBeenCalled();
         (0, vitest_1.expect)(generateNextHarness_1.partidoRepository.create).toHaveBeenCalledTimes(3);
     });
-    (0, vitest_1.it)('handles detached notification rejection with a structured warning', async () => {
-        const notificationError = new Error('push failed');
-        generateNextHarness_1.notificationService.notifyJornadaGenerated.mockRejectedValue(notificationError);
+    (0, vitest_1.it)('creates both notification audiences in the jornada transaction', async () => {
         (0, generateNextHarness_1.mockDivision)();
         (0, generateNextHarness_1.mockTeams)(['t1', 't2']);
         (0, generateNextHarness_1.mockNoPreviousJornadas)();
         (0, generateNextHarness_1.mockJornadaCreated)();
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(1);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId);
-        await Promise.resolve();
-        (0, vitest_1.expect)(generateNextHarness_1.logger.warn).toHaveBeenCalledWith({
-            event: 'notification.failed',
-            provider: 'onesignal',
-            divisionId: generateNextHarness_1.divisionId,
-            jornadaId: 'j-new-1',
-        }, 'Jornada generation notification failed');
+        (0, vitest_1.expect)(generateNextHarness_1.prisma.notificationOutbox.createMany).toHaveBeenCalledWith({
+            data: [
+                vitest_1.expect.objectContaining({ eventKey: 'jornada-generated:j-new-1:registered', audience: 'REGISTERED', jornadaId: 'j-new-1', divisionId: generateNextHarness_1.divisionId }),
+                vitest_1.expect.objectContaining({ eventKey: 'jornada-generated:j-new-1:followers', audience: 'FOLLOWERS', jornadaId: 'j-new-1', divisionId: generateNextHarness_1.divisionId }),
+            ],
+            skipDuplicates: true,
+        });
     });
 });
 //# sourceMappingURL=generateNext.observability.test.js.map

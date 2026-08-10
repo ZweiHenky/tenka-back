@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { partidoService } from './service';
-import { createSchema, updateSchema } from './validator';
+import { createSchema, resultSchema, updateSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import { refereeAccessService } from '../referee-access/service';
@@ -30,8 +30,20 @@ export const partidoController = {
     try {
       const p = updateSchema.safeParse(req.body);
       if (!p.success) throw new ValidationError(p.error.issues[0].message);
+      if (['golesLocal', 'golesVisitante', 'penalesLocal', 'penalesVisitante'].some((field) => p.data[field as keyof typeof p.data] !== undefined)
+        || p.data.estado !== undefined) {
+        throw new ValidationError('Usa PATCH /api/partidos/:id/resultado para modificar el resultado');
+      }
       const updated = await partidoService.update(req.params.id, p.data, req.user!);
       ok(res, updated, 'Partido actualizado exitosamente');
+    } catch (e) { next(e); }
+  },
+
+  async updateResult(req: Request, res: Response, next: NextFunction) {
+    try {
+      const parsed = resultSchema.safeParse(req.body);
+      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      ok(res, await partidoService.updateResult(req.params.id, parsed.data, req.user!), 'Resultado actualizado exitosamente');
     } catch (e) { next(e); }
   },
 

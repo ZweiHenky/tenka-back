@@ -1,7 +1,9 @@
 process.env.APP_ENV = 'local';
+process.env.DB_TARGET = 'development';
 process.env.NODE_ENV = 'test';
 process.env.PORT = '3000';
-process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test';
+process.env.DEV_DATABASE_URL = 'postgresql://test:test@localhost:5432/test';
+delete process.env.DATABASE_URL;
 process.env.BETTER_AUTH_SECRET = 'test-secret-with-at-least-32-characters';
 process.env.BETTER_AUTH_URL = 'https://test.example.com';
 process.env.GOOGLE_CLIENT_ID = 'test-google-client-id';

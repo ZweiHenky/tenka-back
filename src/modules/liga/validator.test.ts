@@ -60,6 +60,24 @@ describe('validacion de canchas de liga', () => {
   it('permite actualizaciones parciales y deja la validacion final al servicio', () => {
     expect(updateLigaSchema.safeParse({ multiplesCanchas: true }).success).toBe(true);
   });
+
+  it('acepta ids y estado activo en las canchas de una actualizacion', () => {
+    const result = updateLigaSchema.parse({
+      canchas: [
+        { id: 'cancha-1', nombre: '  Principal  ', activa: true },
+        { id: 'cancha-2', activa: false },
+      ],
+    });
+
+    expect(result.canchas).toEqual([
+      { id: 'cancha-1', nombre: 'Principal', activa: true },
+      { id: 'cancha-2', activa: false },
+    ]);
+  });
+
+  it('exige nombre para una cancha nueva en una actualizacion', () => {
+    expect(updateLigaSchema.safeParse({ canchas: [{ activa: true }] }).success).toBe(false);
+  });
 });
 
 describe('validacion de arbitros de liga', () => {

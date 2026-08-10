@@ -2,14 +2,29 @@ import { ConflictError, NotFoundError, ValidationError } from '../../utils/error
 import { ligaRepository } from './repository';
 import { mediaService } from '../media/service';
 import { prisma } from '../../config/database';
-import type { LigaEntity, LigaCanchaEntity, LigaArbitroEntity, ProgramacionRecienteLigaDto } from './entity';
-import type { LigaFilterParams } from './repository.interface';
+import type { LigaEntity, LigaCanchaEntity, LigaArbitroEntity, ProgramacionRecienteLigaDto, LigaReglaItem } from './entity';
+import type { LigaCanchaWrite, LigaFilterParams, LigaWriteData } from './repository.interface';
 import type { AuthenticatedUser } from '../../types/auth';
+import { runInTransaction } from '../../utils/transaction';
 
 const DUPLICATE_NAME_MESSAGE = 'Ya existe una liga con ese nombre';
+const DUPLICATE_COURT_MESSAGE = 'Ya existe una cancha con ese nombre en esta liga';
+const MINIMUM_COURTS_MESSAGE = 'Una liga con múltiples canchas debe conservar al menos 2 canchas activas';
+
+function normalizeName(nombre: string): string {
+  return nombre.trim().toLowerCase();
+}
 
 function isUniqueConstraintError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
+}
+
+function isCourtUniqueConstraintError(error: unknown): boolean {
+  if (!isUniqueConstraintError(error) || typeof error !== 'object' || error === null || !('meta' in error)) return false;
+  const target = (error as { meta?: { target?: unknown } }).meta?.target;
+  return Array.isArray(target)
+    ? target.includes('nombreNormalizado')
+    : typeof target === 'string' && target.includes('nombreNormalizado');
 }
 
 function validateCanchas(multiplesCanchas: boolean, canchas: { nombre: string }[]) {
@@ -17,10 +32,56 @@ function validateCanchas(multiplesCanchas: boolean, canchas: { nombre: string }[
     throw new ValidationError('Una liga con múltiples canchas debe tener al menos 2 canchas');
   }
 
-  const nombres = canchas.map((cancha) => cancha.nombre.trim().toLocaleLowerCase());
+  const nombres = canchas.map((cancha) => cancha.nombre.trim().toLowerCase());
   if (new Set(nombres).size !== nombres.length) {
     throw new ValidationError('Los nombres de las canchas no pueden repetirse');
   }
+}
+
+function reconcileCanchas(
+  current: Array<{ id: string; nombre: string; nombreNormalizado: string; activa: boolean }>,
+  incoming: Array<{ id?: string; nombre?: string; activa?: boolean }>,
+  multiplesCanchas: boolean,
+): LigaCanchaWrite[] {
+  const currentById = new Map(current.map((cancha) => [cancha.id, cancha]));
+  const incomingIds = incoming.flatMap((cancha) => cancha.id ? [cancha.id] : []);
+  if (new Set(incomingIds).size !== incomingIds.length) {
+    throw new ValidationError('Una cancha no puede aparecer más de una vez');
+  }
+  for (const id of incomingIds) {
+    if (!currentById.has(id)) throw new ValidationError('La cancha indicada no pertenece a esta liga');
+  }
+
+  const requestedById = new Map(incoming.flatMap((cancha) => cancha.id ? [[cancha.id, cancha] as const] : []));
+  const reconciled: LigaCanchaWrite[] = current.map((cancha) => {
+    const requested = requestedById.get(cancha.id);
+    const nombre = requested?.nombre?.trim() ?? cancha.nombre;
+    return {
+      id: cancha.id,
+      nombre,
+      nombreNormalizado: normalizeName(nombre),
+      nombreNormalizadoAnterior: cancha.nombreNormalizado,
+      activa: multiplesCanchas && requested !== undefined ? (requested.activa ?? cancha.activa) : false,
+    };
+  });
+  for (const cancha of incoming) {
+    if (cancha.id) continue;
+    const nombre = cancha.nombre!.trim();
+    reconciled.push({
+      nombre,
+      nombreNormalizado: normalizeName(nombre),
+      activa: multiplesCanchas && (cancha.activa ?? true),
+    });
+  }
+
+  const normalizedNames = reconciled.map((cancha) => cancha.nombreNormalizado);
+  if (new Set(normalizedNames).size !== normalizedNames.length) {
+    throw new ConflictError(DUPLICATE_COURT_MESSAGE);
+  }
+  if (multiplesCanchas && reconciled.filter((cancha) => cancha.activa).length < 2) {
+    throw new ValidationError(MINIMUM_COURTS_MESSAGE);
+  }
+  return reconciled;
 }
 
 function validateArbitros(usaArbitros: boolean, arbitros: { nombre: string }[]) {
@@ -59,27 +120,44 @@ export const ligaService = {
   async create(data: {
     nombre: string;
     descripcion: string;
-    logo?: string;
-    logoPublicId?: string;
-    cancha?: string;
-    canchaPublicId?: string;
+    logoAssetId?: string | null;
+    coverAssetId?: string | null;
     multiplesCanchas?: boolean;
     canchas?: { nombre: string }[];
     usaArbitros?: boolean;
     arbitros?: { nombre: string }[];
+    reglas?: LigaReglaItem[];
     ubicacionId: string;
     userId: string;
   }): Promise<LigaEntity> {
-    const { canchas, arbitros, ...ligaData } = data;
+    const { canchas, arbitros, logoAssetId, coverAssetId, ...ligaData } = data;
     validateCanchas(data.multiplesCanchas ?? false, canchas ?? []);
     validateArbitros(data.usaArbitros ?? false, arbitros ?? []);
     const nombre = data.nombre.trim();
-    const nombreNormalizado = nombre.toLowerCase();
+    const nombreNormalizado = normalizeName(nombre);
     if (await ligaRepository.findByNormalizedName(nombreNormalizado)) {
       throw new ConflictError(DUPLICATE_NAME_MESSAGE);
     }
     try {
-      return await ligaRepository.create({ ...ligaData, nombre, nombreNormalizado }, canchas, arbitros);
+      const courtWrites = canchas?.map((cancha) => ({
+        nombre: cancha.nombre.trim(),
+        nombreNormalizado: normalizeName(cancha.nombre),
+        activa: data.multiplesCanchas === true,
+      }));
+      if (logoAssetId === undefined && coverAssetId === undefined) {
+        return await ligaRepository.create({ ...ligaData, nombre, nombreNormalizado }, courtWrites, arbitros);
+      }
+      return await runInTransaction(async (tx) => {
+        const logo = logoAssetId !== undefined ? await mediaService.prepareAttachment(tx, logoAssetId, data.userId, 'LEAGUE_LOGO') : undefined;
+        const cover = coverAssetId !== undefined ? await mediaService.prepareAttachment(tx, coverAssetId, data.userId, 'LEAGUE_COVER') : undefined;
+        return ligaRepository.create({
+          ...ligaData,
+          nombre,
+          nombreNormalizado,
+          ...(logo && { logo: logo.url, logoPublicId: logo.publicId }),
+          ...(cover && { cancha: cover.url, canchaPublicId: cover.publicId }),
+        }, courtWrites, arbitros, tx);
+      });
     } catch (error) {
       if (isUniqueConstraintError(error)) throw new ConflictError(DUPLICATE_NAME_MESSAGE);
       throw error;
@@ -89,44 +167,65 @@ export const ligaService = {
   async update(id: string, data: {
     nombre?: string;
     descripcion?: string;
-    logo?: string;
-    logoPublicId?: string;
-    cancha?: string;
-    canchaPublicId?: string;
+    logoAssetId?: string | null;
+    coverAssetId?: string | null;
     multiplesCanchas?: boolean;
-    canchas?: { nombre: string }[];
+    canchas?: Array<{ id?: string; nombre?: string; activa?: boolean }>;
     usaArbitros?: boolean;
     arbitros?: { nombre: string }[];
+    reglas?: LigaReglaItem[];
     ubicacionId?: string;
   }, actor: AuthenticatedUser): Promise<LigaEntity> {
     const old = await ligaRepository.findUpdateContext(id, actor);
     if (!old) throw new NotFoundError('Liga');
-    const { canchas, arbitros, ...ligaData } = data;
-    const nextCanchas = canchas ?? old.canchas;
-    validateCanchas(data.multiplesCanchas ?? old.multiplesCanchas, nextCanchas);
+    const { canchas, arbitros, logoAssetId, coverAssetId, ...rawLigaData } = data;
+    const ligaData: LigaWriteData = rawLigaData;
+    const multiplesCanchas = data.multiplesCanchas ?? old.multiplesCanchas;
+    let courtWrites: LigaCanchaWrite[] | undefined;
+    if (canchas !== undefined) {
+      courtWrites = reconcileCanchas(old.canchas, canchas, multiplesCanchas);
+    } else if (!multiplesCanchas) {
+      courtWrites = reconcileCanchas(old.canchas, [], false);
+    } else if (old.canchas.filter((cancha) => cancha.activa).length < 2) {
+      throw new ValidationError(MINIMUM_COURTS_MESSAGE);
+    }
     const nextArbitros = arbitros ?? old.arbitros;
     validateArbitros(data.usaArbitros ?? old.usaArbitros, nextArbitros);
     if (data.nombre !== undefined) {
       const nombre = data.nombre.trim();
-      const nombreNormalizado = nombre.toLowerCase();
+      const nombreNormalizado = normalizeName(nombre);
       ligaData.nombre = nombre;
-      (ligaData as Record<string, unknown>).nombreNormalizado = nombreNormalizado;
+      ligaData.nombreNormalizado = nombreNormalizado;
       if (await ligaRepository.findByNormalizedName(nombreNormalizado, id)) {
         throw new ConflictError(DUPLICATE_NAME_MESSAGE);
       }
     }
     let updated: LigaEntity;
     try {
-      updated = await ligaRepository.update(id, ligaData, canchas, arbitros);
+      const disablingMultipleCourts = old.multiplesCanchas && data.multiplesCanchas === false;
+      if (logoAssetId === undefined && coverAssetId === undefined) {
+        updated = disablingMultipleCourts
+          ? await ligaRepository.update(id, ligaData, courtWrites, arbitros, true)
+          : await ligaRepository.update(id, ligaData, courtWrites, arbitros);
+      } else updated = await runInTransaction(async (tx) => {
+        await mediaService.lockAttachmentTarget(tx, 'liga', id);
+        const current = await tx.liga.findUniqueOrThrow({
+          where: { id },
+          select: { logo: true, logoPublicId: true, cancha: true, canchaPublicId: true },
+        });
+        const logo = logoAssetId !== undefined ? await mediaService.prepareAttachment(tx, logoAssetId, actor.id, 'LEAGUE_LOGO', current.logo, current.logoPublicId) : undefined;
+        const cover = coverAssetId !== undefined ? await mediaService.prepareAttachment(tx, coverAssetId, actor.id, 'LEAGUE_COVER', current.cancha, current.canchaPublicId) : undefined;
+        const writeData = {
+          ...ligaData,
+          ...(logo && { logo: logo.url, logoPublicId: logo.publicId }),
+          ...(cover && { cancha: cover.url, canchaPublicId: cover.publicId }),
+        };
+        return ligaRepository.update(id, writeData, courtWrites, arbitros, disablingMultipleCourts, tx);
+      });
     } catch (error) {
+      if (isCourtUniqueConstraintError(error)) throw new ConflictError(DUPLICATE_COURT_MESSAGE);
       if (isUniqueConstraintError(error)) throw new ConflictError(DUPLICATE_NAME_MESSAGE);
       throw error;
-    }
-    if (data.logo !== undefined && data.logo !== old.logo) {
-      await mediaService.scheduleImageCleanup(old.logo, old.logoPublicId);
-    }
-    if (data.cancha !== undefined && data.cancha !== old.cancha) {
-      await mediaService.scheduleImageCleanup(old.cancha, old.canchaPublicId);
     }
     return updated;
   },
@@ -134,9 +233,15 @@ export const ligaService = {
   async delete(id: string, actor: AuthenticatedUser): Promise<void> {
     const old = await ligaRepository.findDeleteContext(id, actor);
     if (!old) throw new NotFoundError('Liga');
-    await ligaRepository.delete(id);
-    await mediaService.scheduleImageCleanup(old.logo, old.logoPublicId);
-    await mediaService.scheduleImageCleanup(old.cancha, old.canchaPublicId);
+    if (!old.logo && !old.cancha) {
+      await ligaRepository.delete(id);
+      return;
+    }
+    await runInTransaction(async (tx) => {
+      await mediaService.scheduleImageCleanup(old.logo, old.logoPublicId, tx);
+      await mediaService.scheduleImageCleanup(old.cancha, old.canchaPublicId, tx);
+      await ligaRepository.delete(id, 'liga' in tx ? tx : undefined);
+    });
   },
 
   async getCanchas(ligaId: string, actor: AuthenticatedUser): Promise<LigaCanchaEntity[]> {
@@ -151,13 +256,16 @@ export const ligaService = {
     if (!liga.multiplesCanchas) {
       throw new ValidationError('La liga no tiene múltiples canchas habilitadas');
     }
-    const existing = await prisma.ligaCancha.findUnique({
-      where: { ligaId_nombre: { ligaId, nombre: data.nombre } },
-    });
-    if (existing) throw new ConflictError('Ya existe una cancha con ese nombre en esta liga');
-    return prisma.ligaCancha.create({
-      data: { ...data, ligaId },
-    });
+    const nombre = data.nombre.trim();
+    const nombreNormalizado = normalizeName(nombre);
+    const existing = await prisma.ligaCancha.findFirst({ where: { ligaId, nombreNormalizado } });
+    if (existing) throw new ConflictError(DUPLICATE_COURT_MESSAGE);
+    try {
+      return await prisma.ligaCancha.create({ data: { nombre, nombreNormalizado, ligaId } });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) throw new ConflictError(DUPLICATE_COURT_MESSAGE);
+      throw error;
+    }
   },
 
   async updateCancha(ligaId: string, canchaId: string, data: { nombre?: string; activa?: boolean }, actor: AuthenticatedUser): Promise<LigaCanchaEntity> {
@@ -165,13 +273,33 @@ export const ligaService = {
     if (!liga) throw new NotFoundError('Liga');
     const cancha = await prisma.ligaCancha.findFirst({ where: { id: canchaId, ligaId } });
     if (!cancha) throw new NotFoundError('Cancha');
-    if (data.nombre && data.nombre !== cancha.nombre) {
-      const existing = await prisma.ligaCancha.findUnique({
-        where: { ligaId_nombre: { ligaId, nombre: data.nombre } },
-      });
-      if (existing) throw new ConflictError('Ya existe una cancha con ese nombre en esta liga');
+    if (!liga.multiplesCanchas && data.activa === true) {
+      throw new ValidationError('Una liga sin múltiples canchas no puede tener canchas activas');
     }
-    return prisma.ligaCancha.update({ where: { id: canchaId }, data });
+    if (liga.multiplesCanchas && cancha.activa && data.activa === false) {
+      const remainingActive = await prisma.ligaCancha.count({
+        where: { ligaId, activa: true, id: { not: canchaId } },
+      });
+      if (remainingActive < 2) throw new ValidationError(MINIMUM_COURTS_MESSAGE);
+    }
+    const updateData: { nombre?: string; nombreNormalizado?: string; activa?: boolean } = {};
+    if (data.activa !== undefined) updateData.activa = data.activa;
+    if (data.nombre !== undefined) {
+      const nombre = data.nombre.trim();
+      const nombreNormalizado = normalizeName(nombre);
+      const existing = await prisma.ligaCancha.findFirst({
+        where: { ligaId, nombreNormalizado, id: { not: canchaId } },
+      });
+      if (existing) throw new ConflictError(DUPLICATE_COURT_MESSAGE);
+      updateData.nombre = nombre;
+      updateData.nombreNormalizado = nombreNormalizado;
+    }
+    try {
+      return await prisma.ligaCancha.update({ where: { id: canchaId }, data: updateData });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) throw new ConflictError(DUPLICATE_COURT_MESSAGE);
+      throw error;
+    }
   },
 
   async deleteCancha(ligaId: string, canchaId: string, actor: AuthenticatedUser): Promise<void> {
@@ -179,8 +307,17 @@ export const ligaService = {
     if (!liga) throw new NotFoundError('Liga');
     const cancha = await prisma.ligaCancha.findFirst({ where: { id: canchaId, ligaId } });
     if (!cancha) throw new NotFoundError('Cancha');
-    const matchCount = await prisma.partido.count({ where: { canchaId } });
-    if (matchCount > 0) {
+    if (liga.multiplesCanchas && cancha.activa) {
+      const remainingActive = await prisma.ligaCancha.count({
+        where: { ligaId, activa: true, id: { not: canchaId } },
+      });
+      if (remainingActive < 2) throw new ValidationError(MINIMUM_COURTS_MESSAGE);
+    }
+    const [matchCount, fixedDivisionCount] = await Promise.all([
+      prisma.partido.count({ where: { canchaId } }),
+      prisma.division.count({ where: { canchaUnicaId: canchaId } }),
+    ]);
+    if (matchCount > 0 || fixedDivisionCount > 0) {
       await prisma.ligaCancha.update({ where: { id: canchaId }, data: { activa: false } });
     } else {
       await prisma.ligaCancha.delete({ where: { id: canchaId } });

@@ -4,14 +4,52 @@ exports.updateArbitroSchema = exports.createArbitroSchema = exports.updateCancha
 const zod_1 = require("zod");
 const nombreSchema = zod_1.z.string().trim().min(1).max(20);
 const descripcionSchema = zod_1.z.string().max(150);
-const canchaItemSchema = zod_1.z.object({
+const createCanchaItemSchema = zod_1.z.object({
     nombre: zod_1.z.string().trim().min(1).max(50),
+});
+const updateCanchaItemSchema = zod_1.z.object({
+    id: zod_1.z.string().min(1).optional(),
+    nombre: zod_1.z.string().trim().min(1).max(50).optional(),
+    activa: zod_1.z.boolean().optional(),
+}).superRefine((cancha, ctx) => {
+    if (!cancha.id && !cancha.nombre) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            path: ['nombre'],
+            message: 'Una cancha nueva debe tener nombre',
+        });
+    }
 });
 const arbitroItemSchema = zod_1.z.object({
     nombre: zod_1.z.string().trim().min(1).max(50),
 });
+const reglaItemSchema = zod_1.z.object({
+    titulo: zod_1.z.string().trim().min(1, 'El título de la regla es obligatorio').max(60, 'El título no puede superar los 60 caracteres'),
+    detalle: zod_1.z.string().trim().min(1, 'El detalle de la regla es obligatorio').max(500, 'El detalle no puede superar los 500 caracteres'),
+});
+function validateReglas(data, ctx) {
+    if (!data.reglas)
+        return;
+    if (data.reglas.length > 30) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            path: ['reglas'],
+            message: 'Máximo 30 reglas o directivas',
+        });
+        return;
+    }
+    const titulos = data.reglas.map((regla) => regla.titulo.trim().toLowerCase());
+    if (new Set(titulos).size !== titulos.length) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            path: ['reglas'],
+            message: 'Los títulos de las reglas no pueden repetirse',
+        });
+    }
+}
 function validateCanchas(data, ctx) {
-    if (data.multiplesCanchas && (data.canchas?.length ?? 0) < 2) {
+    const activeNamed = data.canchas?.filter((cancha) => cancha.activa !== false && cancha.nombre) ?? [];
+    if (data.multiplesCanchas && activeNamed.length < 2) {
         ctx.addIssue({
             code: zod_1.z.ZodIssueCode.custom,
             path: ['canchas'],
@@ -19,7 +57,8 @@ function validateCanchas(data, ctx) {
         });
     }
     if (data.canchas) {
-        const nombres = data.canchas.map((cancha) => cancha.nombre.toLocaleLowerCase());
+        const nombres = data.canchas
+            .flatMap((cancha) => cancha.nombre ? [cancha.nombre.toLowerCase()] : []);
         if (new Set(nombres).size !== nombres.length) {
             ctx.addIssue({
                 code: zod_1.z.ZodIssueCode.custom,
@@ -51,40 +90,41 @@ function validateArbitros(data, ctx) {
 exports.createLigaSchema = zod_1.z.object({
     nombre: nombreSchema,
     descripcion: descripcionSchema,
-    logo: zod_1.z.string().optional(),
-    logoPublicId: zod_1.z.string().optional(),
-    cancha: zod_1.z.string().optional(),
-    canchaPublicId: zod_1.z.string().optional(),
+    logoAssetId: zod_1.z.string().min(1).nullable().optional(),
+    coverAssetId: zod_1.z.string().min(1).nullable().optional(),
     multiplesCanchas: zod_1.z.boolean().optional(),
-    canchas: zod_1.z.array(canchaItemSchema).optional(),
+    canchas: zod_1.z.array(createCanchaItemSchema).optional(),
     usaArbitros: zod_1.z.boolean().optional(),
     arbitros: zod_1.z.array(arbitroItemSchema).optional(),
+    reglas: zod_1.z.array(reglaItemSchema).max(30).optional(),
     ubicacionId: zod_1.z.string(),
-}).superRefine(validateCanchas).superRefine(validateArbitros);
+}).superRefine(validateCanchas).superRefine(validateArbitros).superRefine(validateReglas);
 exports.updateLigaSchema = zod_1.z.object({
     nombre: nombreSchema.optional(),
     descripcion: descripcionSchema.optional(),
-    logo: zod_1.z.string().optional(),
-    logoPublicId: zod_1.z.string().optional(),
-    cancha: zod_1.z.string().optional(),
-    canchaPublicId: zod_1.z.string().optional(),
+    logoAssetId: zod_1.z.string().min(1).nullable().optional(),
+    coverAssetId: zod_1.z.string().min(1).nullable().optional(),
     multiplesCanchas: zod_1.z.boolean().optional(),
-    canchas: zod_1.z.array(canchaItemSchema).optional(),
+    canchas: zod_1.z.array(updateCanchaItemSchema).optional(),
     usaArbitros: zod_1.z.boolean().optional(),
     arbitros: zod_1.z.array(arbitroItemSchema).optional(),
+    reglas: zod_1.z.array(reglaItemSchema).max(30).optional(),
     ubicacionId: zod_1.z.string().optional(),
 }).superRefine((data, ctx) => {
     if (data.canchas)
-        validateCanchas(data, ctx);
+        validateCanchas({ ...data, multiplesCanchas: undefined }, ctx);
 }).superRefine((data, ctx) => {
     if (data.arbitros)
         validateArbitros(data, ctx);
+}).superRefine((data, ctx) => {
+    if (data.reglas)
+        validateReglas(data, ctx);
 });
 exports.createCanchaSchema = zod_1.z.object({
-    nombre: zod_1.z.string().min(1).max(50),
+    nombre: zod_1.z.string().trim().min(1).max(50),
 });
 exports.updateCanchaSchema = zod_1.z.object({
-    nombre: zod_1.z.string().min(1).max(50).optional(),
+    nombre: zod_1.z.string().trim().min(1).max(50).optional(),
     activa: zod_1.z.boolean().optional(),
 });
 exports.createArbitroSchema = zod_1.z.object({

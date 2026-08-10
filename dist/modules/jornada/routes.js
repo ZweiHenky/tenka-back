@@ -11,7 +11,5 @@ router.get('/division/:divisionId', authMiddleware_1.optionalAuth, controller_1.
 router.get('/:id', authMiddleware_1.optionalAuth, controller_1.jornadaController.getById);
 router.use(authMiddleware_1.requireAuth);
 router.post('/generate-next/:divisionId', controller_1.jornadaController.generateNext);
-router.post('/', controller_1.jornadaController.create);
-router.patch('/:id', controller_1.jornadaController.update);
 router.delete('/:id', controller_1.jornadaController.delete);
 //# sourceMappingURL=routes.js.map

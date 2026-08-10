@@ -54,7 +54,7 @@ describe('autorizacion de liga', () => {
   });
 
   it.each([owner, admin])('permite consultar la programacion al propietario o administrador', async (actor) => {
-    const schedule = { id: 'liga-1', nombre: 'Liga Centro', divisiones: [] };
+    const schedule = { id: 'liga-1', nombre: 'Liga Centro', multiplesCanchas: false, divisiones: [] };
     mocks.findRecentSchedule.mockResolvedValue(schedule);
 
     await expect(ligaService.getRecentSchedule('liga-1', actor)).resolves.toBe(schedule);

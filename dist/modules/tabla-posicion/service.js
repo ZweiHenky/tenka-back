@@ -36,109 +36,114 @@ exports.tablaPosicionService = {
             equipo: t.equipo,
         }));
     },
-    async recalcular(divisionId) {
-        const [teams, partidos] = await Promise.all([
-            database_1.prisma.divisionEquipo.findMany({
-                where: { divisionId },
-                select: { equipoId: true },
-            }),
-            database_1.prisma.partido.findMany({
-                where: {
-                    jornada: { divisionId },
-                    estado: 'FINALIZADO',
-                    rondaPlayoffId: null,
-                },
-                select: {
-                    equipoLocalId: true,
-                    equipoVisitanteId: true,
-                    golesLocal: true,
-                    golesVisitante: true,
-                    penalesLocal: true,
-                    penalesVisitante: true,
-                    tipoPartido: true,
-                },
-            }),
-        ]);
-        const stats = new Map();
-        for (const equipoId of teams.map((t) => t.equipoId)) {
-            stats.set(equipoId, { pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, gp: 0 });
-        }
-        for (const p of partidos) {
-            if (!p.equipoLocalId || !p.equipoVisitanteId)
-                continue;
-            const local = stats.get(p.equipoLocalId);
-            const visit = stats.get(p.equipoVisitanteId);
-            if (!local || !visit)
-                continue;
-            if (p.tipoPartido === 'AMISTOSO') {
-                continue;
+    async recalcular(divisionId, transaction) {
+        const recalculate = async (tx) => {
+            const [teams, partidos] = await Promise.all([
+                tx.divisionEquipo.findMany({
+                    where: { divisionId },
+                    select: { equipoId: true },
+                }),
+                tx.partido.findMany({
+                    where: {
+                        jornada: { divisionId },
+                        estado: 'FINALIZADO',
+                        rondaPlayoffId: null,
+                    },
+                    select: {
+                        equipoLocalId: true,
+                        equipoVisitanteId: true,
+                        golesLocal: true,
+                        golesVisitante: true,
+                        penalesLocal: true,
+                        penalesVisitante: true,
+                        tipoPartido: true,
+                    },
+                }),
+            ]);
+            const stats = new Map();
+            for (const equipoId of teams.map((t) => t.equipoId)) {
+                stats.set(equipoId, { pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, gp: 0 });
             }
-            if (p.tipoPartido === 'COMPLEMENTO') {
+            for (const p of partidos) {
+                if (!p.equipoLocalId || !p.equipoVisitanteId)
+                    continue;
+                const local = stats.get(p.equipoLocalId);
+                const visit = stats.get(p.equipoVisitanteId);
+                if (!local || !visit)
+                    continue;
+                if (p.tipoPartido === 'AMISTOSO') {
+                    continue;
+                }
+                if (p.tipoPartido === 'COMPLEMENTO') {
+                    local.pj++;
+                    local.gf += p.golesLocal;
+                    local.gc += p.golesVisitante;
+                    if (p.golesLocal > p.golesVisitante)
+                        local.g++;
+                    else if (p.golesLocal < p.golesVisitante)
+                        local.p++;
+                    else {
+                        local.e++;
+                        const tienePenales = p.penalesLocal != null && p.penalesVisitante != null;
+                        if (tienePenales && p.penalesLocal !== p.penalesVisitante && p.penalesLocal > p.penalesVisitante) {
+                            local.gp++;
+                        }
+                    }
+                    continue;
+                }
                 local.pj++;
+                visit.pj++;
                 local.gf += p.golesLocal;
                 local.gc += p.golesVisitante;
-                if (p.golesLocal > p.golesVisitante)
+                visit.gf += p.golesVisitante;
+                visit.gc += p.golesLocal;
+                if (p.golesLocal > p.golesVisitante) {
                     local.g++;
-                else if (p.golesLocal < p.golesVisitante)
+                    visit.p++;
+                }
+                else if (p.golesLocal < p.golesVisitante) {
                     local.p++;
+                    visit.g++;
+                }
                 else {
                     local.e++;
+                    visit.e++;
                     const tienePenales = p.penalesLocal != null && p.penalesVisitante != null;
-                    if (tienePenales && p.penalesLocal > p.penalesVisitante) {
-                        local.gp++;
-                    }
-                }
-                continue;
-            }
-            local.pj++;
-            visit.pj++;
-            local.gf += p.golesLocal;
-            local.gc += p.golesVisitante;
-            visit.gf += p.golesVisitante;
-            visit.gc += p.golesLocal;
-            if (p.golesLocal > p.golesVisitante) {
-                local.g++;
-                visit.p++;
-            }
-            else if (p.golesLocal < p.golesVisitante) {
-                local.p++;
-                visit.g++;
-            }
-            else {
-                local.e++;
-                visit.e++;
-                const tienePenales = p.penalesLocal != null && p.penalesVisitante != null;
-                if (tienePenales) {
-                    if (p.penalesLocal > p.penalesVisitante) {
-                        local.gp++;
-                    }
-                    else {
-                        visit.gp++;
+                    if (tienePenales && p.penalesLocal !== p.penalesVisitante) {
+                        if (p.penalesLocal > p.penalesVisitante) {
+                            local.gp++;
+                        }
+                        else {
+                            visit.gp++;
+                        }
                     }
                 }
             }
-        }
-        const data = [];
-        for (const t of teams) {
-            const s = stats.get(t.equipoId);
-            data.push({
-                divisionId,
-                equipoId: t.equipoId,
-                partidosJugados: s.pj,
-                ganados: s.g,
-                empatados: s.e,
-                perdidos: s.p,
-                golesFavor: s.gf,
-                golesContra: s.gc,
-                diferenciaGoles: s.gf - s.gc,
-                puntos: s.g * 3 + s.e + s.gp,
-            });
-        }
-        data.sort((a, b) => b.puntos - a.puntos || (b.diferenciaGoles - a.diferenciaGoles));
-        await database_1.prisma.$transaction(async (tx) => {
+            const data = [];
+            for (const t of teams) {
+                const s = stats.get(t.equipoId);
+                data.push({
+                    divisionId,
+                    equipoId: t.equipoId,
+                    partidosJugados: s.pj,
+                    ganados: s.g,
+                    empatados: s.e,
+                    perdidos: s.p,
+                    golesFavor: s.gf,
+                    golesContra: s.gc,
+                    diferenciaGoles: s.gf - s.gc,
+                    puntos: s.g * 3 + s.e + s.gp,
+                });
+            }
+            data.sort((a, b) => b.puntos - a.puntos || (b.diferenciaGoles - a.diferenciaGoles));
             await tx.tablaPosicion.deleteMany({ where: { divisionId } });
             await tx.tablaPosicion.createMany({ data });
-        });
+        };
+        if (transaction) {
+            await recalculate(transaction);
+            return;
+        }
+        await database_1.prisma.$transaction(recalculate, { isolationLevel: 'RepeatableRead' });
     },
     async findOne(divisionId, equipoId, actor) {
         const division = await repository_1.tablaPosicionRepository.findOne(divisionId, equipoId, actor);

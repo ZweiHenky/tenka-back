@@ -34,21 +34,31 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
             return { id, equipoLocalId: slot.equipoLocalId, equipoVisitanteId: slot.equipoVisitanteId, jornadaId: null };
         });
     }
-    (0, vitest_1.it)('incluye eliminatorias en conflictos de la misma cancha y excluye el propio partido de la consulta', async () => {
+    (0, vitest_1.it)('rejects a slot without an explicit friendly or playoff type', async () => {
         (0, generateNextHarness_1.mockDivision)({ maxEquipos: 10, diasPartido: null });
+        mockPlayoffMode();
+        await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
+            { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30' },
+        ])).rejects.toThrow('Solo se permiten partidos amistosos o de eliminatoria');
+    });
+    (0, vitest_1.it)('incluye eliminatorias en conflictos de la misma cancha y excluye el propio partido de la consulta', async () => {
+        (0, generateNextHarness_1.mockDivision)({ maxEquipos: 10, diasPartido: null, multiplesCanchas: true });
         mockPlayoffMode();
         mockTenTeams();
         mockEliminatoriaPartidos();
         (0, generateNextHarness_1.mockNoPreviousJornadas)();
         (0, generateNextHarness_1.mockJornadaCreated)();
-        generateNextHarness_1.prisma.ligaCancha.findMany.mockResolvedValue([{ id: 'c1', nombre: 'Cancha 1' }]);
+        generateNextHarness_1.prisma.ligaCancha.findMany.mockResolvedValue([
+            { id: 'c1', nombre: 'Cancha 1' },
+            { id: 'c2', nombre: 'Cancha 2' },
+        ]);
         generateNextHarness_1.prisma.partido.findMany
             .mockResolvedValueOnce([{ id: 'p1', equipoLocalId: 't1', equipoVisitanteId: 't2', jornadaId: null }])
             .mockResolvedValueOnce([]);
         await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { ...ELIM_SLOTS[0], canchaId: 'c1' },
-            { fecha: '2099-01-01', horaInicio: '18:30', horaFin: '19:00', tipo: 'amistoso', equipoLocalId: 't3', equipoVisitanteId: 't4', canchaId: 'c1' },
-        ])).rejects.toThrow('horarios solapados');
+            { fecha: '2099-01-01', horaInicio: '18:30', horaFin: '20:00', tipo: 'amistoso', equipoLocalId: 't3', equipoVisitanteId: 't4', canchaId: 'c1' },
+        ])).rejects.toThrow('ya tiene otro partido programado');
         (0, vitest_1.expect)(generateNextHarness_1.prisma.partido.findMany).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
             where: vitest_1.expect.objectContaining({ id: { notIn: ['p1'] } }),
         }));
@@ -273,7 +283,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         ])).rejects.toThrow('repite el mismo cruce');
     });
     (0, vitest_1.it)('amistosos automáticos no repiten una pareja de la jornada anterior', async () => {
-        (0, generateNextHarness_1.mockDivision)({ maxEquipos: 4, diasPartido: null });
+        (0, generateNextHarness_1.mockDivision)({ maxEquipos: 4, diasPartido: null, duracionPartido: 60 });
         mockPlayoffMode();
         (0, generateNextHarness_1.mockTeams)(['t1', 't2', 't3', 't4']);
         generateNextHarness_1.jornadaRepository.findByDivision.mockResolvedValue({
@@ -292,7 +302,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, vitest_1.expect)([amistoso[0].equipoLocalId, amistoso[0].equipoVisitanteId].sort().join('-')).not.toBe('t1-t2');
     });
     (0, vitest_1.it)('rechaza un amistoso manual repetido mientras quedan parejas nuevas', async () => {
-        (0, generateNextHarness_1.mockDivision)({ maxEquipos: 4, diasPartido: null });
+        (0, generateNextHarness_1.mockDivision)({ maxEquipos: 4, diasPartido: null, duracionPartido: 60 });
         mockPlayoffMode();
         (0, generateNextHarness_1.mockTeams)(['t1', 't2', 't3', 't4']);
         generateNextHarness_1.jornadaRepository.findByDivision.mockResolvedValue({
@@ -307,7 +317,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         ])).rejects.toThrow('todavía hay parejas disponibles');
     });
     (0, vitest_1.it)('inicia un nuevo ciclo amistoso después de agotar todas las parejas', async () => {
-        (0, generateNextHarness_1.mockDivision)({ maxEquipos: 4, diasPartido: null });
+        (0, generateNextHarness_1.mockDivision)({ maxEquipos: 4, diasPartido: null, duracionPartido: 60 });
         mockPlayoffMode();
         (0, generateNextHarness_1.mockTeams)(['t1', 't2', 't3', 't4']);
         const allPairs = [
@@ -354,7 +364,24 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, vitest_1.expect)(generateNextHarness_1.prisma.$transaction).toHaveBeenCalledOnce();
         (0, vitest_1.expect)(generateNextHarness_1.prisma.partido.deleteMany).not.toHaveBeenCalled();
         (0, vitest_1.expect)(generateNextHarness_1.jornadaRepository.delete).not.toHaveBeenCalled();
-        (0, vitest_1.expect)(generateNextHarness_1.notificationService.notifyJornadaGenerated).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(generateNextHarness_1.prisma.notificationOutbox.createMany).not.toHaveBeenCalled();
+    });
+    (0, vitest_1.it)('recalcula si un partido de playoff deja de estar libre bajo el lock', async () => {
+        (0, generateNextHarness_1.mockDivision)({ maxEquipos: 10, diasPartido: null });
+        mockPlayoffMode();
+        mockTenTeams();
+        mockEliminatoriaPartidos();
+        (0, generateNextHarness_1.mockNoPreviousJornadas)();
+        (0, generateNextHarness_1.mockJornadaCreated)();
+        generateNextHarness_1.prisma.partido.updateMany
+            .mockResolvedValueOnce({ count: 0 })
+            .mockResolvedValue({ count: 1 });
+        await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, ELIM_SLOTS);
+        (0, vitest_1.expect)(generateNextHarness_1.prisma.$transaction).toHaveBeenCalledTimes(2);
+        (0, vitest_1.expect)(generateNextHarness_1.prisma.partido.updateMany).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
+            where: { id: 'p1', jornadaId: null },
+        }));
+        (0, vitest_1.expect)(generateNextHarness_1.prisma.notificationOutbox.createMany).toHaveBeenCalledOnce();
     });
 });
 //# sourceMappingURL=generateNext.playoff-friendlies.test.js.map

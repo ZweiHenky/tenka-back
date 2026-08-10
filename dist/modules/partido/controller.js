@@ -55,8 +55,23 @@ exports.partidoController = {
             const p = validator_1.updateSchema.safeParse(req.body);
             if (!p.success)
                 throw new errors_1.ValidationError(p.error.issues[0].message);
+            if (['golesLocal', 'golesVisitante', 'penalesLocal', 'penalesVisitante'].some((field) => p.data[field] !== undefined)
+                || p.data.estado !== undefined) {
+                throw new errors_1.ValidationError('Usa PATCH /api/partidos/:id/resultado para modificar el resultado');
+            }
             const updated = await service_1.partidoService.update(req.params.id, p.data, req.user);
             (0, response_1.ok)(res, updated, 'Partido actualizado exitosamente');
+        }
+        catch (e) {
+            next(e);
+        }
+    },
+    async updateResult(req, res, next) {
+        try {
+            const parsed = validator_1.resultSchema.safeParse(req.body);
+            if (!parsed.success)
+                throw new errors_1.ValidationError(parsed.error.issues[0].message);
+            (0, response_1.ok)(res, await service_1.partidoService.updateResult(req.params.id, parsed.data, req.user), 'Resultado actualizado exitosamente');
         }
         catch (e) {
             next(e);

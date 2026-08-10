@@ -3,8 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const vitest_1 = require("vitest");
 const env_1 = require("./env");
 const validEnv = {
-    APP_ENV: 'local', NODE_ENV: 'test', PORT: '3000',
-    DATABASE_URL: 'postgresql://user:password@db.example.com:5432/app',
+    APP_ENV: 'local', DB_TARGET: 'development', NODE_ENV: 'test', PORT: '3000',
+    DEV_DATABASE_URL: 'postgresql://user:password@dev-db.example.com:5432/app',
     BETTER_AUTH_SECRET: 'a'.repeat(32), BETTER_AUTH_URL: 'http://localhost:3000',
     GOOGLE_CLIENT_ID: 'google-client-id', GOOGLE_CLIENT_SECRET: 'google-client-secret',
     ONESIGNAL_APP_ID: 'onesignal-app-id', ONESIGNAL_REST_API_KEY: 'onesignal-rest-api-key',
@@ -12,12 +12,29 @@ const validEnv = {
     CLOUDINARY_API_SECRET: 'cloudinary-api-secret', PHONE_OTP_MODE: 'console',
     SENTRY_DSN: 'https://public@example.ingest.sentry.io/1',
 };
+const previewEnv = {
+    ...validEnv,
+    APP_ENV: 'preview',
+    DB_TARGET: 'preview',
+    DATABASE_URL: 'postgresql://user:password@preview-db.example.com:5432/app',
+    PHONE_OTP_MODE: 'disabled',
+};
+const productionEnv = {
+    ...validEnv,
+    APP_ENV: 'production',
+    DB_TARGET: 'production',
+    NODE_ENV: 'production',
+    DATABASE_URL: 'postgresql://user:password@production-db.example.com:5432/app',
+    PHONE_OTP_MODE: 'disabled',
+    BETTER_AUTH_URL: 'https://api.example.com',
+    CORS_ALLOWED_ORIGINS: 'https://app.example.com',
+};
 (0, vitest_1.describe)('parseBackendEnv', () => {
     (0, vitest_1.it)('parses and normalizes a valid environment', () => {
         (0, vitest_1.expect)((0, env_1.parseBackendEnv)(validEnv)).toMatchObject({ APP_ENV: 'local', NODE_ENV: 'test', PORT: 3000 });
     });
     vitest_1.it.each([
-        'DATABASE_URL', 'BETTER_AUTH_SECRET', 'BETTER_AUTH_URL', 'GOOGLE_CLIENT_ID',
+        'DEV_DATABASE_URL', 'DB_TARGET', 'BETTER_AUTH_SECRET', 'BETTER_AUTH_URL', 'GOOGLE_CLIENT_ID',
         'GOOGLE_CLIENT_SECRET', 'ONESIGNAL_APP_ID', 'ONESIGNAL_REST_API_KEY',
         'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET',
     ])('requires %s', (name) => {
@@ -27,25 +44,68 @@ const validEnv = {
         (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...validEnv, PORT: port })).toThrow('PORT');
     });
     (0, vitest_1.it)('rejects non-PostgreSQL database URLs', () => {
-        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...validEnv, DATABASE_URL: 'https://db.example.com' })).toThrow('DATABASE_URL');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...validEnv, DEV_DATABASE_URL: 'https://db.example.com' })).toThrow('DEV_DATABASE_URL');
+    });
+    (0, vitest_1.it)('never falls back to DATABASE_URL in local development', () => {
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({
+            ...validEnv,
+            DEV_DATABASE_URL: undefined,
+            DATABASE_URL: 'postgresql://user:password@production-db.example.com:5432/app',
+        })).toThrow('DEV_DATABASE_URL');
+    });
+    (0, vitest_1.it)('requires the database target to match the application environment', () => {
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...validEnv, DB_TARGET: 'production' })).toThrow('DB_TARGET');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...previewEnv, DB_TARGET: 'production' })).toThrow('DB_TARGET');
     });
     (0, vitest_1.it)('allows ngrok in local and preview environments', () => {
         (0, vitest_1.expect)((0, env_1.parseBackendEnv)({ ...validEnv, BETTER_AUTH_URL: 'https://demo.ngrok-free.app' }).APP_ENV).toBe('local');
-        (0, vitest_1.expect)((0, env_1.parseBackendEnv)({ ...validEnv, APP_ENV: 'preview', PHONE_OTP_MODE: 'disabled', BETTER_AUTH_URL: 'https://demo.ngrok-free.app' }).APP_ENV).toBe('preview');
+        (0, vitest_1.expect)((0, env_1.parseBackendEnv)({ ...previewEnv, BETTER_AUTH_URL: 'https://demo.ngrok-free.app' }).APP_ENV).toBe('preview');
     });
     (0, vitest_1.it)('allows console OTP only locally', () => {
-        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...validEnv, APP_ENV: 'preview' })).toThrow('PHONE_OTP_MODE');
-        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...validEnv, APP_ENV: 'production', BETTER_AUTH_URL: 'https://api.example.com' })).toThrow('PHONE_OTP_MODE');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...previewEnv, PHONE_OTP_MODE: 'console' })).toThrow('PHONE_OTP_MODE');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...productionEnv, PHONE_OTP_MODE: 'console' })).toThrow('PHONE_OTP_MODE');
+    });
+    (0, vitest_1.it)('allows twilio OTP outside local when the twilio vars are set', () => {
+        const withTwilio = {
+            ...previewEnv,
+            PHONE_OTP_MODE: 'twilio',
+            TWILIO_ACCOUNT_SID: 'AC00000000000000000000000000000000',
+            TWILIO_AUTH_TOKEN: 'twilio-auth-token',
+            TWILIO_PHONE_NUMBER: '+15551234567',
+        };
+        (0, vitest_1.expect)((0, env_1.parseBackendEnv)(withTwilio).PHONE_OTP_MODE).toBe('twilio');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...validEnv, PHONE_OTP_MODE: 'twilio' })).toThrow('TWILIO_ACCOUNT_SID');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({
+            ...withTwilio,
+            TWILIO_ACCOUNT_SID: undefined,
+        })).toThrow('TWILIO_ACCOUNT_SID');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({
+            ...withTwilio,
+            TWILIO_AUTH_TOKEN: undefined,
+        })).toThrow('TWILIO_AUTH_TOKEN');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({
+            ...withTwilio,
+            TWILIO_PHONE_NUMBER: undefined,
+        })).toThrow('TWILIO_PHONE_NUMBER');
+    });
+    (0, vitest_1.it)('rejects an invalid twilio phone number', () => {
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({
+            ...validEnv,
+            PHONE_OTP_MODE: 'twilio',
+            TWILIO_ACCOUNT_SID: 'AC00000000000000000000000000000000',
+            TWILIO_AUTH_TOKEN: 'twilio-auth-token',
+            TWILIO_PHONE_NUMBER: '15551234567',
+        })).toThrow('TWILIO_PHONE_NUMBER');
     });
     vitest_1.it.each([
         'http://api.example.com', 'https://localhost:3000', 'https://127.0.0.1',
         'https://10.0.0.1', 'https://172.16.0.1', 'https://192.168.1.1',
         'https://demo.ngrok-free.app', 'https://demo.ngrok.io',
     ])('rejects unstable production auth URL %s', (url) => {
-        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...validEnv, APP_ENV: 'production', PHONE_OTP_MODE: 'disabled', BETTER_AUTH_URL: url })).toThrow('BETTER_AUTH_URL');
+        (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({ ...productionEnv, BETTER_AUTH_URL: url })).toThrow('BETTER_AUTH_URL');
     });
     (0, vitest_1.it)('accepts a stable public production auth URL', () => {
-        const parsed = (0, env_1.parseBackendEnv)({ ...validEnv, APP_ENV: 'production', NODE_ENV: 'production', PHONE_OTP_MODE: 'disabled', BETTER_AUTH_URL: 'https://api.example.com', CORS_ALLOWED_ORIGINS: 'https://app.example.com' });
+        const parsed = (0, env_1.parseBackendEnv)(productionEnv);
         (0, vitest_1.expect)(parsed.APP_ENV).toBe('production');
     });
     (0, vitest_1.it)('parses an explicit CORS allowlist', () => {
@@ -57,11 +117,7 @@ const validEnv = {
     });
     (0, vitest_1.it)('requires HTTPS CORS origins in production', () => {
         (0, vitest_1.expect)(() => (0, env_1.parseBackendEnv)({
-            ...validEnv,
-            APP_ENV: 'production',
-            NODE_ENV: 'production',
-            PHONE_OTP_MODE: 'disabled',
-            BETTER_AUTH_URL: 'https://api.example.com',
+            ...productionEnv,
             CORS_ALLOWED_ORIGINS: 'http://app.example.com',
         })).toThrow('CORS_ALLOWED_ORIGINS');
     });

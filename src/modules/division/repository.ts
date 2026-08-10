@@ -26,8 +26,8 @@ export const divisionRepository: DivisionRepository = {
     return prisma.division.create({ data: data as any });
   },
 
-  async update(id: string, data: Record<string, unknown>): Promise<DivisionEntity> {
-    return prisma.division.update({ where: { id }, data });
+  async update(id: string, data: Record<string, unknown>, tx?: Prisma.TransactionClient): Promise<DivisionEntity> {
+    return (tx ?? prisma).division.update({ where: { id }, data });
   },
 
   async delete(id: string, tx?: Prisma.TransactionClient): Promise<void> {

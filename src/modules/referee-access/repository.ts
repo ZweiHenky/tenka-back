@@ -16,25 +16,49 @@ export const refereeAccessRepository: PartidoRefereeAccessRepository = {
         partido: {
           select: {
             id: true,
+            version: true,
             fecha: true,
+            fechaFin: true,
+            canchaId: true,
             estado: true,
             golesLocal: true,
             golesVisitante: true,
             penalesLocal: true,
             penalesVisitante: true,
             tipoPartido: true,
+            notas: true,
+            anotaciones: {
+              select: { id: true, jugadorId: true, equipoId: true, ladoMarcador: true, cantidad: true, jugadorNombre: true, equipoNombre: true, dorsal: true },
+              orderBy: [{ ladoMarcador: 'asc' }, { jugadorNombre: 'asc' }, { id: 'asc' }],
+            },
+            participaciones: {
+              select: { id: true, jugadorId: true, equipoId: true, ladoMarcador: true, jugadorIdSnapshot: true, equipoIdSnapshot: true, jugadorNombre: true, equipoNombre: true, dorsal: true },
+              orderBy: [{ ladoMarcador: 'asc' }, { jugadorNombre: 'asc' }, { id: 'asc' }],
+            },
             equipoLocal: { select: { id: true, nombre: true, logo: true } },
             equipoVisitante: { select: { id: true, nombre: true, logo: true } },
             cancha: { select: { id: true, nombre: true } },
             jornada: {
               select: {
                 numero: true,
-                division: { select: { nombre: true, liga: { select: { nombre: true } } } },
+                division: { select: {
+                  nombre: true,
+                  registrarParticipaciones: true,
+                  usarPenalesEnEmpates: true,
+                  liga: { select: { nombre: true, multiplesCanchas: true } },
+                  jugadores: { select: { equipoId: true, dorsal: true, jugador: { select: { id: true, nombre: true, foto: true } } } },
+                } },
               },
             },
             rondaPlayoff: {
               select: {
-                division: { select: { nombre: true, liga: { select: { nombre: true } } } },
+                division: { select: {
+                  nombre: true,
+                  registrarParticipaciones: true,
+                  usarPenalesEnEmpates: true,
+                  liga: { select: { nombre: true, multiplesCanchas: true } },
+                  jugadores: { select: { equipoId: true, dorsal: true, jugador: { select: { id: true, nombre: true, foto: true } } } },
+                } },
               },
             },
           },

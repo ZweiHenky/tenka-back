@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TEAMS = exports.jornadaService = exports.owner = exports.divisionId = exports.logger = exports.notificationService = exports.partidoRepository = exports.jornadaRepository = exports.prisma = void 0;
+exports.TEAMS = exports.jornadaService = exports.owner = exports.divisionId = exports.logger = exports.partidoRepository = exports.jornadaRepository = exports.prisma = void 0;
 exports.mockDivision = mockDivision;
 exports.mockTeams = mockTeams;
 exports.mockNoPreviousJornadas = mockNoPreviousJornadas;
@@ -14,10 +14,12 @@ vitest_1.vi.mock('../../../../config/database', () => ({
     prisma: {
         division: { findUnique: vitest_1.vi.fn() },
         divisionEquipo: { findMany: vitest_1.vi.fn() },
-        partido: { findMany: vitest_1.vi.fn(), deleteMany: vitest_1.vi.fn(), createMany: vitest_1.vi.fn(), update: vitest_1.vi.fn() },
-        jornada: { findUnique: vitest_1.vi.fn(), create: vitest_1.vi.fn() },
+        partido: { findMany: vitest_1.vi.fn(), deleteMany: vitest_1.vi.fn(), createMany: vitest_1.vi.fn(), update: vitest_1.vi.fn(), updateMany: vitest_1.vi.fn() },
+        jornada: { findUnique: vitest_1.vi.fn(), findFirst: vitest_1.vi.fn(), create: vitest_1.vi.fn() },
+        notificationOutbox: { createMany: vitest_1.vi.fn() },
         rondaPlayoff: { findMany: vitest_1.vi.fn(), findFirst: vitest_1.vi.fn() },
         ligaCancha: { findMany: vitest_1.vi.fn() },
+        $executeRawUnsafe: vitest_1.vi.fn(),
         $transaction: vitest_1.vi.fn(),
     },
 }));
@@ -36,26 +38,21 @@ vitest_1.vi.mock('../../../partido/repository', () => ({
 vitest_1.vi.mock('../../../tabla-posicion/service', () => ({
     tablaPosicionService: { recalcular: vitest_1.vi.fn() },
 }));
-vitest_1.vi.mock('../../../notification/service', () => ({
-    notificationService: { notifyJornadaGenerated: vitest_1.vi.fn() },
-}));
 vitest_1.vi.mock('../../../../config/logger', () => ({
     logger: { info: vitest_1.vi.fn(), warn: vitest_1.vi.fn() },
 }));
 const database_1 = require("../../../../config/database");
 const repository_1 = require("../../repository");
 const repository_2 = require("../../../partido/repository");
-const service_2 = require("../../../notification/service");
 const logger_1 = require("../../../../config/logger");
 exports.prisma = database_1.prisma;
 exports.jornadaRepository = repository_1.jornadaRepository;
 exports.partidoRepository = repository_2.partidoRepository;
-exports.notificationService = service_2.notificationService;
 exports.logger = logger_1.logger;
 exports.divisionId = 'div-test-1';
 exports.owner = { id: 'user-1', email: 'owner@test.com', rol: 'LIGA' };
-function generateNext(_divisionId, slots) {
-    return service_1.jornadaService.generateNext(exports.divisionId, exports.owner, slots);
+function generateNext(_divisionId, slots, generationKey = 'test-generation-key') {
+    return service_1.jornadaService.generateNext(exports.divisionId, exports.owner, slots, undefined, undefined, generationKey);
 }
 exports.jornadaService = { ...service_1.jornadaService, generateNext };
 exports.TEAMS = [
@@ -69,14 +66,15 @@ exports.TEAMS = [
 ];
 function mockDivision(opts) {
     exports.prisma.division.findUnique.mockImplementation(async (query) => {
-        if (query.select?.liga && !query.select?.diasPartido)
+        if (query.select?.liga && !query.select?.diasPartido && !query.select?.ligaId)
             return { liga: { userId: exports.owner.id } };
         return {
             maxEquipos: opts?.maxEquipos ?? 7,
             diasPartido: opts?.diasPartido ?? null,
-            duracionPartido: null,
+            duracionPartido: opts && 'duracionPartido' in opts ? opts.duracionPartido : 90,
             ligaId: 'liga-1',
-            liga: { userId: exports.owner.id },
+            canchaUnicaId: opts?.canchaUnicaId ?? null,
+            liga: { userId: exports.owner.id, multiplesCanchas: opts?.multiplesCanchas ?? false },
         };
     });
 }
@@ -93,7 +91,7 @@ function mockJornadaCreated(numero = 1) {
     return jornada;
 }
 function mockPartidosCreatedReturn(count) {
-    exports.prisma.partido.findMany.mockResolvedValue(Array.from({ length: count }, () => ({ fecha: new Date('2026-07-02T18:00:00') })));
+    void count;
 }
 function expectMatch(calls, localId, visitaId, tipo) {
     return calls.some(([args]) => args.equipoLocalId === localId
@@ -103,13 +101,24 @@ function expectMatch(calls, localId, visitaId, tipo) {
 function resetGenerateNextHarness() {
     vitest_1.vi.resetAllMocks();
     exports.prisma.rondaPlayoff.findMany.mockResolvedValue([]);
+    exports.prisma.jornada.findFirst.mockResolvedValue(null);
+    exports.prisma.ligaCancha.findMany.mockResolvedValue([]);
     exports.prisma.rondaPlayoff.findFirst.mockImplementation(async () => {
         const rows = await exports.prisma.rondaPlayoff.findMany();
         return rows[0] ?? null;
     });
     exports.jornadaRepository.findGenerationHistory.mockImplementation(async () => {
         const result = await exports.jornadaRepository.findByDivision();
-        return result?.rows ?? [];
+        return (result?.rows ?? []).map((jornada, jornadaIndex) => ({
+            ...jornada,
+            id: jornada.id ?? `j-history-${jornada.numero ?? jornadaIndex}`,
+            fechaInicio: jornada.fechaInicio ?? null,
+            partidos: (jornada.partidos ?? []).map((partido, partidoIndex) => ({
+                ...partido,
+                id: partido.id ?? `p-history-${jornada.numero ?? jornadaIndex}-${partidoIndex}`,
+                fecha: partido.fecha ?? null,
+            })),
+        }));
     });
     exports.prisma.partido.findMany.mockImplementation(async (query) => {
         if (!query?.where?.id?.in)
@@ -118,20 +127,37 @@ function resetGenerateNextHarness() {
         return rows.filter(Boolean);
     });
     exports.prisma.partido.update.mockImplementation(async ({ where, data }) => exports.partidoRepository.update(where.id, data));
+    exports.prisma.partido.updateMany.mockImplementation(async ({ where, data }) => {
+        await exports.partidoRepository.update(where.id, data);
+        return { count: 1 };
+    });
     exports.prisma.partido.createMany.mockImplementation(async ({ data }) => {
         for (const partido of data)
             await exports.partidoRepository.create(partido);
         return { count: data.length };
     });
     exports.prisma.$transaction.mockImplementation(async (callback) => callback({
+        $executeRawUnsafe: exports.prisma.$executeRawUnsafe,
+        ligaCancha: exports.prisma.ligaCancha,
+        division: exports.prisma.division,
+        divisionEquipo: exports.prisma.divisionEquipo,
         jornada: {
+            findFirst: vitest_1.vi.fn(async (query) => {
+                if (query?.where?.generationKey)
+                    return exports.prisma.jornada.findFirst(query);
+                const result = await exports.jornadaRepository.findByDivision(exports.divisionId);
+                const history = result?.rows ?? [];
+                return history.length > 0 ? { numero: Math.max(...history.map((item) => item.numero)) } : null;
+            }),
             create: vitest_1.vi.fn(async ({ data }) => exports.jornadaRepository.create(data)),
         },
         partido: {
+            findMany: exports.prisma.partido.findMany,
             update: exports.prisma.partido.update,
+            updateMany: exports.prisma.partido.updateMany,
             createMany: exports.prisma.partido.createMany,
         },
+        notificationOutbox: exports.prisma.notificationOutbox,
     }));
-    exports.notificationService.notifyJornadaGenerated.mockResolvedValue(undefined);
 }
 //# sourceMappingURL=generateNextHarness.js.map

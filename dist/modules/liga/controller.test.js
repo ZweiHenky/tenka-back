@@ -10,7 +10,7 @@ const owner = { id: 'owner-1', email: 'owner@test.com', rol: 'LIGA' };
 (0, vitest_1.describe)('ligaController.getRecentSchedule', () => {
     (0, vitest_1.beforeEach)(() => vitest_1.vi.clearAllMocks());
     (0, vitest_1.it)('responde la programacion reciente con el envelope establecido', async () => {
-        const schedule = { id: 'liga-1', nombre: 'Liga Centro', divisiones: [] };
+        const schedule = { id: 'liga-1', nombre: 'Liga Centro', multiplesCanchas: false, divisiones: [] };
         mocks.getRecentSchedule.mockResolvedValue(schedule);
         const req = { params: { ligaId: 'liga-1' }, user: owner };
         const res = { status: vitest_1.vi.fn().mockReturnThis(), json: vitest_1.vi.fn() };

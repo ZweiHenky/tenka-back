@@ -17,7 +17,11 @@ let ligaService;
         mocks.findByNormalizedName.mockResolvedValue(null);
         mocks.update.mockResolvedValue(service_test_harness_1.existingLiga);
         mocks.canchaFindUnique.mockResolvedValue(null);
-        mocks.canchaFindFirst.mockResolvedValue({ id: 'cancha-1', ligaId: 'liga-1', nombre: 'Cancha 1', activa: true });
+        mocks.canchaFindFirst
+            .mockReset()
+            .mockResolvedValueOnce(null)
+            .mockResolvedValue({ id: 'cancha-1', ligaId: 'liga-1', nombre: 'Cancha 1', activa: true });
+        mocks.canchaCount.mockResolvedValue(2);
         mocks.canchaCreate.mockResolvedValue({ id: 'cancha-1' });
         mocks.canchaUpdate.mockResolvedValue({ id: 'cancha-1' });
         mocks.partidoCount.mockResolvedValue(0);

@@ -16,6 +16,7 @@ export interface DivisionConRelaciones {
 export interface LigaCanchaEntity {
   id: string;
   nombre: string;
+  nombreNormalizado: string;
   activa: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -51,12 +52,18 @@ export interface ProgramacionRecienteJornadaDto {
 export interface ProgramacionRecienteLigaDto {
   id: string;
   nombre: string;
+  multiplesCanchas: boolean;
   divisiones: Array<{
     id: string;
     nombre: string;
     categoria: { id: string; nombre: string };
     jornadas: ProgramacionRecienteJornadaDto[];
   }>;
+}
+
+export interface LigaReglaItem {
+  titulo: string;
+  detalle: string;
 }
 
 export interface LigaEntity {
@@ -70,6 +77,7 @@ export interface LigaEntity {
   canchaPublicId: string | null;
   multiplesCanchas: boolean;
   usaArbitros: boolean;
+  reglas?: LigaReglaItem[] | null;
   createdAt: Date;
   updatedAt: Date;
   ubicacionId: string;

@@ -37,6 +37,8 @@ const routes_16 = require("./modules/jugador/routes");
 const routes_17 = require("./modules/media/routes");
 const routes_18 = require("./modules/notification-subscription/routes");
 const routes_19 = require("./modules/referee-access/routes");
+const routes_20 = require("./modules/disponibilidad-cancha/routes");
+const routes_21 = require("./modules/goleadores/routes");
 function createApp() {
     const app = (0, express_1.default)();
     const allowedOrigins = new Set((0, env_1.getCorsAllowedOrigins)());
@@ -83,6 +85,7 @@ function createApp() {
         runAuthHandler(req, res, next);
     });
     app.use('/api/categorias', routes_1.categoriaRouter);
+    app.use('/api/ligas', routes_20.disponibilidadCanchaRouter);
     app.use('/api/ligas', routes_2.ligaRouter);
     app.use('/api/tipos', routes_3.tipoRouter);
     app.use('/api/ubicaciones', routes_4.ubicacionRouter);
@@ -101,6 +104,7 @@ function createApp() {
     app.use('/api/media', routes_17.mediaRouter);
     app.use('/api/notification-subscriptions', routes_18.notificationSubscriptionRouter);
     app.use('/api/referee', routes_19.refereeAccessRouter);
+    app.use('/api/goleadores', routes_21.goleadoresRouter);
     app.use((_req, _res, next) => next(new errors_1.NotFoundError('Ruta')));
     instrument_1.Sentry.setupExpressErrorHandler(app, {
         shouldHandleError: (error) => !(error instanceof errors_1.AppError) && (error.status ?? 500) >= 500,

@@ -24,5 +24,10 @@ export const uploadLimiter = createRateLimiter({
   limit: env.UPLOAD_RATE_LIMIT,
   keyGenerator: (req) => req.user?.id ? `user:${req.user.id}` : ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? 'unknown'),
 });
+export const playerPhoneLookupLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  limit: 10,
+  keyGenerator: (req) => req.user?.id ? `user:${req.user.id}` : ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? 'unknown'),
+});
 export const refereeReadLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, limit: 30 });
 export const refereeWriteLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, limit: 5 });

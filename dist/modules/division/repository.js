@@ -21,8 +21,8 @@ exports.divisionRepository = {
     async create(data) {
         return database_1.prisma.division.create({ data: data });
     },
-    async update(id, data) {
-        return database_1.prisma.division.update({ where: { id }, data });
+    async update(id, data, tx) {
+        return (tx ?? database_1.prisma).division.update({ where: { id }, data });
     },
     async delete(id, tx) {
         await (tx ?? database_1.prisma).division.delete({ where: { id } });

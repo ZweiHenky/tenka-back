@@ -34,7 +34,7 @@ let ligaService;
         (0, vitest_1.expect)(mocks.findByNormalizedName).toHaveBeenCalledWith('liga centro', 'liga-1');
         (0, vitest_1.expect)(mocks.update).toHaveBeenCalledWith('liga-1', {
             nombre: 'LIGA CENTRO', nombreNormalizado: 'liga centro',
-        }, undefined, undefined);
+        }, [], undefined);
     });
     (0, vitest_1.it)('rechaza una colision al renombrar', async () => {
         mocks.findByNormalizedName.mockResolvedValue({ ...service_test_harness_1.existingLiga, id: 'liga-2' });

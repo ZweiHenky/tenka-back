@@ -6,6 +6,8 @@ exports.createDivisionSchema = zod_1.z.object({
     nombre: zod_1.z.string().min(1),
     maxEquipos: zod_1.z.number().int().min(2),
     arbitraje: zod_1.z.number().min(0).default(0),
+    registrarParticipaciones: zod_1.z.boolean().optional(),
+    usarPenalesEnEmpates: zod_1.z.boolean().optional(),
     diasPartido: zod_1.z.string().min(1),
     horarioPartido: zod_1.z.string().min(1),
     duracionPartido: zod_1.z.number().int().min(1).optional(),
@@ -22,6 +24,8 @@ exports.updateDivisionSchema = zod_1.z.object({
     nombre: zod_1.z.string().min(1).optional(),
     maxEquipos: zod_1.z.number().int().min(2).optional(),
     arbitraje: zod_1.z.number().min(0).optional(),
+    registrarParticipaciones: zod_1.z.boolean().optional(),
+    usarPenalesEnEmpates: zod_1.z.boolean().optional(),
     diasPartido: zod_1.z.string().min(1).optional(),
     horarioPartido: zod_1.z.string().min(1).optional(),
     duracionPartido: zod_1.z.number().int().min(1).optional(),
@@ -33,5 +37,6 @@ exports.updateDivisionSchema = zod_1.z.object({
     categoriaId: zod_1.z.string().optional(),
     tipoId: zod_1.z.string().optional(),
     tipoCompetenciaId: zod_1.z.string().optional(),
+    canchaUnicaId: zod_1.z.string().min(1).nullable().optional(),
 });
 //# sourceMappingURL=validator.js.map

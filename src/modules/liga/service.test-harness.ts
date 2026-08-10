@@ -23,9 +23,11 @@ const mocks = vi.hoisted(() => ({
   canchaFindUnique: vi.fn(),
   canchaFindFirst: vi.fn(),
   canchaCreate: vi.fn(),
+  canchaCount: vi.fn(),
   canchaUpdate: vi.fn(),
   canchaDelete: vi.fn(),
   partidoCount: vi.fn(),
+  divisionCount: vi.fn(),
   partidoArbitroCount: vi.fn(),
 }));
 
@@ -60,11 +62,15 @@ vi.mock('../../config/database', () => ({
       findUnique: mocks.canchaFindUnique,
       findFirst: mocks.canchaFindFirst,
       create: mocks.canchaCreate,
+      count: mocks.canchaCount,
       update: mocks.canchaUpdate,
       delete: mocks.canchaDelete,
     },
     partido: {
       count: mocks.partidoCount,
+    },
+    division: {
+      count: mocks.divisionCount,
     },
     partidoArbitro: {
       count: mocks.partidoArbitroCount,

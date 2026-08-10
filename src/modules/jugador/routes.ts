@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { optionalAuth, requireAuth, requireRole } from '../../middlewares/authMiddleware';
 import { jugadorController } from './controller';
+import { playerPhoneLookupLimiter } from '../../middlewares/rateLimits';
 
 const router = Router();
 
@@ -13,6 +14,12 @@ router.get('/:id', jugadorController.getById);
 router.use(requireAuth);
 router.post('/me', jugadorController.createMe);
 router.patch('/me', jugadorController.updateMe);
+router.post(
+  '/equipo/:equipoId/buscar',
+  requireRole('CAPITAN', 'LIGA'),
+  playerPhoneLookupLimiter,
+  jugadorController.lookupByPhone,
+);
 router.post('/', requireRole('CAPITAN', 'LIGA'), jugadorController.create);
 router.patch('/:id', requireRole('CAPITAN', 'LIGA'), jugadorController.update);
 router.delete('/:id', jugadorController.delete);

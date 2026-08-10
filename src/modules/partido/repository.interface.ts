@@ -1,5 +1,6 @@
 import type { PartidoEntity } from './entity';
 import type { AuthenticatedUser } from '../../types/auth';
+import type { Prisma, PrismaClient } from '../../generated/prisma/client';
 
 export interface PartidoRepository {
   findAllVisible(actor?: AuthenticatedUser): Promise<PartidoEntity[]>;
@@ -9,9 +10,11 @@ export interface PartidoRepository {
   findVisibleByJornada(jornadaId: string, actor?: AuthenticatedUser): Promise<PartidoEntity[] | null>;
   findByRondaPlayoff(rondaPlayoffId: string): Promise<PartidoEntity[]>;
   findVisibleByRondaPlayoff(rondaPlayoffId: string, actor?: AuthenticatedUser): Promise<PartidoEntity[] | null>;
-  findAuthorizationContext(id: string): Promise<{
+  findAuthorizationContext(id: string, client?: PrismaClient | Prisma.TransactionClient): Promise<{
     id: string;
+    version?: number;
     ligaUserId: string;
+    ligaId: string;
     estado: string | null;
     golesLocal: number;
     golesVisitante: number;
@@ -25,8 +28,10 @@ export interface PartidoRepository {
     equipoVisitanteId: string | null;
     fecha: Date | null;
     fechaFin: Date | null;
+    canchaId: string | null;
+    multiplesCanchas: boolean;
   } | null>;
   create(data: Record<string, unknown>): Promise<PartidoEntity>;
-  update(id: string, data: Record<string, unknown>): Promise<PartidoEntity>;
-  delete(id: string): Promise<void>;
+  update(id: string, data: Record<string, unknown>, client?: PrismaClient | Prisma.TransactionClient): Promise<PartidoEntity>;
+  delete(id: string, client?: PrismaClient | Prisma.TransactionClient): Promise<PartidoEntity>;
 }

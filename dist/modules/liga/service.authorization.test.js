@@ -39,7 +39,7 @@ let ligaService;
         (0, vitest_1.expect)(mocks.findRecentSchedule).toHaveBeenCalledWith('liga-1', service_test_harness_1.foreignUser);
     });
     vitest_1.it.each([service_test_harness_1.owner, service_test_harness_1.admin])('permite consultar la programacion al propietario o administrador', async (actor) => {
-        const schedule = { id: 'liga-1', nombre: 'Liga Centro', divisiones: [] };
+        const schedule = { id: 'liga-1', nombre: 'Liga Centro', multiplesCanchas: false, divisiones: [] };
         mocks.findRecentSchedule.mockResolvedValue(schedule);
         await (0, vitest_1.expect)(ligaService.getRecentSchedule('liga-1', actor)).resolves.toBe(schedule);
     });

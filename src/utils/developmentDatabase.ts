@@ -1,0 +1,18 @@
+import { PrismaPg } from '@prisma/adapter-pg';
+import { env } from '../config/env';
+import { PrismaClient } from '../generated/prisma/client';
+
+const DEVELOPMENT_SCRIPT_AUTH = 'myleague-development-script-v1';
+
+export function createDevelopmentPrismaClient(): PrismaClient {
+  if (process.env.DEVELOPMENT_SCRIPT_AUTH !== DEVELOPMENT_SCRIPT_AUTH) {
+    throw new Error('Direct database script execution is disabled. Use a pnpm db:script:* command.');
+  }
+  if (env.APP_ENV !== 'local' || env.DB_TARGET !== 'development') {
+    throw new Error('Database scripts are only allowed for the development target.');
+  }
+
+  return new PrismaClient({
+    adapter: new PrismaPg({ connectionString: env.DATABASE_URL }),
+  });
+}

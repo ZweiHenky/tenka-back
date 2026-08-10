@@ -5,6 +5,7 @@ const errors_1 = require("../../utils/errors");
 const repository_1 = require("./repository");
 const service_1 = require("../media/service");
 const authorization_1 = require("../../utils/authorization");
+const transaction_1 = require("../../utils/transaction");
 const DUPLICATE_NAME_MESSAGE = 'Ya tienes un equipo con ese nombre';
 function isUniqueConstraintError(error) {
     return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
@@ -29,7 +30,17 @@ exports.equipoService = {
             throw new errors_1.ConflictError(DUPLICATE_NAME_MESSAGE);
         }
         try {
-            return await repository_1.equipoRepository.create({ ...data, nombre, nombreNormalizado });
+            if (data.logoAssetId === undefined)
+                return await repository_1.equipoRepository.create({ nombre, nombreNormalizado, userId: data.userId });
+            return await (0, transaction_1.runInTransaction)(async (tx) => {
+                const media = data.logoAssetId !== undefined ? await service_1.mediaService.prepareAttachment(tx, data.logoAssetId, data.userId, 'TEAM_LOGO') : undefined;
+                return repository_1.equipoRepository.create({
+                    nombre,
+                    nombreNormalizado,
+                    userId: data.userId,
+                    ...(media && { logo: media.url, logoPublicId: media.publicId }),
+                }, tx);
+            });
         }
         catch (error) {
             if (isUniqueConstraintError(error))
@@ -40,7 +51,7 @@ exports.equipoService = {
     async update(id, data, actor) {
         const old = await this.getById(id);
         (0, authorization_1.assertOwnerOrAdmin)(actor, old.userId, 'Equipo');
-        const updateData = { ...data };
+        const { logoAssetId, ...updateData } = data;
         if (typeof data.nombre === 'string') {
             const nombre = data.nombre.trim();
             const nombreNormalizado = nombre.toLowerCase();
@@ -52,23 +63,33 @@ exports.equipoService = {
         }
         let updated;
         try {
-            updated = await repository_1.equipoRepository.update(id, updateData);
+            if (logoAssetId === undefined)
+                return await repository_1.equipoRepository.update(id, updateData);
+            updated = await (0, transaction_1.runInTransaction)(async (tx) => {
+                await service_1.mediaService.lockAttachmentTarget(tx, 'equipo', id);
+                const current = await tx.equipo.findUniqueOrThrow({ where: { id }, select: { logo: true, logoPublicId: true } });
+                const media = logoAssetId !== undefined ? await service_1.mediaService.prepareAttachment(tx, logoAssetId, actor.id, 'TEAM_LOGO', current.logo, current.logoPublicId) : undefined;
+                return repository_1.equipoRepository.update(id, { ...updateData, ...(media && { logo: media.url, logoPublicId: media.publicId }) }, tx);
+            });
         }
         catch (error) {
             if (isUniqueConstraintError(error))
                 throw new errors_1.ConflictError(DUPLICATE_NAME_MESSAGE);
             throw error;
         }
-        if (data.logo !== undefined && data.logo !== old.logo) {
-            await service_1.mediaService.scheduleImageCleanup(old.logo, old.logoPublicId);
-        }
         return updated;
     },
     async delete(id, actor) {
         const old = await this.getById(id);
         (0, authorization_1.assertOwnerOrAdmin)(actor, old.userId, 'Equipo');
-        await repository_1.equipoRepository.delete(id);
-        await service_1.mediaService.scheduleImageCleanup(old.logo, old.logoPublicId);
+        if (!old.logo) {
+            await repository_1.equipoRepository.delete(id);
+            return;
+        }
+        await (0, transaction_1.runInTransaction)(async (tx) => {
+            await service_1.mediaService.scheduleImageCleanup(old.logo, old.logoPublicId, tx);
+            await repository_1.equipoRepository.delete(id, tx);
+        });
     },
 };
 //# sourceMappingURL=service.js.map

@@ -4,6 +4,8 @@ export const createDivisionSchema = z.object({
   nombre: z.string().min(1),
   maxEquipos: z.number().int().min(2),
   arbitraje: z.number().min(0).default(0),
+  registrarParticipaciones: z.boolean().optional(),
+  usarPenalesEnEmpates: z.boolean().optional(),
   diasPartido: z.string().min(1),
   horarioPartido: z.string().min(1),
   duracionPartido: z.number().int().min(1).optional(),
@@ -21,6 +23,8 @@ export const updateDivisionSchema = z.object({
   nombre: z.string().min(1).optional(),
   maxEquipos: z.number().int().min(2).optional(),
   arbitraje: z.number().min(0).optional(),
+  registrarParticipaciones: z.boolean().optional(),
+  usarPenalesEnEmpates: z.boolean().optional(),
   diasPartido: z.string().min(1).optional(),
   horarioPartido: z.string().min(1).optional(),
   duracionPartido: z.number().int().min(1).optional(),
@@ -32,6 +36,7 @@ export const updateDivisionSchema = z.object({
   categoriaId: z.string().optional(),
   tipoId: z.string().optional(),
   tipoCompetenciaId: z.string().optional(),
+  canchaUnicaId: z.string().min(1).nullable().optional(),
 });
 
 export type CreateDivisionInput = z.output<typeof createDivisionSchema>;

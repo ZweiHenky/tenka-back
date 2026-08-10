@@ -10,7 +10,7 @@ router.get('/jornada/:jornadaId', optionalAuth, partidoController.findByJornada)
 router.get('/ronda-playoff/:rondaPlayoffId', optionalAuth, partidoController.findByRondaPlayoff);
 router.get('/:id', optionalAuth, partidoController.getById);
 router.use(requireAuth);
-router.post('/', partidoController.create);
+router.patch('/:id/resultado', partidoController.updateResult);
 router.patch('/:id', partidoController.update);
 router.delete('/:id', partidoController.delete);
 router.post('/:id/referee-link', refereeAccessController.createAccess);

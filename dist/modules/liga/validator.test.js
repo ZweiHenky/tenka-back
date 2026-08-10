@@ -48,6 +48,21 @@ const baseLiga = {
     (0, vitest_1.it)('permite actualizaciones parciales y deja la validacion final al servicio', () => {
         (0, vitest_1.expect)(validator_1.updateLigaSchema.safeParse({ multiplesCanchas: true }).success).toBe(true);
     });
+    (0, vitest_1.it)('acepta ids y estado activo en las canchas de una actualizacion', () => {
+        const result = validator_1.updateLigaSchema.parse({
+            canchas: [
+                { id: 'cancha-1', nombre: '  Principal  ', activa: true },
+                { id: 'cancha-2', activa: false },
+            ],
+        });
+        (0, vitest_1.expect)(result.canchas).toEqual([
+            { id: 'cancha-1', nombre: 'Principal', activa: true },
+            { id: 'cancha-2', activa: false },
+        ]);
+    });
+    (0, vitest_1.it)('exige nombre para una cancha nueva en una actualizacion', () => {
+        (0, vitest_1.expect)(validator_1.updateLigaSchema.safeParse({ canchas: [{ activa: true }] }).success).toBe(false);
+    });
 });
 (0, vitest_1.describe)('validacion de arbitros de liga', () => {
     (0, vitest_1.it)('rechaza una liga con arbitros habilitados y un solo arbitro', () => {

@@ -1,6 +1,7 @@
 import { prisma } from '../../config/database';
 import type { EquipoEntity } from './entity';
 import type { EquipoRepository } from './repository.interface';
+import type { Prisma } from '../../generated/prisma/client';
 
 export const equipoRepository: EquipoRepository = {
   async findAll(): Promise<EquipoEntity[]> {
@@ -21,15 +22,15 @@ export const equipoRepository: EquipoRepository = {
     });
   },
 
-  async create(data: { nombre: string; nombreNormalizado: string; logo?: string; userId: string }): Promise<EquipoEntity> {
-    return prisma.equipo.create({ data });
+  async create(data: { nombre: string; nombreNormalizado: string; logo?: string; userId: string }, tx?: Prisma.TransactionClient): Promise<EquipoEntity> {
+    return (tx ?? prisma).equipo.create({ data });
   },
 
-  async update(id: string, data: Record<string, unknown>): Promise<EquipoEntity> {
-    return prisma.equipo.update({ where: { id }, data });
+  async update(id: string, data: Record<string, unknown>, tx?: Prisma.TransactionClient): Promise<EquipoEntity> {
+    return (tx ?? prisma).equipo.update({ where: { id }, data });
   },
 
-  async delete(id: string): Promise<void> {
-    await prisma.equipo.delete({ where: { id } });
+  async delete(id: string, tx?: Prisma.TransactionClient): Promise<void> {
+    await (tx ?? prisma).equipo.delete({ where: { id } });
   },
 };

@@ -4,6 +4,7 @@ import { tablaPosicionRepository } from './repository';
 import type { TablaPosicionEntity } from './entity';
 import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
+import type { Prisma } from '../../generated/prisma/client';
 
 async function assertDivisionOwner(divisionId: string, actor: AuthenticatedUser): Promise<void> {
   const division = await prisma.division.findUnique({
@@ -36,37 +37,38 @@ export const tablaPosicionService = {
     }));
   },
 
-  async recalcular(divisionId: string): Promise<void> {
-    const [teams, partidos] = await Promise.all([
-      prisma.divisionEquipo.findMany({
-        where: { divisionId },
-        select: { equipoId: true },
-      }),
-      prisma.partido.findMany({
-        where: {
-          jornada: { divisionId },
-          estado: 'FINALIZADO',
-          rondaPlayoffId: null,
-        },
-        select: {
-          equipoLocalId: true,
-          equipoVisitanteId: true,
-          golesLocal: true,
-          golesVisitante: true,
-          penalesLocal: true,
-          penalesVisitante: true,
-          tipoPartido: true,
-        },
-      }),
-    ]);
+  async recalcular(divisionId: string, transaction?: Prisma.TransactionClient): Promise<void> {
+    const recalculate = async (tx: Prisma.TransactionClient): Promise<void> => {
+      const [teams, partidos] = await Promise.all([
+        tx.divisionEquipo.findMany({
+          where: { divisionId },
+          select: { equipoId: true },
+        }),
+        tx.partido.findMany({
+          where: {
+            jornada: { divisionId },
+            estado: 'FINALIZADO',
+            rondaPlayoffId: null,
+          },
+          select: {
+            equipoLocalId: true,
+            equipoVisitanteId: true,
+            golesLocal: true,
+            golesVisitante: true,
+            penalesLocal: true,
+            penalesVisitante: true,
+            tipoPartido: true,
+          },
+        }),
+      ]);
 
-    const stats = new Map<string, { pj: number; g: number; e: number; p: number; gf: number; gc: number; gp: number }>();
+      const stats = new Map<string, { pj: number; g: number; e: number; p: number; gf: number; gc: number; gp: number }>();
 
-    for (const equipoId of teams.map((t) => t.equipoId)) {
-      stats.set(equipoId, { pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, gp: 0 });
-    }
+      for (const equipoId of teams.map((t) => t.equipoId)) {
+        stats.set(equipoId, { pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, gp: 0 });
+      }
 
-    for (const p of partidos) {
+      for (const p of partidos) {
       if (!p.equipoLocalId || !p.equipoVisitanteId) continue;
       const local = stats.get(p.equipoLocalId);
       const visit = stats.get(p.equipoVisitanteId);
@@ -84,7 +86,7 @@ export const tablaPosicionService = {
         else {
           local.e++;
           const tienePenales = p.penalesLocal != null && p.penalesVisitante != null;
-          if (tienePenales && p.penalesLocal! > p.penalesVisitante!) {
+          if (tienePenales && p.penalesLocal! !== p.penalesVisitante! && p.penalesLocal! > p.penalesVisitante!) {
             local.gp++;
           }
         }
@@ -108,7 +110,7 @@ export const tablaPosicionService = {
         local.e++;
         visit.e++;
         const tienePenales = p.penalesLocal != null && p.penalesVisitante != null;
-        if (tienePenales) {
+        if (tienePenales && p.penalesLocal !== p.penalesVisitante) {
           if (p.penalesLocal! > p.penalesVisitante!) {
             local.gp++;
           } else {
@@ -116,11 +118,11 @@ export const tablaPosicionService = {
           }
         }
       }
-    }
+      }
 
-    const data: { divisionId: string; equipoId: string; partidosJugados: number; ganados: number; empatados: number; perdidos: number; golesFavor: number; golesContra: number; diferenciaGoles: number; puntos: number }[] = [];
+      const data: { divisionId: string; equipoId: string; partidosJugados: number; ganados: number; empatados: number; perdidos: number; golesFavor: number; golesContra: number; diferenciaGoles: number; puntos: number }[] = [];
 
-    for (const t of teams) {
+      for (const t of teams) {
       const s = stats.get(t.equipoId)!;
       data.push({
         divisionId,
@@ -134,14 +136,19 @@ export const tablaPosicionService = {
         diferenciaGoles: s.gf - s.gc,
         puntos: s.g * 3 + s.e + s.gp,
       });
-    }
+      }
 
-    data.sort((a, b) => b.puntos - a.puntos || (b.diferenciaGoles - a.diferenciaGoles));
+      data.sort((a, b) => b.puntos - a.puntos || (b.diferenciaGoles - a.diferenciaGoles));
 
-    await prisma.$transaction(async (tx) => {
       await tx.tablaPosicion.deleteMany({ where: { divisionId } });
       await tx.tablaPosicion.createMany({ data });
-    });
+    };
+
+    if (transaction) {
+      await recalculate(transaction);
+      return;
+    }
+    await prisma.$transaction(recalculate, { isolationLevel: 'RepeatableRead' });
   },
 
   async findOne(divisionId: string, equipoId: string, actor?: AuthenticatedUser): Promise<TablaPosicionEntity> {

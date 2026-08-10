@@ -4,6 +4,47 @@ const vitest_1 = require("vitest");
 const generateNextHarness_1 = require("./support/generateNextHarness");
 (0, vitest_1.beforeEach)(generateNextHarness_1.resetGenerateNextHarness);
 (0, vitest_1.describe)('generateNext regular pairings', () => {
+    (0, vitest_1.it)('recalcula todo el plan cuando otra jornada gana el lock primero', async () => {
+        (0, generateNextHarness_1.mockDivision)({ maxEquipos: 4, diasPartido: null });
+        (0, generateNextHarness_1.mockTeams)(['t1', 't2', 't3', 't4']);
+        generateNextHarness_1.jornadaRepository.findByDivision
+            .mockResolvedValueOnce({ rows: [] })
+            .mockResolvedValue({
+            rows: [{
+                    id: 'jornada-concurrente',
+                    numero: 1,
+                    fechaInicio: null,
+                    partidos: [{ equipoLocalId: 't1', equipoVisitanteId: 't2', tipoPartido: 'REGULAR', fecha: null }],
+                }],
+        });
+        (0, generateNextHarness_1.mockJornadaCreated)(2);
+        await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId);
+        (0, vitest_1.expect)(generateNextHarness_1.prisma.$transaction).toHaveBeenCalledTimes(2);
+        (0, vitest_1.expect)(generateNextHarness_1.jornadaRepository.create).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(generateNextHarness_1.jornadaRepository.create).toHaveBeenCalledWith(vitest_1.expect.objectContaining({ numero: 2 }));
+    });
+    (0, vitest_1.it)('recalcula el plan si cambian participantes con el mismo número de jornada', async () => {
+        (0, generateNextHarness_1.mockDivision)({ maxEquipos: 4, diasPartido: null });
+        (0, generateNextHarness_1.mockTeams)(['t1', 't2', 't3', 't4']);
+        const originalHistory = {
+            id: 'jornada-1',
+            numero: 1,
+            fechaInicio: null,
+            partidos: [{ id: 'partido-1', equipoLocalId: 't1', equipoVisitanteId: 't2', tipoPartido: 'REGULAR', fecha: null }],
+        };
+        const changedHistory = {
+            ...originalHistory,
+            partidos: [{ id: 'partido-1', equipoLocalId: 't1', equipoVisitanteId: 't3', tipoPartido: 'REGULAR', fecha: null }],
+        };
+        generateNextHarness_1.jornadaRepository.findByDivision
+            .mockResolvedValueOnce({ rows: [originalHistory] })
+            .mockResolvedValue({ rows: [changedHistory] });
+        (0, generateNextHarness_1.mockJornadaCreated)(2);
+        await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId);
+        (0, vitest_1.expect)(generateNextHarness_1.prisma.$transaction).toHaveBeenCalledTimes(2);
+        (0, vitest_1.expect)(generateNextHarness_1.jornadaRepository.create).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(generateNextHarness_1.jornadaRepository.create).toHaveBeenCalledWith(vitest_1.expect.objectContaining({ numero: 2 }));
+    });
     (0, vitest_1.it)('lanza ValidationError si hay menos de 2 equipos', async () => {
         (0, generateNextHarness_1.mockDivision)();
         (0, generateNextHarness_1.mockTeams)(['t1']);
@@ -91,6 +132,8 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(3);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-08', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1' },
+            { fecha: '2099-01-09', horaInicio: '18:00', horaFin: '19:30' },
+            { fecha: '2099-01-10', horaInicio: '18:00', horaFin: '19:30' },
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
         const t1Match = calls.find(([args]) => args.equipoLocalId === 't1' || args.equipoVisitanteId === 't1');

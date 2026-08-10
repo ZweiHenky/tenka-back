@@ -1,23 +1,15 @@
-import { NotFoundError, ValidationError } from '../../utils/errors';
+import { createHash, randomUUID } from 'node:crypto';
+import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
 import { jornadaRepository } from './repository';
 import { tablaPosicionService } from '../tabla-posicion/service';
-import { notificationService } from '../notification/service';
 import { prisma } from '../../config/database';
 import type { JornadaEntity } from './entity';
 import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
 import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 import { logger } from '../../config/logger';
-import { Sentry } from '../../instrument';
-
-async function assertDivisionOwner(divisionId: string, actor: AuthenticatedUser): Promise<void> {
-  const division = await prisma.division.findUnique({
-    where: { id: divisionId },
-    select: { liga: { select: { userId: true } } },
-  });
-  if (!division) throw new NotFoundError('División');
-  assertOwnerOrAdmin(actor, division.liga.userId, 'División');
-}
+import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
+import type { JornadaGenerationHistory } from './repository.interface';
 
 const DAY_MAP: Record<string, number> = {
   dom: 0, domingo: 0,
@@ -75,9 +67,75 @@ interface SlotInput {
   equipoLocalId?: string;
   equipoVisitanteId?: string;
   tipo?: 'regular' | 'complemento' | 'amistoso' | 'eliminatoria';
-  canchaId?: string;
+  canchaId?: string | null;
   partidoId?: string;
 }
+
+class StaleGenerationPlanError extends Error {}
+
+type GeneratedJornada = JornadaEntity & { idempotencyReplayed: boolean };
+
+type GenerationLookupClient = {
+  jornada: { findFirst(args: Record<string, unknown>): Promise<any> };
+};
+
+function generationRequestHash(slots?: SlotInput[], equipoIds?: string[], descansoEquipoId?: string): string {
+  return createHash('sha256').update(JSON.stringify({
+    slots: slots ?? null,
+    equipoIds: equipoIds ? [...equipoIds].sort() : null,
+    descansoEquipoId: descansoEquipoId ?? null,
+  })).digest('hex');
+}
+
+function generationHistoryFingerprint(history: JornadaGenerationHistory[]): string {
+  const canonicalHistory = history
+    .map((jornada) => ({
+      id: jornada.id,
+      numero: jornada.numero,
+      fechaInicio: jornada.fechaInicio?.toISOString() ?? null,
+      partidos: jornada.partidos
+        .map((partido) => ({
+          id: partido.id,
+          tipoPartido: partido.tipoPartido,
+          equipoLocalId: partido.equipoLocalId,
+          equipoVisitanteId: partido.equipoVisitanteId,
+          fecha: partido.fecha?.toISOString() ?? null,
+        }))
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+    }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+
+  return createHash('sha256').update(JSON.stringify(canonicalHistory)).digest('hex');
+}
+
+async function findGenerationReplay(
+  client: GenerationLookupClient,
+  divisionId: string,
+  generationKey: string,
+  requestHash: string,
+): Promise<JornadaEntity | null> {
+  const existing = await client.jornada.findFirst({
+    where: { divisionId, generationKey },
+    select: { id: true, numero: true, fechaInicio: true, fechaFin: true, createdAt: true, updatedAt: true, divisionId: true, generationRequestHash: true },
+  });
+  if (!existing) return null;
+  if (existing.generationRequestHash !== requestHash) {
+    throw new ConflictError('La clave de idempotencia ya fue usada con una programación diferente');
+  }
+  const { generationRequestHash: _generationRequestHash, ...jornada } = existing;
+  return jornada;
+}
+
+type CourtValidationClient = {
+  ligaCancha: { findMany(args: Record<string, unknown>): Promise<Array<{ id: string; nombre: string; activa: boolean }>> };
+  partido: { findMany(args: Record<string, unknown>): Promise<Array<{
+    id: string;
+    canchaId: string | null;
+    fecha: Date | null;
+    jornada: { division: { duracionPartido: number | null } } | null;
+    rondaPlayoff: { division: { duracionPartido: number | null } } | null;
+  }>> };
+};
 
 function getSlotInterval(slot: SlotInput): { start: Date; end: Date } | null {
   const dateMatch = slot.fecha?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -90,6 +148,140 @@ function getSlotInterval(slot: SlotInput): { start: Date; end: Date } | null {
   const end = new Date(year, month - 1, day, Number(endMatch[1]), Number(endMatch[2]));
   if (end <= start) end.setDate(end.getDate() + 1);
   return { start, end };
+}
+
+function getAuthoritativeSlotInterval(slot: SlotInput, durationMinutes: number | null): { start: Date; end: Date } {
+  const submitted = getSlotInterval(slot);
+  if (!submitted) {
+    throw new ValidationError(`El horario ${slot.fecha} ${slot.horaInicio}-${slot.horaFin} no es válido`);
+  }
+  if (!durationMinutes || durationMinutes <= 0) {
+    throw new ValidationError('La división debe tener una duración de partido válida para programar horarios');
+  }
+
+  const end = addMinutes(submitted.start, durationMinutes);
+  if (end.getTime() !== submitted.end.getTime()) {
+    throw new ValidationError(`La hora fin del horario ${slot.fecha} ${slot.horaInicio}-${slot.horaFin} no coincide con la duración de ${durationMinutes} minutos de la división`);
+  }
+  return { start: submitted.start, end };
+}
+
+function isCourtExclusionError(error: unknown): boolean {
+  const candidate = error as any;
+  const databaseError = candidate?.meta?.database_error ?? candidate?.cause?.meta?.database_error ?? candidate?.cause;
+  const details = [
+    candidate?.message,
+    candidate?.meta?.constraint,
+    candidate?.meta?.constraint_name,
+    typeof databaseError === 'string' ? databaseError : undefined,
+    databaseError?.message,
+    databaseError?.code,
+    databaseError?.constraint,
+  ].filter(Boolean).join(' ');
+  return candidate?.code === '23P01'
+    || databaseError?.code === '23P01'
+    || details.includes('partidos_cancha_no_overlap')
+    || (candidate?.code === 'P2004' && /23P01|exclusion constraint/i.test(details));
+}
+
+async function validateLeagueCourtCapacity(
+  client: CourtValidationClient,
+  input: {
+    ligaId: string;
+    multiplesCanchas: boolean;
+    durationMinutes: number | null;
+    fixedCourtId?: string | null;
+    slots: SlotInput[];
+    excludedPartidoIds: string[];
+  },
+): Promise<void> {
+  const canchas = await client.ligaCancha.findMany({
+    where: { ligaId: input.ligaId, activa: true },
+    select: { id: true, nombre: true, activa: true },
+  });
+  const activeNamed = canchas.filter((cancha) => cancha.nombre.trim().length > 0);
+  if (input.multiplesCanchas && activeNamed.length < 2) {
+    throw new ValidationError('Una liga con múltiples canchas requiere al menos 2 canchas activas con nombre');
+  }
+
+  const activeById = new Map(activeNamed.map((cancha) => [cancha.id, cancha.nombre]));
+  if (input.fixedCourtId) {
+    if (!input.multiplesCanchas) {
+      throw new ValidationError('La liga no tiene múltiples canchas habilitadas');
+    }
+    if (!activeById.has(input.fixedCourtId)) {
+      throw new ValidationError('La cancha fija de la división no está activa');
+    }
+  }
+  const drafts = input.slots.map((slot, index) => {
+    if (input.fixedCourtId && slot.canchaId && slot.canchaId !== input.fixedCourtId) {
+      throw new ValidationError(`El slot #${index} debe usar la cancha fija de la división`);
+    }
+    if (!input.multiplesCanchas && slot.canchaId) {
+      throw new ValidationError('Las ligas de cancha única deben enviar canchaId nulo');
+    }
+    if (input.multiplesCanchas && (!slot.canchaId || !activeById.has(slot.canchaId))) {
+      throw new ValidationError(`El slot #${index} debe usar una cancha activa de esta liga`);
+    }
+    const interval = getAuthoritativeSlotInterval(slot, input.durationMinutes);
+    return { id: `slot-${index}`, canchaId: input.multiplesCanchas ? slot.canchaId! : null, ...interval, slot };
+  });
+
+  if (drafts.length === 0) return;
+  const latestDraftEnd = new Date(Math.max(...drafts.map((draft) => draft.end.getTime())));
+
+  const occupancies = await client.partido.findMany({
+    where: {
+      // A match starting after every draft ends cannot overlap, regardless of its duration.
+      fecha: { not: null, lt: latestDraftEnd },
+      ...(input.excludedPartidoIds.length ? { id: { notIn: input.excludedPartidoIds } } : {}),
+      OR: [
+        { jornada: { division: { ligaId: input.ligaId } } },
+        { rondaPlayoff: { division: { ligaId: input.ligaId } } },
+      ],
+    },
+    select: {
+      id: true,
+      canchaId: true,
+      fecha: true,
+      jornada: { select: { division: { select: { duracionPartido: true } } } },
+      rondaPlayoff: { select: { division: { select: { duracionPartido: true } } } },
+    },
+  });
+
+  const persisted = occupancies.map((partido) => {
+    const duration = partido.jornada?.division.duracionPartido ?? partido.rondaPlayoff?.division.duracionPartido;
+    if (!duration || duration <= 0) {
+      throw new ValidationError(`El partido ${partido.id} no tiene una duración de división válida; no se puede comprobar la capacidad de cancha`);
+    }
+    return {
+      id: partido.id,
+      canchaId: input.multiplesCanchas ? partido.canchaId : null,
+      resolvedCourt: !input.multiplesCanchas || Boolean(partido.canchaId && activeById.has(partido.canchaId)),
+      start: partido.fecha!,
+      end: addMinutes(partido.fecha!, duration),
+    };
+  });
+
+  for (let index = 0; index < drafts.length; index++) {
+    const current = drafts[index];
+    const draftConflict = drafts.slice(index + 1).find((other) =>
+      other.canchaId === current.canchaId && isOverlapping(current.start, current.end, other.start, other.end));
+    if (draftConflict) {
+      const court = current.canchaId ? `La cancha "${activeById.get(current.canchaId)}"` : 'La cancha única de la liga';
+      throw new ValidationError(`${court} ya tiene otro partido programado en ese horario (${current.slot.fecha} ${current.slot.horaInicio}-${current.slot.horaFin})`);
+    }
+
+    for (const occupancy of persisted) {
+      if (!isOverlapping(current.start, current.end, occupancy.start, occupancy.end)) continue;
+      if (!occupancy.resolvedCourt) {
+        throw new ValidationError(`El partido programado ${occupancy.id} se solapa con el horario solicitado y no tiene una cancha activa válida; resuelve su cancha antes de generar la jornada`);
+      }
+      if (occupancy.canchaId !== current.canchaId) continue;
+      const court = current.canchaId ? `La cancha "${activeById.get(current.canchaId)}"` : 'La cancha única de la liga';
+      throw new ValidationError(`${court} ya tiene otro partido programado en ese horario (${current.slot.fecha} ${current.slot.horaInicio}-${current.slot.horaFin})`);
+    }
+  }
 }
 
 function buildHistoricalMatchCounts(existing: Array<{ partidos: Array<{ equipoLocalId: string | null; equipoVisitanteId: string | null; tipoPartido: string }> }>, tipoPartido: 'REGULAR' | 'AMISTOSO'): Map<string, Map<string, number>> {
@@ -163,99 +355,119 @@ export const jornadaService = {
     return result;
   },
 
-  async create(data: { numero: number; fechaInicio?: string; fechaFin?: string; divisionId: string }, actor: AuthenticatedUser): Promise<JornadaEntity> {
-    await assertDivisionOwner(data.divisionId, actor);
-    return jornadaRepository.create(data);
-  },
-
-  async update(id: string, data: Record<string, unknown>, actor: AuthenticatedUser): Promise<JornadaEntity> {
-    const context = await jornadaRepository.findUpdateContext(id, actor);
-    if (!context) throw new NotFoundError('Jornada');
-    return jornadaRepository.update(id, data);
-  },
-
   async delete(id: string, actor: AuthenticatedUser): Promise<void> {
-    const context = await jornadaRepository.findDeleteContext(id, actor);
-    if (!context) throw new NotFoundError('Jornada');
-    if (context.latestJornadaId !== id) {
-      throw new ValidationError('Solo se puede eliminar la última jornada generada');
-    }
-    const { divisionId, hasFinalizados, playoffPartidos } = context;
+    const preflight = await jornadaRepository.findDeleteContext(id, actor);
+    if (!preflight) throw new NotFoundError('Jornada');
+    assertOwnerOrAdmin(actor, preflight.ligaUserId, 'Jornada');
 
-    await prisma.$transaction(async (tx) => {
-      const partidosByRonda = new Map<string, typeof playoffPartidos>();
-      for (const partido of playoffPartidos) {
-        const rondaId = partido.rondaPlayoffId!;
-        const current = partidosByRonda.get(rondaId) ?? [];
-        current.push(partido);
-        partidosByRonda.set(rondaId, current);
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await prisma.$transaction(async (tx) => {
+          await acquireLeagueScheduleLock(tx, preflight.ligaId);
+          const context = await jornadaRepository.findDeleteContext(id, actor, tx);
+          if (!context) throw new NotFoundError('Jornada');
+          assertOwnerOrAdmin(actor, context.ligaUserId, 'Jornada');
+          if (context.ligaId !== preflight.ligaId) {
+            throw new ConflictError('La jornada cambió durante la eliminación; vuelve a intentarlo');
+          }
+          if (context.latestJornadaId !== id) {
+            throw new ValidationError('Solo se puede eliminar la última jornada generada');
+          }
+          const { divisionId, hasFinalizados, playoffPartidos } = context;
+          const partidosByRonda = new Map<string, typeof playoffPartidos>();
+          for (const partido of playoffPartidos) {
+            const rondaId = partido.rondaPlayoffId;
+            const current = partidosByRonda.get(rondaId) ?? [];
+            current.push(partido);
+            partidosByRonda.set(rondaId, current);
+          }
+
+          for (const [rondaId, partidos] of partidosByRonda) {
+            const ronda = await tx.rondaPlayoff.findUnique({
+              where: { id: rondaId },
+              select: { divisionId: true, orden: true },
+            });
+            if (!ronda) continue;
+            const nextRonda = await tx.rondaPlayoff.findFirst({
+              where: { divisionId: ronda.divisionId, orden: ronda.orden + 1 },
+              select: { id: true },
+            });
+            if (!nextRonda) continue;
+
+            const nextKeys = [...new Set(partidos.map((p) => Math.ceil(p.llave / 2)))];
+            const derivedPartidos = await tx.partido.findMany({
+              where: { rondaPlayoffId: nextRonda.id, llave: { in: nextKeys } },
+              select: { id: true, jornadaId: true },
+            });
+            const assignedToAnotherJornada = derivedPartidos.find((p) => p.jornadaId && p.jornadaId !== id);
+            if (assignedToAnotherJornada) {
+              throw new ValidationError('No se puede eliminar la jornada porque la siguiente fase ya fue programada');
+            }
+            if (derivedPartidos.length > 0) {
+              await tx.partido.deleteMany({ where: { id: { in: derivedPartidos.map((p) => p.id) } } });
+            }
+          }
+
+          const playoffIds = playoffPartidos.map((p) => p.id);
+          if (playoffIds.length > 0) {
+            await tx.partidoRefereeAccess.deleteMany({ where: { partidoId: { in: playoffIds } } });
+            await tx.anotacionPartido.deleteMany({ where: { partidoId: { in: playoffIds } } });
+            await tx.participacionPartido.deleteMany({ where: { partidoId: { in: playoffIds } } });
+            await tx.partido.updateMany({
+              where: { id: { in: playoffIds } },
+              data: {
+                estado: 'PROGRAMADO',
+                golesLocal: 0,
+                golesVisitante: 0,
+                penalesLocal: null,
+                penalesVisitante: null,
+                fecha: null,
+                fechaFin: null,
+                canchaId: null,
+                jornadaId: null,
+                version: { increment: 1 },
+              },
+            });
+          }
+
+          await tx.jornada.delete({ where: { id } });
+          if (hasFinalizados) {
+            await tablaPosicionService.recalcular(divisionId, tx);
+          }
+        }, { isolationLevel: 'Serializable' });
+        return;
+      } catch (error: any) {
+        if (error?.code !== 'P2034' || attempt >= 2) throw error;
       }
-
-      for (const [rondaId, partidos] of partidosByRonda) {
-        const ronda = await tx.rondaPlayoff.findUnique({
-          where: { id: rondaId },
-          select: { divisionId: true, orden: true },
-        });
-        if (!ronda) continue;
-        const nextRonda = await tx.rondaPlayoff.findFirst({
-          where: { divisionId: ronda.divisionId, orden: ronda.orden + 1 },
-          select: { id: true },
-        });
-        if (!nextRonda) continue;
-
-        const nextKeys = [...new Set(partidos.map((p) => Math.ceil(p.llave! / 2)))];
-        const derivedPartidos = await tx.partido.findMany({
-          where: { rondaPlayoffId: nextRonda.id, llave: { in: nextKeys } },
-          select: { id: true, jornadaId: true },
-        });
-        const assignedToAnotherJornada = derivedPartidos.find((p) => p.jornadaId && p.jornadaId !== id);
-        if (assignedToAnotherJornada) {
-          throw new ValidationError('No se puede eliminar la jornada porque la siguiente fase ya fue programada');
-        }
-        if (derivedPartidos.length > 0) {
-          await tx.partido.deleteMany({ where: { id: { in: derivedPartidos.map((p) => p.id) } } });
-        }
-      }
-
-      const playoffIds = playoffPartidos.map((p) => p.id);
-      if (playoffIds.length > 0) {
-        await tx.partidoRefereeAccess.deleteMany({ where: { partidoId: { in: playoffIds } } });
-        await tx.partido.updateMany({
-          where: { id: { in: playoffIds } },
-          data: {
-            estado: 'PROGRAMADO',
-            golesLocal: 0,
-            golesVisitante: 0,
-            penalesLocal: null,
-            penalesVisitante: null,
-            fecha: null,
-            fechaFin: null,
-            canchaId: null,
-            jornadaId: null,
-          },
-        });
-      }
-
-      await tx.jornada.delete({ where: { id } });
-    });
-    if (hasFinalizados) {
-      await tablaPosicionService.recalcular(divisionId);
     }
   },
 
-  async generateNext(divisionId: string, actor: AuthenticatedUser, slots?: SlotInput[], equipoIds?: string[], descansoEquipoId?: string): Promise<JornadaEntity> {
+  async generateNext(divisionId: string, actor: AuthenticatedUser, slots?: SlotInput[], equipoIds?: string[], descansoEquipoId?: string, generationKey = 'internal-generation', generationAttempt = 0): Promise<GeneratedJornada> {
     const startedAt = Date.now();
+    const requestHash = generationRequestHash(slots, equipoIds, descansoEquipoId);
+    const requestSlots = slots;
     const division = await prisma.division.findUnique({
       where: { id: divisionId },
       select: {
         diasPartido: true,
         duracionPartido: true,
         ligaId: true,
-        liga: { select: { userId: true } },
+        canchaUnicaId: true,
+        liga: { select: { userId: true, multiplesCanchas: true } },
       },
     });
     if (!division) throw new NotFoundError('División');
     assertOwnerOrAdmin(actor, division.liga.userId, 'División');
+    const replay = await findGenerationReplay(prisma as unknown as GenerationLookupClient, divisionId, generationKey, requestHash);
+    if (replay) return { ...replay, idempotencyReplayed: true };
+    if (division.canchaUnicaId) {
+      for (const [index, slot] of (slots ?? []).entries()) {
+        if (slot.canchaId && slot.canchaId !== division.canchaUnicaId) {
+          throw new ValidationError(`El slot #${index} debe usar la cancha fija de la división`);
+        }
+      }
+      slots = slots?.map((slot) => ({ ...slot, canchaId: division.canchaUnicaId }));
+    }
 
     // Check for playoff mode: when rondas exist, only amistoso and eliminatoria slots allowed
     const playoffRound = await prisma.rondaPlayoff.findFirst({ where: { divisionId }, select: { id: true } });
@@ -263,8 +475,8 @@ export const jornadaService = {
     if (playoffMode) {
       if (slots) {
         for (const s of slots) {
-          if (s.tipo === 'regular' || s.tipo === 'complemento') {
-            throw new ValidationError('No se permiten partidos regulares o de complemento cuando hay eliminatorias');
+          if (s.tipo !== 'amistoso' && s.tipo !== 'eliminatoria') {
+            throw new ValidationError('Solo se permiten partidos amistosos o de eliminatoria cuando hay eliminatorias');
           }
         }
       }
@@ -274,6 +486,7 @@ export const jornadaService = {
     }
 
     const existing = await jornadaRepository.findGenerationHistory(divisionId);
+    const preflightHistoryFingerprint = generationHistoryFingerprint(existing);
     const nextNumero = existing.length > 0 ? Math.max(...existing.map(j => j.numero)) + 1 : 1;
 
     const links = await prisma.divisionEquipo.findMany({
@@ -327,7 +540,7 @@ export const jornadaService = {
         .map((slot) => slot.partidoId!))];
       const eliminatoriaPartidos = eliminatoriaIds.length > 0
         ? await prisma.partido.findMany({
-          where: { id: { in: eliminatoriaIds } },
+          where: { id: { in: eliminatoriaIds }, rondaPlayoff: { divisionId } },
           select: {
             id: true,
             equipoLocalId: true,
@@ -343,9 +556,7 @@ export const jornadaService = {
 
           const existing = eliminatoriaById.get(slot.partidoId);
           if (!existing) throw new ValidationError(`El partido de eliminatoria ${slot.partidoId} no existe`);
-          if (existing?.jornadaId) {
-            continue;
-          }
+          if (existing?.jornadaId) throw new ValidationError(`El partido de eliminatoria ${slot.partidoId} ya está programado`);
 
           playoffCount++;
 
@@ -386,85 +597,28 @@ export const jornadaService = {
       }
       for (const id of eliminatoriaTeamIds) usedTeamIds.add(id);
 
+      // Keep fast validation for user feedback, but allow a concurrent identical request to replay.
+      try {
+        await validateLeagueCourtCapacity(prisma as unknown as CourtValidationClient, {
+          ligaId: division.ligaId,
+          multiplesCanchas: division.liga.multiplesCanchas,
+          durationMinutes: division.duracionPartido,
+          fixedCourtId: division.canchaUnicaId,
+          slots: slots ?? [],
+          excludedPartidoIds: pendingPlayoffUpdates.map((update) => update.id),
+        });
+      } catch (error) {
+        const concurrentReplay = await findGenerationReplay(prisma as unknown as GenerationLookupClient, divisionId, generationKey, requestHash);
+        if (concurrentReplay) return { ...concurrentReplay, idempotencyReplayed: true };
+        throw error;
+      }
+
       const regularTeamCount = teams.length - eliminatoriaTeamIds.size;
       const teamLimited = Math.max(0, Math.ceil(regularTeamCount / 2));
       let maxPartidos = Math.max(0, teamLimited - playoffCount);
 
-      // Without configured courts, all submitted slots share one virtual court.
-      if (slots && slots.length > 1) {
-        const noCanchaSlots = slots.filter((slot) => !slot.canchaId);
-        for (let i = 0; i < noCanchaSlots.length; i++) {
-          const current = getSlotInterval(noCanchaSlots[i]);
-          if (!current) throw new ValidationError(`El horario ${noCanchaSlots[i].fecha} ${noCanchaSlots[i].horaInicio}-${noCanchaSlots[i].horaFin} no es válido`);
-          for (let j = i + 1; j < noCanchaSlots.length; j++) {
-            const other = getSlotInterval(noCanchaSlots[j]);
-            if (!other) throw new ValidationError(`El horario ${noCanchaSlots[j].fecha} ${noCanchaSlots[j].horaInicio}-${noCanchaSlots[j].horaFin} no es válido`);
-            if (isOverlapping(current.start, current.end, other.start, other.end)) {
-              throw new ValidationError(
-                `Hay partidos con horarios solapados (${noCanchaSlots[i].fecha} ${noCanchaSlots[i].horaInicio}-${noCanchaSlots[i].horaFin})`
-              );
-            }
-          }
-        }
-      }
-
-      // Validate cancha overlap across every match type and division
-      if (slots && slots.length > 0) {
-        const canchaSlots = slots.filter((s) => s.canchaId && s.fecha);
-        if (canchaSlots.length > 0) {
-          const canchaIds = [...new Set(canchaSlots.map((s) => s.canchaId!))];
-          const incomingPartidoIds = canchaSlots.flatMap((s) => s.partidoId ? [s.partidoId] : []);
-          const [existingPartidos, canchas] = await Promise.all([
-            prisma.partido.findMany({
-              where: {
-                canchaId: { in: canchaIds },
-                fecha: { not: null },
-                fechaFin: { not: null },
-                ...(incomingPartidoIds.length > 0 ? { id: { notIn: incomingPartidoIds } } : {}),
-              },
-              select: { id: true, canchaId: true, fecha: true, fechaFin: true },
-            }),
-            prisma.ligaCancha.findMany({
-              where: { id: { in: canchaIds } },
-              select: { id: true, nombre: true },
-            }),
-          ]);
-          const canchaMap = new Map(canchas.map((c) => [c.id, c.nombre]));
-
-          for (let i = 0; i < canchaSlots.length; i++) {
-            const slot = canchaSlots[i];
-            const interval = getSlotInterval(slot);
-            if (!interval) throw new ValidationError(`El horario ${slot.fecha} ${slot.horaInicio}-${slot.horaFin} no es válido`);
-
-            for (let j = i + 1; j < canchaSlots.length; j++) {
-              const other = canchaSlots[j];
-              if (other.canchaId !== slot.canchaId) continue;
-              const otherInterval = getSlotInterval(other);
-              if (!otherInterval) throw new ValidationError(`El horario ${other.fecha} ${other.horaInicio}-${other.horaFin} no es válido`);
-              if (isOverlapping(interval.start, interval.end, otherInterval.start, otherInterval.end)) {
-                const canchaNombre = canchaMap.get(slot.canchaId!) || slot.canchaId!;
-                throw new ValidationError(
-                  `La cancha "${canchaNombre}" tiene partidos con horarios solapados (${slot.fecha} ${slot.horaInicio}-${slot.horaFin})`
-                );
-              }
-            }
-
-            const conflict = existingPartidos.find((ep) => {
-              if (ep.canchaId !== slot.canchaId) return false;
-              return isOverlapping(interval.start, interval.end, ep.fecha!, ep.fechaFin!);
-            });
-            if (conflict) {
-              const canchaNombre = canchaMap.get(slot.canchaId!) || slot.canchaId!;
-              throw new ValidationError(
-                `La cancha "${canchaNombre}" ya tiene otro partido programado en ese horario (${slot.fecha} ${slot.horaInicio}-${slot.horaFin})`
-              );
-            }
-          }
-        }
-      }
-
       // Structure: each entry can be assigned teams or empty
-      type PartidoPlan = { localId?: string; visitaId?: string; fecha?: Date; tipo?: 'regular' | 'complemento' | 'amistoso'; canchaId?: string };
+      type PartidoPlan = { localId?: string; visitaId?: string; fecha?: Date; tipo?: 'regular' | 'complemento' | 'amistoso'; canchaId?: string | null };
       const plan: PartidoPlan[] = [];
 
       let usableSlots: SlotInput[] = [];
@@ -773,6 +927,9 @@ export const jornadaService = {
       }
 
       // Extras: if some teams couldn't fit into plan slots, push new entries
+      if (slots && slots.length > 0 && unassignedTeamList.length >= 2) {
+        throw new ValidationError('No hay suficientes slots físicos para programar todos los partidos de la jornada');
+      }
       while (unassignedTeamList.length >= 2) {
         const a = unassignedTeamList.shift()!.id;
         let bId = rrPairing.get(a);
@@ -863,7 +1020,7 @@ export const jornadaService = {
       let swapIdx = -1;
       for (let i = plan.length - 1; i > descansoIdx; i--) {
         const p = plan[i];
-        if (p.tipo === 'amistoso') continue
+        if (p.tipo) continue
         if (!p.localId || !p.visitaId) continue
         if (p.localId === 'DESCANSO' || p.visitaId === 'DESCANSO') continue
         swapIdx = i;
@@ -889,7 +1046,7 @@ export const jornadaService = {
           continue;
         }
         const key = [p.localId, p.visitaId].sort().join('-');
-        if (p.tipo !== 'amistoso' && seenPairs.has(key)) {
+        if (p.tipo !== 'amistoso' && p.tipo !== 'complemento' && seenPairs.has(key)) {
           continue;
         }
         seenPairs.add(key);
@@ -930,30 +1087,101 @@ export const jornadaService = {
         fechaFin = new Date(maxDate.getFullYear(), maxDate.getMonth(), maxDate.getDate(), 23, 59, 0);
       }
 
-      const jornada = await prisma.$transaction(async (tx) => {
-        const created = await tx.jornada.create({
-          data: { numero: nextNumero, divisionId, fechaInicio, fechaFin },
+      let jornada: JornadaEntity | undefined;
+      let idempotencyReplayed = false;
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          jornada = await prisma.$transaction(async (tx) => {
+          await acquireLeagueScheduleLock(tx, division.ligaId);
+          const replay = await findGenerationReplay(tx as unknown as GenerationLookupClient, divisionId, generationKey, requestHash);
+          if (replay) {
+            idempotencyReplayed = true;
+            return replay;
+          }
+          const lockedDivision = await tx.division.findUnique({
+            where: { id: divisionId },
+            select: {
+              ligaId: true,
+              duracionPartido: true,
+              canchaUnicaId: true,
+              liga: { select: { multiplesCanchas: true } },
+            },
+          });
+          if (!lockedDivision || lockedDivision.ligaId !== division.ligaId) {
+            throw new ValidationError('La división cambió mientras se generaba la jornada; vuelve a intentarlo');
+          }
+          const lockedHistory = await jornadaRepository.findGenerationHistory(divisionId, tx);
+          if (generationHistoryFingerprint(lockedHistory) !== preflightHistoryFingerprint) {
+            throw new StaleGenerationPlanError();
+          }
+          await validateLeagueCourtCapacity(tx as unknown as CourtValidationClient, {
+            ligaId: lockedDivision.ligaId,
+            multiplesCanchas: lockedDivision.liga.multiplesCanchas,
+            durationMinutes: lockedDivision.duracionPartido,
+            fixedCourtId: lockedDivision.canchaUnicaId,
+            slots: slots ?? [],
+            excludedPartidoIds: pendingPlayoffUpdates.map((update) => update.id),
+          });
+          const created = await tx.jornada.create({
+          data: { numero: nextNumero, divisionId, fechaInicio, fechaFin, generationKey, generationRequestHash: requestHash },
         });
         for (const update of pendingPlayoffUpdates) {
-          await tx.partido.update({
-            where: { id: update.id },
+          const result = await tx.partido.updateMany({
+            where: { id: update.id, jornadaId: null },
             data: { ...update.data, jornadaId: created.id },
           });
+          if (result.count !== 1) throw new StaleGenerationPlanError();
         }
-        if (partidoData.length > 0) {
+          if (partidoData.length > 0) {
           await tx.partido.createMany({
             data: partidoData.map((partido) => ({ ...partido, jornadaId: created.id })) as any,
+           });
+          }
+          await tx.notificationOutbox.createMany({
+            data: [
+              {
+                eventKey: `jornada-generated:${created.id}:registered`,
+                jornadaId: created.id,
+                divisionId,
+                audience: 'REGISTERED',
+                providerIdempotencyKey: randomUUID(),
+              },
+              {
+                eventKey: `jornada-generated:${created.id}:followers`,
+                jornadaId: created.id,
+                divisionId,
+                audience: 'FOLLOWERS',
+                providerIdempotencyKey: randomUUID(),
+              },
+            ],
+            skipDuplicates: true,
           });
+          return created;
+          }, { isolationLevel: 'Serializable' });
+          break;
+        } catch (error: any) {
+          if (error instanceof StaleGenerationPlanError) {
+            if (generationAttempt < 2) {
+              return jornadaService.generateNext(divisionId, actor, requestSlots, equipoIds, descansoEquipoId, generationKey, generationAttempt + 1);
+            }
+            throw new ConflictError('La programación cambió mientras se generaba la jornada; vuelve a intentarlo');
+          }
+          if (error?.code === 'P2034' && attempt < 2) continue;
+          if (error?.code === 'P2002') throw new ConflictError('La jornada ya fue generada');
+          if (isCourtExclusionError(error)) {
+            throw new ValidationError('La cancha ya fue ocupada por otro partido; actualiza los horarios e inténtalo de nuevo');
+          }
+          throw error;
         }
-        return created;
-      });
+      }
 
+    const committedJornada = jornada!;
     const updatedPlayoffIds = new Set(pendingPlayoffUpdates.map((update) => update.id));
     const createdPartidoCount = partidoData.length;
 
     logger.info({
       divisionId,
-      jornadaId: jornada.id,
+      jornadaId: committedJornada.id,
       counts: {
         created: createdPartidoCount,
         playoffUpdated: updatedPlayoffIds.size,
@@ -962,11 +1190,7 @@ export const jornadaService = {
       durationMs: Date.now() - startedAt,
     }, 'Jornada generation completed');
 
-    void notificationService.notifyJornadaGenerated(jornada.id, divisionId, division.ligaId).catch((err: unknown) => {
-      Sentry.captureException(err, { tags: { provider: 'onesignal', operation: 'notify_jornada' } });
-      logger.warn({ event: 'notification.failed', provider: 'onesignal', divisionId, jornadaId: jornada.id }, 'Jornada generation notification failed');
-    });
-
-    return jornada;
+    const { generationKey: _generationKey, generationRequestHash: _generationRequestHash, ...publicJornada } = committedJornada as JornadaEntity & { generationKey?: string; generationRequestHash?: string };
+    return { ...publicJornada, idempotencyReplayed };
   },
 };

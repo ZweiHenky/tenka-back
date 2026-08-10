@@ -3,14 +3,32 @@
   "version": "1.0.0",
   "description": "Express TypeScript base project",
   "main": "dist/index.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "pnpm db:generate && node node_modules/typescript/bin/tsc",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "seed": "npx prisma db seed",
-    "seed:catalogs": "ts-node-dev --transpile-only prisma/seed-catalogs.ts",
+    "seed": "node scripts/development-script.mjs seed",
+    "seed:catalogs": "node scripts/development-script.mjs seed-catalogs",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
+    "test:db-safety": "node --test scripts/db-safety.test.mjs",
+    "db:generate": "node scripts/prisma-command.mjs generate",
+    "db:validate": "node scripts/prisma-command.mjs validate",
+    "db:status:dev": "node scripts/prisma-command.mjs status development",
+    "db:migrate:dev": "node scripts/prisma-command.mjs migrate-dev development",
+    "db:status:preview": "node scripts/prisma-command.mjs status preview",
+    "db:migrate:preview": "node scripts/prisma-command.mjs migrate-deploy preview",
+    "db:status:production": "node scripts/prisma-command.mjs status production",
+    "db:script:create-teams": "node scripts/development-script.mjs create-teams",
+    "db:script:assign-teams": "node scripts/development-script.mjs assign-teams",
+    "db:script:check-teams": "node scripts/development-script.mjs check-teams",
+    "db:script:find-division": "node scripts/development-script.mjs find-division",
+    "db:script:add-teams": "node scripts/development-script.mjs add-teams",
+    "db:script:seed-teams": "node scripts/development-script.mjs seed-teams",
     "sentry:test": "node dist/scripts/test-sentry.js"
   },
   "dependencies": {
@@ -26,9 +44,11 @@
     "express": "^4.18.2",
     "express-rate-limit": "8.6.0",
     "helmet": "^8.3.0",
+    "jose": "^6.2.8",
     "pg": "^8.22.0",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
+    "twilio": "^6.0.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {

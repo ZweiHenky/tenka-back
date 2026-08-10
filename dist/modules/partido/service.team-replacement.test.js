@@ -45,30 +45,42 @@ const service_test_harness_1 = require("./service.test-harness");
         await service_test_harness_1.partidoService.update('partido-1', { golesLocal: 2 }, service_test_harness_1.owner);
         (0, vitest_1.expect)(service_test_harness_1.prisma.divisionEquipo.count).not.toHaveBeenCalled();
         (0, vitest_1.expect)(service_test_harness_1.prisma.partido.findFirst).not.toHaveBeenCalled();
-        (0, vitest_1.expect)(service_test_harness_1.partidoRepository.update).toHaveBeenCalledWith('partido-1', { golesLocal: 2 });
+        (0, vitest_1.expect)(service_test_harness_1.prisma.equipo.findMany).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(service_test_harness_1.prisma.$executeRaw).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(service_test_harness_1.partidoRepository.update).toHaveBeenCalledWith('partido-1', { golesLocal: 2 }, service_test_harness_1.prisma);
     });
     (0, vitest_1.it)('swaps teams while preserving each selected side', async () => {
         await service_test_harness_1.partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, service_test_harness_1.owner);
         (0, vitest_1.expect)(service_test_harness_1.prisma.divisionEquipo.count).toHaveBeenCalledWith({
             where: { divisionId: 'division-1', equipoId: 'equipo-3' },
         });
-        (0, vitest_1.expect)(service_test_harness_1.prisma.partido.findMany).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
-            where: vitest_1.expect.objectContaining({
-                id: { not: 'partido-1' },
-                jornadaId: 'jornada-1',
-                tipoPartido: 'REGULAR',
-            }),
+        (0, vitest_1.expect)(service_test_harness_1.prisma.partido.findMany).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(service_test_harness_1.prisma.partido.updateMany).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
+            where: vitest_1.expect.objectContaining({ id: 'partido-2', estado: 'PROGRAMADO', jornadaId: 'jornada-1', tipoPartido: 'REGULAR' }),
+            data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-4', notas: null },
         }));
-        (0, vitest_1.expect)(service_test_harness_1.prisma.partido.update).toHaveBeenCalledWith({
-            where: { id: 'partido-2' }, data: { equipoLocalId: 'equipo-1' },
-        });
-        (0, vitest_1.expect)(service_test_harness_1.prisma.partido.update).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
-            where: { id: 'partido-1' }, data: { equipoLocalId: 'equipo-3' },
+        (0, vitest_1.expect)(service_test_harness_1.prisma.partido.updateMany).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
+            where: vitest_1.expect.objectContaining({ id: 'partido-1', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' }),
+            data: { equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-2', notas: null },
         }));
         (0, vitest_1.expect)(service_test_harness_1.prisma.partido.findFirst).toHaveBeenCalledOnce();
         (0, vitest_1.expect)(service_test_harness_1.prisma.partido.findFirst).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
             where: vitest_1.expect.objectContaining({ id: { notIn: ['partido-1', 'partido-2'] } }),
         }));
+        (0, vitest_1.expect)(service_test_harness_1.prisma.equipo.findMany).toHaveBeenCalledWith({
+            where: { id: { in: ['equipo-1', 'equipo-2', 'equipo-3', 'equipo-4'] } },
+            select: { userId: true },
+        });
+        (0, vitest_1.expect)(service_test_harness_1.prisma.$executeRaw).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(vitest_1.vi.mocked(service_test_harness_1.prisma.partido.updateMany).mock.invocationCallOrder.at(-1))
+            .toBeLessThan(vitest_1.vi.mocked(service_test_harness_1.prisma.$executeRaw).mock.invocationCallOrder[0]);
+    });
+    (0, vitest_1.it)('fails the swap transaction when the schedule outbox cannot be written', async () => {
+        vitest_1.vi.mocked(service_test_harness_1.prisma.$executeRaw).mockRejectedValueOnce(new Error('outbox unavailable'));
+        await (0, vitest_1.expect)(service_test_harness_1.partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, service_test_harness_1.owner))
+            .rejects.toThrow('outbox unavailable');
+        (0, vitest_1.expect)(service_test_harness_1.prisma.partido.updateMany).toHaveBeenCalledTimes(2);
+        (0, vitest_1.expect)(service_test_harness_1.prisma.partido.findUnique).not.toHaveBeenCalled();
     });
     (0, vitest_1.it)('allows the resulting unordered pair when it occurred in a prior jornada', async () => {
         vitest_1.vi.mocked(service_test_harness_1.prisma.jornada.findMany).mockResolvedValue([
@@ -85,30 +97,37 @@ const service_test_harness_1 = require("./service.test-harness");
     vitest_1.it.each([
         ['same order', 'equipo-3', 'equipo-2'],
         ['reversed order', 'equipo-2', 'equipo-3'],
-    ])('rejects a duplicate unordered pair in the simulated current jornada: %s', async (_label, local, visitor) => {
+    ])('rejects an ambiguous incoming-team appearance before duplicate-pair matching: %s', async (_label, local, visitor) => {
         vitest_1.vi.mocked(service_test_harness_1.prisma.jornada.findMany).mockResolvedValue([{ id: 'jornada-1', numero: 1, partidos: [
                     { id: 'partido-1', estado: 'PROGRAMADO', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' },
                     { id: 'partido-2', estado: 'PROGRAMADO', equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-4' },
                     { id: 'duplicate', estado: 'PROGRAMADO', equipoLocalId: local, equipoVisitanteId: visitor },
                 ] }]);
         await (0, vitest_1.expect)(service_test_harness_1.partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, service_test_harness_1.owner))
-            .rejects.toThrow('El intercambio produciría un enfrentamiento duplicado dentro de la jornada actual');
-        (0, vitest_1.expect)(service_test_harness_1.prisma.partido.update).not.toHaveBeenCalled();
+            .rejects.toThrow('intercambio es ambiguo');
+        (0, vitest_1.expect)(service_test_harness_1.prisma.partido.updateMany).not.toHaveBeenCalled();
     });
     (0, vitest_1.it)('blocks when the incoming team has no match in the jornada', async () => {
-        vitest_1.vi.mocked(service_test_harness_1.prisma.partido.findMany).mockResolvedValue([]);
+        vitest_1.vi.mocked(service_test_harness_1.prisma.jornada.findMany).mockResolvedValue([{ id: 'jornada-1', numero: 1, partidos: [
+                    { id: 'partido-1', estado: 'PROGRAMADO', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' },
+                ] }]);
         await (0, vitest_1.expect)(service_test_harness_1.partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, service_test_harness_1.owner))
             .rejects.toThrow('no tiene otro partido en esta jornada');
     });
     (0, vitest_1.it)('blocks an ambiguous incoming team appearance', async () => {
-        vitest_1.vi.mocked(service_test_harness_1.prisma.partido.findMany).mockResolvedValue([{ id: 'p2' }, { id: 'p3' }]);
+        vitest_1.vi.mocked(service_test_harness_1.prisma.jornada.findMany).mockResolvedValue([{ id: 'jornada-1', numero: 1, partidos: [
+                    { id: 'partido-1', estado: 'PROGRAMADO', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' },
+                    { id: 'p2', estado: 'PROGRAMADO', equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-4' },
+                    { id: 'p3', estado: 'PROGRAMADO', equipoLocalId: 'equipo-5', equipoVisitanteId: 'equipo-3' },
+                ] }]);
         await (0, vitest_1.expect)(service_test_harness_1.partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, service_test_harness_1.owner))
             .rejects.toThrow('intercambio es ambiguo');
     });
     (0, vitest_1.it)('blocks a target match that is not PROGRAMADO', async () => {
-        vitest_1.vi.mocked(service_test_harness_1.prisma.partido.findMany).mockResolvedValue([{
-                id: 'partido-2', estado: 'FINALIZADO', equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-4',
-            }]);
+        vitest_1.vi.mocked(service_test_harness_1.prisma.jornada.findMany).mockResolvedValue([{ id: 'jornada-1', numero: 1, partidos: [
+                    { id: 'partido-1', estado: 'PROGRAMADO', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' },
+                    { id: 'partido-2', estado: 'FINALIZADO', equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-4' },
+                ] }]);
         await (0, vitest_1.expect)(service_test_harness_1.partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, service_test_harness_1.owner))
             .rejects.toThrow('partido del equipo seleccionado debe estar programado');
     });
@@ -136,10 +155,10 @@ const service_test_harness_1 = require("./service.test-harness");
             .rejects.toThrow('El equipo local y visitante deben ser diferentes');
     });
     (0, vitest_1.it)('rejects when the outgoing team would face itself in the target match', async () => {
-        vitest_1.vi.mocked(service_test_harness_1.prisma.partido.findMany).mockResolvedValue([{
-                id: 'partido-2', estado: 'PROGRAMADO', equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-1',
-                fecha: new Date('2026-08-01T20:00:00Z'), fechaFin: new Date('2026-08-01T21:00:00Z'),
-            }]);
+        vitest_1.vi.mocked(service_test_harness_1.prisma.jornada.findMany).mockResolvedValue([{ id: 'jornada-1', numero: 1, partidos: [
+                    { id: 'partido-1', estado: 'PROGRAMADO', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' },
+                    { id: 'partido-2', estado: 'PROGRAMADO', equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-1', fecha: new Date('2026-08-01T20:00:00Z'), fechaFin: new Date('2026-08-01T21:00:00Z') },
+                ] }]);
         await (0, vitest_1.expect)(service_test_harness_1.partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, service_test_harness_1.owner))
             .rejects.toThrow('mismo equipo como local y visitante');
     });
@@ -175,12 +194,17 @@ const service_test_harness_1 = require("./service.test-harness");
                 OR: [{ equipoLocalId: 'equipo-1' }, { equipoVisitanteId: 'equipo-1' }],
             },
         ]);
-        (0, vitest_1.expect)(service_test_harness_1.prisma.$transaction).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(service_test_harness_1.prisma.$transaction).toHaveBeenCalledOnce();
     });
     (0, vitest_1.it)('keeps owner authorization before replacement validation', async () => {
         await (0, vitest_1.expect)(service_test_harness_1.partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, service_test_harness_1.other))
             .rejects.toMatchObject({ statusCode: 404 });
         (0, vitest_1.expect)(service_test_harness_1.prisma.divisionEquipo.count).not.toHaveBeenCalled();
+    });
+    vitest_1.it.each(['golesLocal', 'golesVisitante', 'penalesLocal', 'penalesVisitante', 'estado', 'jornadaId', 'rondaPlayoffId', 'tipoPartido'])('rejects replacement mixed with %s before opening a transaction', async (field) => {
+        await (0, vitest_1.expect)(service_test_harness_1.partidoService.update('partido-1', { equipoLocalId: 'equipo-3', [field]: field === 'estado' ? 'PROGRAMADO' : 1 }, service_test_harness_1.owner))
+            .rejects.toThrow('No se puede combinar el reemplazo de equipo');
+        (0, vitest_1.expect)(service_test_harness_1.prisma.$transaction).not.toHaveBeenCalled();
     });
     (0, vitest_1.it)('allows an administrator to update a foreign partido', async () => {
         await service_test_harness_1.partidoService.update('partido-1', { golesLocal: 2 }, service_test_harness_1.admin);

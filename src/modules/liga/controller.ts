@@ -4,6 +4,11 @@ import { createLigaSchema, updateLigaSchema, createCanchaSchema, updateCanchaSch
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 
+function publicLiga<T extends { logoPublicId?: unknown; canchaPublicId?: unknown }>(liga: T) {
+  const { logoPublicId: _logo, canchaPublicId: _cover, ...safe } = liga;
+  return safe;
+}
+
 export const ligaController = {
   async list(req: Request, res: Response, next: NextFunction) {
     try {
@@ -18,13 +23,13 @@ export const ligaController = {
           tipoId: tipoId as string | undefined,
           estadoLigaId: estadoLigaId as string | undefined,
         });
-        ok(res, result);
+        ok(res, { ...result, rows: result.rows.map(publicLiga) });
       } else if (userId) {
         const ligas = await ligaService.listByUser(userId as string, req.user);
-        ok(res, ligas);
+        ok(res, ligas.map(publicLiga));
       } else {
         const ligas = await ligaService.list();
-        ok(res, ligas);
+        ok(res, ligas.map(publicLiga));
       }
     } catch (err) {
       next(err);
@@ -34,7 +39,7 @@ export const ligaController = {
   async getById(req: Request, res: Response, next: NextFunction) {
     try {
       const liga = await ligaService.getById(req.params.id, req.user);
-      ok(res, liga);
+      ok(res, publicLiga(liga));
     } catch (err) {
       next(err);
     }
@@ -48,7 +53,7 @@ export const ligaController = {
         ...parsed.data,
         userId: req.user!.id,
       });
-      created(res, liga, 'Liga creada exitosamente');
+      created(res, publicLiga(liga), 'Liga creada exitosamente');
     } catch (err) {
       next(err);
     }
@@ -59,7 +64,7 @@ export const ligaController = {
       const parsed = updateLigaSchema.safeParse(req.body);
       if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
       const liga = await ligaService.update(req.params.id, parsed.data, req.user!);
-      ok(res, liga, 'Liga actualizada exitosamente');
+      ok(res, publicLiga(liga), 'Liga actualizada exitosamente');
     } catch (err) {
       next(err);
     }
