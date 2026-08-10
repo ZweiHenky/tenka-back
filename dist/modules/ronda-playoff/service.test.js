@@ -17,6 +17,7 @@ const mocks = vitest_1.vi.hoisted(() => ({
     partidoDelete: vitest_1.vi.fn(),
     partidoUpdate: vitest_1.vi.fn(),
     anotacionDeleteMany: vitest_1.vi.fn(),
+    participacionDeleteMany: vitest_1.vi.fn(),
     executeRaw: vitest_1.vi.fn(),
 }));
 vitest_1.vi.mock('./repository', () => ({ rondaPlayoffRepository: mocks }));
@@ -82,6 +83,7 @@ const owner = { id: 'owner-1', email: 'owner@test.com', rol: 'LIGA' };
             update: mocks.partidoUpdate,
         },
         anotacionPartido: { deleteMany: mocks.anotacionDeleteMany },
+        participacionPartido: { deleteMany: mocks.participacionDeleteMany },
     };
     (0, vitest_1.beforeEach)(() => {
         vitest_1.vi.clearAllMocks();
@@ -316,6 +318,8 @@ const owner = { id: 'owner-1', email: 'owner@test.com', rol: 'LIGA' };
             where: { id: 'existing' },
             data: vitest_1.expect.objectContaining({ equipoLocalId: 'team-1', equipoVisitanteId: 'team-7', estado: 'PROGRAMADO' }),
         }));
+        (0, vitest_1.expect)(mocks.anotacionDeleteMany).toHaveBeenCalledWith({ where: { partidoId: 'existing' } });
+        (0, vitest_1.expect)(mocks.participacionDeleteMany).toHaveBeenCalledWith({ where: { partidoId: 'existing' } });
     });
     (0, vitest_1.it)('propagates an advancement update failure from the transaction for atomic rollback', async () => {
         mocks.roundFindUnique.mockResolvedValue({

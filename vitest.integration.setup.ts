@@ -7,8 +7,11 @@ import {
   INTEGRATION_SCHEMA,
 } from './src/test/integration/database';
 
-// setupFiles run before test modules, so production services cannot capture the application URL.
-process.env.DATABASE_URL = getIntegrationDatabaseUrl();
+// setupFiles run before test modules, so application services can only capture the isolated URL.
+process.env.APP_ENV = 'local';
+process.env.DB_TARGET = 'development';
+process.env.DEV_DATABASE_URL = getIntegrationDatabaseUrl();
+delete process.env.DATABASE_URL;
 process.env.NODE_ENV = 'test';
 
 const integrationPrisma = new PrismaClient({

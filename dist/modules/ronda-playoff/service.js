@@ -265,6 +265,7 @@ exports.rondaPlayoffService = {
                     data: { equipoLocalId: winnerA, equipoVisitanteId: winnerB, estado: 'PROGRAMADO', golesLocal: 0, golesVisitante: 0, penalesLocal: null, penalesVisitante: null, version: { increment: 1 } },
                 });
                 await tx.anotacionPartido.deleteMany({ where: { partidoId: existing.id } });
+                await tx.participacionPartido.deleteMany({ where: { partidoId: existing.id } });
             }
             else {
                 await tx.partido.create({ data: {

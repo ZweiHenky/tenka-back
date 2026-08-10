@@ -11,11 +11,43 @@ export const exposeAnotacionRead = (anotacion: any) => ({
   equipoId: anotacion.equipoId ?? anotacion.equipoIdSnapshot ?? null,
 });
 
-export const exposePartidoRead = (partido: any): PartidoEntity => ({
-  ...partido,
-  arbitros: partido.arbitros?.map((row: any) => row.arbitro),
-  anotaciones: partido.anotaciones?.map(exposeAnotacionRead),
+export const exposeParticipacionRead = (participacion: any) => ({
+  ...participacion,
+  jugadorId: participacion.jugadorId ?? participacion.jugadorIdSnapshot ?? null,
+  equipoId: participacion.equipoId ?? participacion.equipoIdSnapshot ?? null,
 });
+
+export const exposePartidoRead = (partido: any): PartidoEntity => {
+  const { notas: _notas, jornada: _jornada, rondaPlayoff: _rondaPlayoff, ...publicPartido } = partido;
+  return {
+    ...publicPartido,
+    arbitros: partido.arbitros?.map((row: any) => row.arbitro),
+    anotaciones: partido.anotaciones?.map(exposeAnotacionRead),
+    participaciones: partido.participaciones?.map(exposeParticipacionRead),
+  };
+};
+
+export const exposePartidoReadWithNotas = (partido: any): PartidoEntity => {
+  const { jornada: _jornada, rondaPlayoff: _rondaPlayoff, ...rest } = partido;
+  return {
+    ...rest,
+    arbitros: partido.arbitros?.map((row: any) => row.arbitro),
+    anotaciones: partido.anotaciones?.map(exposeAnotacionRead),
+    participaciones: partido.participaciones?.map(exposeParticipacionRead),
+  };
+};
+
+const PARTIDO_OWNER_CONTEXT = {
+  jornada: { select: { division: { select: { liga: { select: { userId: true } } } } } },
+  rondaPlayoff: { select: { division: { select: { liga: { select: { userId: true } } } } } },
+} as const;
+
+function isPartidoOwner(partido: any, actor?: AuthenticatedUser): boolean {
+  if (!actor) return false;
+  if (actor.rol === 'ADMINISTRADOR') return true;
+  const ligaUserId = partido.jornada?.division?.liga?.userId ?? partido.rondaPlayoff?.division?.liga?.userId;
+  return ligaUserId === actor.id;
+}
 
 export const PARTIDO_READ_INCLUDE = {
   equipoLocal: { select: { id: true, nombre: true, logo: true } },
@@ -26,7 +58,9 @@ export const PARTIDO_READ_INCLUDE = {
 
 const PARTIDO_DETAIL_INCLUDE = {
   ...PARTIDO_READ_INCLUDE,
+  ...PARTIDO_OWNER_CONTEXT,
   anotaciones: { orderBy: [{ ladoMarcador: 'asc' }, { jugadorNombre: 'asc' }, { id: 'asc' }] },
+  participaciones: { orderBy: [{ ladoMarcador: 'asc' }, { jugadorNombre: 'asc' }, { id: 'asc' }] },
 } satisfies Prisma.PartidoInclude;
 
 export const partidoRepository: PartidoRepository = {
@@ -112,7 +146,9 @@ export const partidoRepository: PartidoRepository = {
       },
       include: PARTIDO_DETAIL_INCLUDE,
     });
-    return partido ? exposePartidoRead(partido) : null;
+    return partido
+      ? (isPartidoOwner(partido, actor) ? exposePartidoReadWithNotas(partido) : exposePartidoRead(partido))
+      : null;
   },
 
   async findByJornada(jornadaId: string): Promise<PartidoEntity[]> {

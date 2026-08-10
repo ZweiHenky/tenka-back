@@ -1,10 +1,6 @@
-import 'dotenv/config';
-import { PrismaClient } from '../src/generated/prisma/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { createDevelopmentPrismaClient } from '../src/utils/developmentDatabase';
 
-const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
-});
+const prisma = createDevelopmentPrismaClient();
 
 async function main() {
   // ── Catalog ──────────────────────────────────────────────────────
@@ -224,4 +220,7 @@ async function main() {
   console.log('Seed completado — ligas y divisiones de ejemplo creadas.');
 }
 
-main().catch(console.error).finally(() => prisma.$disconnect());
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : 'Seed failed');
+  process.exitCode = 1;
+}).finally(() => prisma.$disconnect());

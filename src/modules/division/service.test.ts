@@ -11,9 +11,11 @@ const mocks = vi.hoisted(() => ({
   jornadaDeleteMany: vi.fn(),
   rondaPlayoffDeleteMany: vi.fn(),
   tablaPosicionDeleteMany: vi.fn(),
+  partidoCount: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   delete: vi.fn(),
+  acquireLeagueScheduleLock: vi.fn(),
 }));
 
 vi.mock('../../config/database', () => ({
@@ -23,6 +25,7 @@ vi.mock('../../config/database', () => ({
     ligaCancha: { findFirst: mocks.ligaCanchaFindFirst },
     division: { findFirst: mocks.divisionFindFirst },
     estadoLiga: { findFirstOrThrow: mocks.estadoLigaFindFirstOrThrow },
+    partido: { count: mocks.partidoCount },
   },
 }));
 
@@ -32,6 +35,10 @@ vi.mock('./repository', () => ({
     update: mocks.update,
     delete: mocks.delete,
   },
+}));
+
+vi.mock('../../utils/leagueScheduleLock', () => ({
+  acquireLeagueScheduleLock: mocks.acquireLeagueScheduleLock,
 }));
 
 import { divisionService } from './service';
@@ -50,18 +57,23 @@ const createData = {
 };
 
 const tx = {
+  liga: { findFirst: mocks.ligaFindFirst },
+  ligaCancha: { findFirst: mocks.ligaCanchaFindFirst },
+  division: { findFirst: mocks.divisionFindFirst },
   divisionNotificationSubscription: { findMany: mocks.subscriptionsFindMany },
   oneSignalTagCleanupJob: { upsert: mocks.cleanupUpsert },
   jornada: { deleteMany: mocks.jornadaDeleteMany },
   rondaPlayoff: { deleteMany: mocks.rondaPlayoffDeleteMany },
   tablaPosicion: { deleteMany: mocks.tablaPosicionDeleteMany },
+  partido: { count: mocks.partidoCount },
 };
 
 describe('consultas privadas optimizadas de división', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.ligaFindFirst.mockResolvedValue({ id: 'liga-1' });
-    mocks.divisionFindFirst.mockResolvedValue({ id: 'division-1', ligaId: 'liga-1', canchaUnicaId: null });
+    mocks.divisionFindFirst.mockResolvedValue({ id: 'division-1', ligaId: 'liga-1', canchaUnicaId: null, usarPenalesEnEmpates: true });
+    mocks.partidoCount.mockResolvedValue(0);
     mocks.transaction.mockImplementation(async (callback) => callback(tx));
     mocks.subscriptionsFindMany.mockResolvedValue([]);
     mocks.create.mockResolvedValue({ id: 'division-1' });
@@ -100,7 +112,7 @@ describe('consultas privadas optimizadas de división', () => {
     await divisionService.update('division-1', { nombre: 'Nueva' }, actor);
 
     expect(mocks.divisionFindFirst).toHaveBeenCalledTimes(1);
-    expect(mocks.divisionFindFirst).toHaveBeenCalledWith({ where, select: { id: true, ligaId: true, canchaUnicaId: true } });
+    expect(mocks.divisionFindFirst).toHaveBeenCalledWith({ where, select: { id: true, ligaId: true, canchaUnicaId: true, registrarParticipaciones: true, usarPenalesEnEmpates: true } });
     expect(mocks.update).toHaveBeenCalledTimes(1);
   });
 
@@ -129,6 +141,87 @@ describe('consultas privadas optimizadas de división', () => {
     await divisionService.update('division-1', { ligaId: 'liga-2' }, owner);
 
     expect(mocks.update).toHaveBeenCalledWith('division-1', { ligaId: 'liga-2', canchaUnicaId: null });
+  });
+
+  it('siempre bloquea la liga y relee la división cuando se envía registrarParticipaciones', async () => {
+    mocks.divisionFindFirst.mockResolvedValue({ id: 'division-1', ligaId: 'liga-1', canchaUnicaId: null, registrarParticipaciones: false });
+
+    await divisionService.update('division-1', { registrarParticipaciones: true }, owner);
+
+    expect(mocks.transaction).toHaveBeenCalledTimes(1);
+    expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'ReadCommitted' });
+    expect(mocks.acquireLeagueScheduleLock).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireLeagueScheduleLock).toHaveBeenCalledWith(tx, 'liga-1');
+    expect(mocks.divisionFindFirst).toHaveBeenCalledTimes(2);
+    expect(mocks.acquireLeagueScheduleLock.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.divisionFindFirst.mock.invocationCallOrder[1]);
+    expect(mocks.update).toHaveBeenCalledWith('division-1', { registrarParticipaciones: true }, tx);
+  });
+
+  it('también bloquea cuando el valor preflight de registrarParticipaciones parece idéntico', async () => {
+    mocks.divisionFindFirst.mockResolvedValue({ id: 'division-1', ligaId: 'liga-1', canchaUnicaId: null, registrarParticipaciones: true });
+
+    await divisionService.update('division-1', { registrarParticipaciones: true }, owner);
+
+    expect(mocks.transaction).toHaveBeenCalledOnce();
+    expect(mocks.acquireLeagueScheduleLock).toHaveBeenCalledWith(tx, 'liga-1');
+    expect(mocks.update).toHaveBeenCalledWith('division-1', { registrarParticipaciones: true }, tx);
+  });
+
+  it('permite cambiar la regla de penales antes de finalizar partidos', async () => {
+    mocks.divisionFindFirst.mockResolvedValue({
+      id: 'division-1', ligaId: 'liga-1', canchaUnicaId: null,
+      registrarParticipaciones: false, usarPenalesEnEmpates: true,
+    });
+
+    await divisionService.update('division-1', { usarPenalesEnEmpates: false }, owner);
+
+    expect(mocks.partidoCount).toHaveBeenCalledWith({
+      where: {
+        estado: 'FINALIZADO',
+        OR: [{ jornada: { divisionId: 'division-1' } }, { rondaPlayoff: { divisionId: 'division-1' } }],
+      },
+    });
+    expect(mocks.update).toHaveBeenCalledWith('division-1', { usarPenalesEnEmpates: false }, tx);
+  });
+
+  it('bloquea cambiar la regla de penales después de finalizar un partido', async () => {
+    mocks.divisionFindFirst.mockResolvedValue({
+      id: 'division-1', ligaId: 'liga-1', canchaUnicaId: null,
+      registrarParticipaciones: false, usarPenalesEnEmpates: true,
+    });
+    mocks.partidoCount.mockResolvedValue(1);
+
+    await expect(divisionService.update('division-1', { usarPenalesEnEmpates: false }, owner))
+      .rejects.toThrow('ya tiene partidos finalizados');
+
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('reautoriza después del lock y no escribe si cambió el propietario', async () => {
+    mocks.divisionFindFirst
+      .mockResolvedValueOnce({ id: 'division-1', ligaId: 'liga-1', canchaUnicaId: null, registrarParticipaciones: false })
+      .mockResolvedValueOnce(null);
+
+    await expect(divisionService.update('division-1', { registrarParticipaciones: true }, owner))
+      .rejects.toMatchObject({ statusCode: 404 });
+
+    expect(mocks.acquireLeagueScheduleLock).toHaveBeenCalledWith(tx, 'liga-1');
+    expect(mocks.acquireLeagueScheduleLock.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.divisionFindFirst.mock.invocationCallOrder[1]);
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('bloquea origen y destino y rechaza una liga actual obsoleta antes de mover la división', async () => {
+    mocks.divisionFindFirst
+      .mockResolvedValueOnce({ id: 'division-1', ligaId: 'liga-1', canchaUnicaId: null, registrarParticipaciones: false })
+      .mockResolvedValueOnce({ id: 'division-1', ligaId: 'liga-3', canchaUnicaId: null, registrarParticipaciones: false });
+
+    await expect(divisionService.update('division-1', { ligaId: 'liga-2', registrarParticipaciones: true }, owner))
+      .rejects.toMatchObject({ statusCode: 409 });
+
+    expect(mocks.acquireLeagueScheduleLock.mock.calls).toEqual([[tx, 'liga-1'], [tx, 'liga-2']]);
+    expect(mocks.update).not.toHaveBeenCalled();
   });
 
   it('conserva el 404 y evita escrituras cuando la división no es administrable', async () => {

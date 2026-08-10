@@ -1,8 +1,6 @@
-import 'dotenv/config';
-import { PrismaClient } from '../src/generated/prisma/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { createDevelopmentPrismaClient } from '../src/utils/developmentDatabase';
 
-const p = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
+const p = createDevelopmentPrismaClient();
 
 const DIVISION_ID = 'cmr7l7jji0004hwvg052ex5vj';
 const USER_ID = 'bEls5kJSCtEE9V79m5fAOmzLop21ajjQ';
@@ -29,6 +27,8 @@ async function main() {
     console.log(`Creado y asignado: ${nombre} (${equipo.id})`);
   }
   console.log(`\n8 equipos agregados a Primera`);
-  await p.$disconnect();
 }
-main();
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : 'Team creation failed');
+  process.exitCode = 1;
+}).finally(() => p.$disconnect());

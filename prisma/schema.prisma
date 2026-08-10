@@ -279,18 +279,20 @@ model LigaArbitro {
 }
 
 model Division {
-  id              String    @id @default(cuid())
-  nombre          String
-  maxEquipos      Int
-  arbitraje       Float     @default(0)
-  diasPartido     String?
-  horarioPartido  String?
-  duracionPartido Int?
-  descanso        Int?
-  fechaInicio     DateTime?
-  fechaFin        DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                       String    @id @default(cuid())
+  nombre                   String
+  maxEquipos               Int
+  arbitraje                Float     @default(0)
+  registrarParticipaciones Boolean   @default(false)
+  usarPenalesEnEmpates     Boolean   @default(true)
+  diasPartido              String?
+  horarioPartido           String?
+  duracionPartido          Int?
+  descanso                 Int?
+  fechaInicio              DateTime?
+  fechaFin                 DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   ligaId            String
   estadoLigaId      String
@@ -333,10 +335,11 @@ model Equipo {
   divisiones        DivisionEquipo[]
   jugadores         EquipoJugador[]
   divisionJugadores DivisionJugador[]
-  partidosLocal     Partido[]         @relation("local")
-  partidosVisitante Partido[]         @relation("visitante")
+  partidosLocal     Partido[]              @relation("local")
+  partidosVisitante Partido[]              @relation("visitante")
   tablaPosiciones   TablaPosicion[]
   anotaciones       AnotacionPartido[]
+  participaciones   ParticipacionPartido[]
 
   @@unique([userId, nombreNormalizado])
   @@map("equipos")
@@ -356,9 +359,10 @@ model Jugador {
   createdAt                DateTime        @default(now())
   updatedAt                DateTime        @updatedAt
 
-  equipos    EquipoJugador[]
-  divisiones DivisionJugador[]
-  anotaciones AnotacionPartido[]
+  equipos         EquipoJugador[]
+  divisiones      DivisionJugador[]
+  anotaciones     AnotacionPartido[]
+  participaciones ParticipacionPartido[]
 
   @@map("jugadores")
 }
@@ -474,6 +478,7 @@ model Partido {
   tipoPartido         TipoPartido    @default(REGULAR)
   exhibicionLocal     Boolean        @default(false)
   exhibicionVisitante Boolean        @default(false)
+  notas               String?
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
   version             Int            @default(0)
@@ -493,6 +498,7 @@ model Partido {
   tandas          TandaArbitralPartido[]
   refereeAccess   PartidoRefereeAccess[]
   anotaciones     AnotacionPartido[]
+  participaciones ParticipacionPartido[]
 
   @@index([jornadaId])
   @@index([jornadaId, fecha])
@@ -503,21 +509,21 @@ model Partido {
 }
 
 model AnotacionPartido {
-  id             String       @id @default(cuid())
-  partidoId      String
-  jugadorId      String?
-  equipoId       String?
-  ladoMarcador   LadoMarcador
-  cantidad       Int
+  id                String       @id @default(cuid())
+  partidoId         String
+  jugadorId         String?
+  equipoId          String?
+  ladoMarcador      LadoMarcador
+  cantidad          Int
   jugadorIdSnapshot String?
   equipoIdSnapshot  String?
-  jugadorNombre  String?
-  equipoNombre   String?
-  dorsal         Int?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  jugadorNombre     String?
+  equipoNombre      String?
+  dorsal            Int?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
-  partido Partido @relation(fields: [partidoId], references: [id], onDelete: Cascade)
+  partido Partido  @relation(fields: [partidoId], references: [id], onDelete: Cascade)
   jugador Jugador? @relation(fields: [jugadorId], references: [id], onDelete: SetNull)
   equipo  Equipo?  @relation(fields: [equipoId], references: [id], onDelete: SetNull)
 
@@ -525,6 +531,31 @@ model AnotacionPartido {
   @@index([jugadorId])
   @@index([equipoId])
   @@map("anotaciones_partido")
+}
+
+model ParticipacionPartido {
+  id                String       @id @default(cuid())
+  partidoId         String
+  jugadorId         String?
+  equipoId          String?
+  ladoMarcador      LadoMarcador
+  jugadorIdSnapshot String
+  equipoIdSnapshot  String
+  jugadorNombre     String
+  equipoNombre      String
+  dorsal            Int?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  partido Partido  @relation(fields: [partidoId], references: [id], onDelete: Cascade)
+  jugador Jugador? @relation(fields: [jugadorId], references: [id], onDelete: SetNull)
+  equipo  Equipo?  @relation(fields: [equipoId], references: [id], onDelete: SetNull)
+
+  @@unique([partidoId, jugadorIdSnapshot])
+  @@index([partidoId, ladoMarcador])
+  @@index([jugadorId])
+  @@index([equipoId])
+  @@map("participaciones_partido")
 }
 
 model PartidoArbitro {
@@ -692,8 +723,8 @@ model NotificationOutbox {
   jornadaId              String?
   divisionId             String
   audience               NotificationAudience
-  eventType              NotificationEventType  @default(JORNADA_GENERATED)
-  aggregationKey         String?                 @unique
+  eventType              NotificationEventType    @default(JORNADA_GENERATED)
+  aggregationKey         String?                  @unique
   payload                Json?
   targetUserIds          Json?
   providerIdempotencyKey String                   @unique

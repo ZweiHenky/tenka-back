@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.partidoRepository = exports.PARTIDO_READ_INCLUDE = exports.exposePartidoRead = exports.exposeAnotacionRead = void 0;
+exports.partidoRepository = exports.PARTIDO_READ_INCLUDE = exports.exposePartidoReadWithNotas = exports.exposePartidoRead = exports.exposeParticipacionRead = exports.exposeAnotacionRead = void 0;
 const database_1 = require("../../config/database");
 const divisionVisibility_1 = require("../../utils/divisionVisibility");
 const exposeAnotacionRead = (anotacion) => ({
@@ -9,12 +9,44 @@ const exposeAnotacionRead = (anotacion) => ({
     equipoId: anotacion.equipoId ?? anotacion.equipoIdSnapshot ?? null,
 });
 exports.exposeAnotacionRead = exposeAnotacionRead;
-const exposePartidoRead = (partido) => ({
-    ...partido,
-    arbitros: partido.arbitros?.map((row) => row.arbitro),
-    anotaciones: partido.anotaciones?.map(exports.exposeAnotacionRead),
+const exposeParticipacionRead = (participacion) => ({
+    ...participacion,
+    jugadorId: participacion.jugadorId ?? participacion.jugadorIdSnapshot ?? null,
+    equipoId: participacion.equipoId ?? participacion.equipoIdSnapshot ?? null,
 });
+exports.exposeParticipacionRead = exposeParticipacionRead;
+const exposePartidoRead = (partido) => {
+    const { notas: _notas, jornada: _jornada, rondaPlayoff: _rondaPlayoff, ...publicPartido } = partido;
+    return {
+        ...publicPartido,
+        arbitros: partido.arbitros?.map((row) => row.arbitro),
+        anotaciones: partido.anotaciones?.map(exports.exposeAnotacionRead),
+        participaciones: partido.participaciones?.map(exports.exposeParticipacionRead),
+    };
+};
 exports.exposePartidoRead = exposePartidoRead;
+const exposePartidoReadWithNotas = (partido) => {
+    const { jornada: _jornada, rondaPlayoff: _rondaPlayoff, ...rest } = partido;
+    return {
+        ...rest,
+        arbitros: partido.arbitros?.map((row) => row.arbitro),
+        anotaciones: partido.anotaciones?.map(exports.exposeAnotacionRead),
+        participaciones: partido.participaciones?.map(exports.exposeParticipacionRead),
+    };
+};
+exports.exposePartidoReadWithNotas = exposePartidoReadWithNotas;
+const PARTIDO_OWNER_CONTEXT = {
+    jornada: { select: { division: { select: { liga: { select: { userId: true } } } } } },
+    rondaPlayoff: { select: { division: { select: { liga: { select: { userId: true } } } } } },
+};
+function isPartidoOwner(partido, actor) {
+    if (!actor)
+        return false;
+    if (actor.rol === 'ADMINISTRADOR')
+        return true;
+    const ligaUserId = partido.jornada?.division?.liga?.userId ?? partido.rondaPlayoff?.division?.liga?.userId;
+    return ligaUserId === actor.id;
+}
 exports.PARTIDO_READ_INCLUDE = {
     equipoLocal: { select: { id: true, nombre: true, logo: true } },
     equipoVisitante: { select: { id: true, nombre: true, logo: true } },
@@ -23,7 +55,9 @@ exports.PARTIDO_READ_INCLUDE = {
 };
 const PARTIDO_DETAIL_INCLUDE = {
     ...exports.PARTIDO_READ_INCLUDE,
+    ...PARTIDO_OWNER_CONTEXT,
     anotaciones: { orderBy: [{ ladoMarcador: 'asc' }, { jugadorNombre: 'asc' }, { id: 'asc' }] },
+    participaciones: { orderBy: [{ ladoMarcador: 'asc' }, { jugadorNombre: 'asc' }, { id: 'asc' }] },
 };
 exports.partidoRepository = {
     async findAuthorizationContext(id, client = database_1.prisma) {
@@ -106,7 +140,9 @@ exports.partidoRepository = {
             },
             include: PARTIDO_DETAIL_INCLUDE,
         });
-        return partido ? (0, exports.exposePartidoRead)(partido) : null;
+        return partido
+            ? (isPartidoOwner(partido, actor) ? (0, exports.exposePartidoReadWithNotas)(partido) : (0, exports.exposePartidoRead)(partido))
+            : null;
     },
     async findByJornada(jornadaId) {
         const partidos = await database_1.prisma.partido.findMany({

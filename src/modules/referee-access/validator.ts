@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { allocationSchema } from '../partido/validator'
+import { allocationSchema, notasSchema, participacionSchema } from '../partido/validator'
 
 export const refereeResultSchema = z.object({
   expectedVersion: z.number().int().min(0),
@@ -9,6 +9,8 @@ export const refereeResultSchema = z.object({
   penalesVisitante: z.number().int().min(0).max(99).optional().nullable(),
   estado: z.literal('FINALIZADO'),
   allocations: z.array(allocationSchema).max(198),
+  participaciones: z.array(participacionSchema).max(198).optional(),
+  notas: notasSchema,
 }).strict()
 
 export type RefereeResultInput = z.output<typeof refereeResultSchema>

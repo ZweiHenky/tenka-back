@@ -5,7 +5,13 @@ const database_1 = require("../../config/database");
 const divisionVisibility_1 = require("../../utils/divisionVisibility");
 const exposeArbitros = (jornada) => {
     const { generationKey: _generationKey, generationRequestHash: _generationRequestHash, ...publicJornada } = jornada;
-    return { ...publicJornada, partidos: jornada.partidos?.map((partido) => ({ ...partido, arbitros: partido.arbitros?.map((row) => row.arbitro) })) };
+    return {
+        ...publicJornada,
+        partidos: jornada.partidos?.map((partido) => {
+            const { notas: _notas, ...publicPartido } = partido;
+            return { ...publicPartido, arbitros: partido.arbitros?.map((row) => row.arbitro) };
+        }),
+    };
 };
 const partidosInclude = {
     orderBy: { fecha: 'asc' },

@@ -11,5 +11,7 @@ exports.refereeResultSchema = zod_1.z.object({
     penalesVisitante: zod_1.z.number().int().min(0).max(99).optional().nullable(),
     estado: zod_1.z.literal('FINALIZADO'),
     allocations: zod_1.z.array(validator_1.allocationSchema).max(198),
+    participaciones: zod_1.z.array(validator_1.participacionSchema).max(198).optional(),
+    notas: validator_1.notasSchema,
 }).strict();
 //# sourceMappingURL=validator.js.map

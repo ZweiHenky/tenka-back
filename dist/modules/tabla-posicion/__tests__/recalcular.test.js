@@ -94,6 +94,12 @@ function createdRow(equipoId) {
             puntos: 2,
         });
     });
+    (0, vitest_1.it)('registra 1/1 puntos cuando el empate no tiene penales', async () => {
+        mockTiedMatch(null, null);
+        await service_1.tablaPosicionService.recalcular(divisionId);
+        (0, vitest_1.expect)(createdRow('local')).toMatchObject({ empatados: 1, puntos: 1 });
+        (0, vitest_1.expect)(createdRow('visitante')).toMatchObject({ empatados: 1, puntos: 1 });
+    });
     (0, vitest_1.it)('no registra estadísticas para ningún equipo en partido amistoso (local gana)', async () => {
         vitest_1.vi.mocked(database_1.prisma.partido.findMany).mockResolvedValue([
             {

@@ -48,8 +48,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DivisionNotificationSubscriptionScalarFieldEnum = exports.MediaAssetScalarFieldEnum = exports.MediaDeletionJobScalarFieldEnum = exports.TablaPosicionScalarFieldEnum = exports.PartidoRefereeAccessScalarFieldEnum = exports.TandaArbitralPartidoScalarFieldEnum = exports.TandaArbitralScalarFieldEnum = exports.PartidoArbitroScalarFieldEnum = exports.AnotacionPartidoScalarFieldEnum = exports.PartidoScalarFieldEnum = exports.RondaPlayoffScalarFieldEnum = exports.JornadaScalarFieldEnum = exports.PremioScalarFieldEnum = exports.DivisionJugadorScalarFieldEnum = exports.DivisionEquipoScalarFieldEnum = exports.EquipoJugadorScalarFieldEnum = exports.JugadorScalarFieldEnum = exports.EquipoScalarFieldEnum = exports.DivisionScalarFieldEnum = exports.LigaArbitroScalarFieldEnum = exports.LigaCanchaScalarFieldEnum = exports.LigaScalarFieldEnum = exports.TipoCompetenciaScalarFieldEnum = exports.EstadoLigaScalarFieldEnum = exports.UbicacionScalarFieldEnum = exports.TipoScalarFieldEnum = exports.CategoriaScalarFieldEnum = exports.VerificationScalarFieldEnum = exports.SessionScalarFieldEnum = exports.AccountScalarFieldEnum = exports.UserScalarFieldEnum = exports.TransactionIsolationLevel = exports.ModelName = exports.AnyNull = exports.JsonNull = exports.DbNull = exports.NullTypes = exports.prismaVersion = exports.getExtensionContext = exports.Decimal = exports.Sql = exports.raw = exports.join = exports.empty = exports.sql = exports.PrismaClientValidationError = exports.PrismaClientInitializationError = exports.PrismaClientRustPanicError = exports.PrismaClientUnknownRequestError = exports.PrismaClientKnownRequestError = void 0;
-exports.defineExtension = exports.JsonNullValueFilter = exports.NullsOrder = exports.QueryMode = exports.NullableJsonNullValueInput = exports.SortOrder = exports.NotificationOutboxScalarFieldEnum = exports.OneSignalTagCleanupJobScalarFieldEnum = void 0;
+exports.MediaAssetScalarFieldEnum = exports.MediaDeletionJobScalarFieldEnum = exports.TablaPosicionScalarFieldEnum = exports.PartidoRefereeAccessScalarFieldEnum = exports.TandaArbitralPartidoScalarFieldEnum = exports.TandaArbitralScalarFieldEnum = exports.PartidoArbitroScalarFieldEnum = exports.ParticipacionPartidoScalarFieldEnum = exports.AnotacionPartidoScalarFieldEnum = exports.PartidoScalarFieldEnum = exports.RondaPlayoffScalarFieldEnum = exports.JornadaScalarFieldEnum = exports.PremioScalarFieldEnum = exports.DivisionJugadorScalarFieldEnum = exports.DivisionEquipoScalarFieldEnum = exports.EquipoJugadorScalarFieldEnum = exports.JugadorScalarFieldEnum = exports.EquipoScalarFieldEnum = exports.DivisionScalarFieldEnum = exports.LigaArbitroScalarFieldEnum = exports.LigaCanchaScalarFieldEnum = exports.LigaScalarFieldEnum = exports.TipoCompetenciaScalarFieldEnum = exports.EstadoLigaScalarFieldEnum = exports.UbicacionScalarFieldEnum = exports.TipoScalarFieldEnum = exports.CategoriaScalarFieldEnum = exports.VerificationScalarFieldEnum = exports.SessionScalarFieldEnum = exports.AccountScalarFieldEnum = exports.UserScalarFieldEnum = exports.TransactionIsolationLevel = exports.ModelName = exports.AnyNull = exports.JsonNull = exports.DbNull = exports.NullTypes = exports.prismaVersion = exports.getExtensionContext = exports.Decimal = exports.Sql = exports.raw = exports.join = exports.empty = exports.sql = exports.PrismaClientValidationError = exports.PrismaClientInitializationError = exports.PrismaClientRustPanicError = exports.PrismaClientUnknownRequestError = exports.PrismaClientKnownRequestError = void 0;
+exports.defineExtension = exports.JsonNullValueFilter = exports.NullsOrder = exports.QueryMode = exports.NullableJsonNullValueInput = exports.SortOrder = exports.NotificationOutboxScalarFieldEnum = exports.OneSignalTagCleanupJobScalarFieldEnum = exports.DivisionNotificationSubscriptionScalarFieldEnum = void 0;
 const runtime = __importStar(require("@prisma/client/runtime/client"));
 /**
  * Prisma Errors
@@ -127,6 +127,7 @@ exports.ModelName = {
     RondaPlayoff: 'RondaPlayoff',
     Partido: 'Partido',
     AnotacionPartido: 'AnotacionPartido',
+    ParticipacionPartido: 'ParticipacionPartido',
     PartidoArbitro: 'PartidoArbitro',
     TandaArbitral: 'TandaArbitral',
     TandaArbitralPartido: 'TandaArbitralPartido',
@@ -258,6 +259,8 @@ exports.DivisionScalarFieldEnum = {
     nombre: 'nombre',
     maxEquipos: 'maxEquipos',
     arbitraje: 'arbitraje',
+    registrarParticipaciones: 'registrarParticipaciones',
+    usarPenalesEnEmpates: 'usarPenalesEnEmpates',
     diasPartido: 'diasPartido',
     horarioPartido: 'horarioPartido',
     duracionPartido: 'duracionPartido',
@@ -354,6 +357,7 @@ exports.PartidoScalarFieldEnum = {
     tipoPartido: 'tipoPartido',
     exhibicionLocal: 'exhibicionLocal',
     exhibicionVisitante: 'exhibicionVisitante',
+    notas: 'notas',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     version: 'version',
@@ -370,6 +374,20 @@ exports.AnotacionPartidoScalarFieldEnum = {
     equipoId: 'equipoId',
     ladoMarcador: 'ladoMarcador',
     cantidad: 'cantidad',
+    jugadorIdSnapshot: 'jugadorIdSnapshot',
+    equipoIdSnapshot: 'equipoIdSnapshot',
+    jugadorNombre: 'jugadorNombre',
+    equipoNombre: 'equipoNombre',
+    dorsal: 'dorsal',
+    createdAt: 'createdAt',
+    updatedAt: 'updatedAt'
+};
+exports.ParticipacionPartidoScalarFieldEnum = {
+    id: 'id',
+    partidoId: 'partidoId',
+    jugadorId: 'jugadorId',
+    equipoId: 'equipoId',
+    ladoMarcador: 'ladoMarcador',
     jugadorIdSnapshot: 'jugadorIdSnapshot',
     equipoIdSnapshot: 'equipoIdSnapshot',
     jugadorNombre: 'jugadorNombre',

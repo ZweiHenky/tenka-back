@@ -285,19 +285,19 @@ exports.partidoService = {
                                 id,
                                 jornadaId: currentJornada.id,
                                 expected: current,
-                                data: { ...data, equipoLocalId: currentLocalId, equipoVisitanteId: currentVisitorId },
+                                data: { ...data, equipoLocalId: currentLocalId, equipoVisitanteId: currentVisitorId, notas: null },
                             },
                             {
                                 id: target.id,
                                 jornadaId: currentJornada.id,
                                 expected: target,
-                                data: { equipoLocalId: targetLocalId, equipoVisitanteId: targetVisitorId },
+                                data: { equipoLocalId: targetLocalId, equipoVisitanteId: targetVisitorId, notas: null },
                             },
                             ...recalculated.flatMap((jornada) => jornada.slots.map((slot, index) => ({
                                 id: slot.id,
                                 jornadaId: jornada.jornadaId,
                                 expected: slot,
-                                data: { equipoLocalId: jornada.pairs[index][0], equipoVisitanteId: jornada.pairs[index][1] },
+                                data: { equipoLocalId: jornada.pairs[index][0], equipoVisitanteId: jornada.pairs[index][1], notas: null },
                             }))),
                         ].sort((a, b) => a.id.localeCompare(b.id));
                         for (const write of writes) {
@@ -383,8 +383,10 @@ exports.partidoService = {
                             ? { ...data, golesLocal: 0, golesVisitante: 0, penalesLocal: null, penalesVisitante: null, version: { increment: 1 } }
                             : data.estado ? { ...data, version: { increment: 1 } } : data;
                         const partido = await repository_1.partidoRepository.update(id, playoffData, tx);
-                        if (data.estado === 'PROGRAMADO')
+                        if (data.estado === 'PROGRAMADO') {
                             await tx.anotacionPartido.deleteMany({ where: { partidoId: id } });
+                            await tx.participacionPartido.deleteMany({ where: { partidoId: id } });
+                        }
                         await service_2.rondaPlayoffService.syncAdvancement(tx, lockedCtx.rondaPlayoffId);
                         return partido;
                     }, { isolationLevel: 'Serializable' });
@@ -427,8 +429,10 @@ exports.partidoService = {
                         if (transactionalData.estado)
                             transactionalData.version = { increment: 1 };
                         const partido = await repository_1.partidoRepository.update(id, transactionalData, tx);
-                        if (transactionalData.estado === 'PROGRAMADO')
+                        if (transactionalData.estado === 'PROGRAMADO') {
                             await tx.anotacionPartido.deleteMany({ where: { partidoId: id } });
+                            await tx.participacionPartido.deleteMany({ where: { partidoId: id } });
+                        }
                         if ((lockedCtx.estado === 'FINALIZADO' || partido.estado === 'FINALIZADO') && partido.jornadaId) {
                             await this._recalcularDivision(partido.jornadaId, tx);
                         }
@@ -460,7 +464,7 @@ exports.partidoService = {
                     if (locked.ligaId !== initial.ligaId)
                         throw new errors_1.ConflictError('El partido cambió durante la actualización; vuelve a intentarlo');
                     return (0, resultWriter_1.writeResultInTransaction)(tx, id, data);
-                }, { isolationLevel: 'Serializable' });
+                }, { isolationLevel: 'ReadCommitted' });
             }
             catch (error) {
                 if (error?.code === 'P2034' && attempt < 2)

@@ -4,7 +4,7 @@ import { tablaPosicionService } from '../tabla-posicion/service'
 import { rondaPlayoffService } from '../ronda-playoff/service'
 import { validatePlayoffFinalizationSchedule } from './playoffFinalization'
 import type { ResultInput } from './validator'
-import { exposePartidoRead } from './repository'
+import { exposePartidoReadWithNotas } from './repository'
 
 const RESULT_CONTEXT_SELECT = {
   id: true,
@@ -14,6 +14,7 @@ const RESULT_CONTEXT_SELECT = {
   golesVisitante: true,
   penalesLocal: true,
   penalesVisitante: true,
+  tipoPartido: true,
   jornadaId: true,
   rondaPlayoffId: true,
   equipoLocalId: true,
@@ -21,11 +22,11 @@ const RESULT_CONTEXT_SELECT = {
   fecha: true,
   fechaFin: true,
   canchaId: true,
-  jornada: { select: { division: { select: { id: true, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
-  rondaPlayoff: { select: { division: { select: { id: true, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
+  jornada: { select: { division: { select: { id: true, registrarParticipaciones: true, usarPenalesEnEmpates: true, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
+  rondaPlayoff: { select: { division: { select: { id: true, registrarParticipaciones: true, usarPenalesEnEmpates: true, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
 } as const
 
-export async function getResultContext(tx: Prisma.TransactionClient, partidoId: string) {
+export async function getResultContext(tx: Pick<Prisma.TransactionClient, 'partido'>, partidoId: string) {
   const partido = await tx.partido.findUnique({ where: { id: partidoId }, select: RESULT_CONTEXT_SELECT })
   if (!partido) throw new NotFoundError('Partido')
   const division = partido.jornada?.division ?? partido.rondaPlayoff?.division
@@ -43,6 +44,28 @@ export async function writeResultInTransaction(
     throw new ConflictError('El resultado cambió; actualiza los datos y vuelve a intentarlo')
   }
 
+  if (input.estado === 'FINALIZADO') {
+    const tied = input.golesLocal === input.golesVisitante
+    const hasLocalPenalties = input.penalesLocal != null
+    const hasVisitorPenalties = input.penalesVisitante != null
+    const hasAnyPenalties = hasLocalPenalties || hasVisitorPenalties
+    const hasCompletePenalties = hasLocalPenalties && hasVisitorPenalties
+    const requiresPenalties = tied && (partido.rondaPlayoffId != null
+      || (partido.tipoPartido !== 'AMISTOSO' && division.usarPenalesEnEmpates))
+
+    if (!tied && hasAnyPenalties) {
+      throw new ValidationError('Los penales solo pueden registrarse cuando el marcador está empatado')
+    }
+    if (requiresPenalties && (!hasCompletePenalties || input.penalesLocal === input.penalesVisitante)) {
+      throw new ValidationError(partido.rondaPlayoffId
+        ? 'El partido de eliminatoria no puede terminar empatado. Define un ganador por penales.'
+        : 'El empate debe definir un ganador por penales.')
+    }
+    if (!requiresPenalties && hasAnyPenalties) {
+      throw new ValidationError('Esta división no usa penales para resolver empates')
+    }
+  }
+
   if (input.estado === 'FINALIZADO' && partido.rondaPlayoffId) {
     const scheduleError = validatePlayoffFinalizationSchedule({
       fecha: partido.fecha,
@@ -51,13 +74,13 @@ export async function writeResultInTransaction(
       canchaId: partido.canchaId,
     })
     if (scheduleError) throw new ValidationError(scheduleError)
-    if (input.golesLocal === input.golesVisitante
-      && (input.penalesLocal == null || input.penalesVisitante == null || input.penalesLocal === input.penalesVisitante)) {
-      throw new ValidationError('El partido de eliminatoria no puede terminar empatado. Define un ganador por penales.')
-    }
   }
   if (partido.estado === 'FINALIZADO' && partido.rondaPlayoffId && input.estado === 'PROGRAMADO') {
     throw new ValidationError('Un partido de eliminatoria finalizado solo puede corregirse o suspenderse')
+  }
+
+  if (input.estado !== 'FINALIZADO' && (input.notas !== undefined || input.participaciones !== undefined)) {
+    throw new ValidationError('Las notas y los participantes solo pueden guardarse al finalizar el partido')
   }
 
   const namedKeys = new Set<string>()
@@ -75,8 +98,54 @@ export async function writeResultInTransaction(
     throw new ValidationError('Las anotaciones asignadas no pueden superar el marcador')
   }
 
-  const memberships = namedPlayerIds.length === 0 ? [] : await tx.divisionJugador.findMany({
-    where: { divisionId: division.id, jugadorId: { in: [...new Set(namedPlayerIds)] } },
+  const shouldWriteParticipations = division.registrarParticipaciones && input.estado === 'FINALIZADO'
+  if (shouldWriteParticipations && input.participaciones === undefined) {
+    throw new ValidationError('Debes registrar los jugadores que participaron en el partido')
+  }
+
+  const participacionList = shouldWriteParticipations ? (input.participaciones ?? []) : []
+  const participationKeys = new Set<string>()
+  const participationUniquePlayers = new Set<string>()
+  const participationPlayerIds: string[] = []
+  if (shouldWriteParticipations) {
+    for (const participacion of participacionList) {
+      const key = `${participacion.ladoMarcador}:${participacion.jugadorId}`
+      if (participationKeys.has(key)) {
+        throw new ValidationError('No se puede repetir un jugador en el mismo lado de la participación')
+      }
+      participationKeys.add(key)
+      if (participationUniquePlayers.has(participacion.jugadorId)) {
+        throw new ValidationError('Un jugador no puede participar por ambos equipos')
+      }
+      participationUniquePlayers.add(participacion.jugadorId)
+      participationPlayerIds.push(participacion.jugadorId)
+    }
+    for (const allocation of input.allocations) {
+      if (!allocation.jugadorId) continue
+      if (!participationKeys.has(`${allocation.ladoMarcador}:${allocation.jugadorId}`)) {
+        throw new ValidationError('Todos los goleadores deben estar registrados como participantes del partido')
+      }
+    }
+  }
+
+  const historicalParticipations = !shouldWriteParticipations && input.estado === 'FINALIZADO'
+    ? await tx.participacionPartido.findMany({
+        where: { partidoId },
+        select: { jugadorId: true, jugadorIdSnapshot: true, ladoMarcador: true },
+      })
+    : []
+  if (historicalParticipations.length > 0) {
+    const historyKeys = new Set(historicalParticipations.map((row) => `${row.ladoMarcador}:${row.jugadorId ?? row.jugadorIdSnapshot}`))
+    for (const allocation of input.allocations) {
+      if (!allocation.jugadorId) continue
+      if (!historyKeys.has(`${allocation.ladoMarcador}:${allocation.jugadorId}`)) {
+        throw new ValidationError('El goleador no está en el historial de participantes del partido. Activa el registro de participantes para corregir la lista')
+      }
+    }
+  }
+
+  const memberships = namedPlayerIds.length === 0 && participationPlayerIds.length === 0 ? [] : await tx.divisionJugador.findMany({
+    where: { divisionId: division.id, jugadorId: { in: [...new Set([...namedPlayerIds, ...participationPlayerIds])] } },
     select: {
       jugadorId: true,
       equipoId: true,
@@ -87,29 +156,70 @@ export async function writeResultInTransaction(
   })
   const teamIds = { LOCAL: partido.equipoLocalId, VISITANTE: partido.equipoVisitanteId }
   const membershipByTeamPlayer = new Map(memberships.map((membership) => [`${membership.equipoId}:${membership.jugadorId}`, membership]))
-  const previousAllocations = namedPlayerIds.length === 0 ? [] : await tx.anotacionPartido.findMany({
-    where: { partidoId, jugadorId: { in: [...new Set(namedPlayerIds)] } },
+  const namedPlayerIdsSet = new Set(namedPlayerIds)
+  const participationPlayerIdsSet = new Set(participationPlayerIds)
+  const previousAllocations = namedPlayerIdsSet.size === 0 ? [] : await tx.anotacionPartido.findMany({
+    where: {
+      partidoId,
+      OR: [
+        { jugadorId: { in: [...namedPlayerIdsSet] } },
+        { jugadorIdSnapshot: { in: [...namedPlayerIdsSet] } },
+      ],
+    },
+    select: { jugadorId: true, jugadorIdSnapshot: true, equipoId: true, equipoIdSnapshot: true, ladoMarcador: true, jugadorNombre: true, equipoNombre: true, dorsal: true },
+  })
+  const previousParticipations = participationPlayerIdsSet.size === 0 ? [] : await tx.participacionPartido.findMany({
+    where: {
+      partidoId,
+      OR: [
+        { jugadorId: { in: [...participationPlayerIdsSet] } },
+        { jugadorIdSnapshot: { in: [...participationPlayerIdsSet] } },
+      ],
+    },
     select: { jugadorId: true, jugadorIdSnapshot: true, equipoId: true, equipoIdSnapshot: true, ladoMarcador: true, jugadorNombre: true, equipoNombre: true, dorsal: true },
   })
   const namedRows = input.allocations.filter((allocation) => allocation.jugadorId).map((allocation) => {
     const equipoId = teamIds[allocation.ladoMarcador]
     const membership = membershipByTeamPlayer.get(`${equipoId}:${allocation.jugadorId}`)
     const previous = previousAllocations.find((row) => (row.jugadorId ?? row.jugadorIdSnapshot) === allocation.jugadorId
-      && (row.equipoId ?? row.equipoIdSnapshot) === equipoId && row.ladoMarcador === allocation.ladoMarcador)
+      && row.ladoMarcador === allocation.ladoMarcador)
     if (!membership && !previous) {
       throw new ValidationError('El jugador no pertenece al equipo y división correspondientes al partido')
     }
     return {
       partidoId,
-      jugadorId: allocation.jugadorId,
-      equipoId,
-      jugadorIdSnapshot: allocation.jugadorId,
-      equipoIdSnapshot: equipoId,
+      jugadorId: membership ? allocation.jugadorId : (previous?.jugadorId ?? null),
+      equipoId: membership ? equipoId : (previous?.equipoId ?? null),
+      jugadorIdSnapshot: previous?.jugadorIdSnapshot ?? allocation.jugadorId,
+      equipoIdSnapshot: previous?.equipoIdSnapshot ?? equipoId,
       ladoMarcador: allocation.ladoMarcador,
       cantidad: allocation.cantidad,
-      jugadorNombre: membership?.jugador.nombre ?? previous?.jugadorNombre ?? 'Jugador',
-      equipoNombre: membership?.equipo.nombre ?? previous?.equipoNombre ?? 'Equipo',
-      dorsal: membership?.dorsal ?? previous?.dorsal ?? null,
+      jugadorNombre: previous?.jugadorNombre ?? membership?.jugador.nombre ?? 'Jugador',
+      equipoNombre: previous?.equipoNombre ?? membership?.equipo.nombre ?? 'Equipo',
+      dorsal: previous ? previous.dorsal : (membership?.dorsal ?? null),
+    }
+  })
+
+  const participationRows = participacionList.map((participacion) => {
+    const equipoId = teamIds[participacion.ladoMarcador]
+    const membership = membershipByTeamPlayer.get(`${equipoId}:${participacion.jugadorId}`)
+    const previous = previousParticipations.find((row) => (row.jugadorId ?? row.jugadorIdSnapshot) === participacion.jugadorId
+      && row.ladoMarcador === participacion.ladoMarcador)
+      ?? previousAllocations.find((row) => (row.jugadorId ?? row.jugadorIdSnapshot) === participacion.jugadorId
+        && row.ladoMarcador === participacion.ladoMarcador)
+    if (!membership && !previous) {
+      throw new ValidationError('El jugador no pertenece al equipo y división correspondientes al partido')
+    }
+    return {
+      partidoId,
+      jugadorId: membership ? participacion.jugadorId : (previous?.jugadorId ?? null),
+      equipoId: membership ? equipoId : (previous?.equipoId ?? null),
+      jugadorIdSnapshot: previous?.jugadorIdSnapshot ?? participacion.jugadorId,
+      equipoIdSnapshot: previous?.equipoIdSnapshot ?? equipoId!,
+      ladoMarcador: participacion.ladoMarcador,
+      jugadorNombre: previous?.jugadorNombre ?? membership?.jugador.nombre ?? 'Jugador',
+      equipoNombre: previous?.equipoNombre ?? membership?.equipo.nombre ?? 'Equipo',
+      dorsal: previous ? previous.dorsal : (membership?.dorsal ?? null),
     }
   })
 
@@ -132,6 +242,7 @@ export async function writeResultInTransaction(
           golesVisitante: input.golesVisitante,
           penalesLocal: input.penalesLocal ?? null,
           penalesVisitante: input.penalesVisitante ?? null,
+          ...(input.notas !== undefined ? { notas: input.notas } : {}),
           version: { increment: 1 },
           },
   })
@@ -139,6 +250,7 @@ export async function writeResultInTransaction(
 
   if (input.estado === 'PROGRAMADO') {
     await tx.anotacionPartido.deleteMany({ where: { partidoId } })
+    await tx.participacionPartido.deleteMany({ where: { partidoId } })
   } else if (input.estado === 'FINALIZADO') {
     const teamRows = await tx.equipo.findMany({
       where: { id: { in: [partido.equipoLocalId, partido.equipoVisitanteId].filter((id): id is string => Boolean(id)) } },
@@ -167,6 +279,12 @@ export async function writeResultInTransaction(
     if (namedRows.length + unattributedRows.length > 0) {
       await tx.anotacionPartido.createMany({ data: [...namedRows, ...unattributedRows] })
     }
+    if (shouldWriteParticipations) {
+      await tx.participacionPartido.deleteMany({ where: { partidoId } })
+      if (participationRows.length > 0) {
+        await tx.participacionPartido.createMany({ data: participationRows })
+      }
+    }
   }
 
   if (partido.jornadaId && (partido.estado === 'FINALIZADO' || input.estado === 'FINALIZADO' || input.estado === 'PROGRAMADO' || input.estado === 'SUSPENDIDO')) {
@@ -176,7 +294,10 @@ export async function writeResultInTransaction(
 
   const updated = await tx.partido.findUnique({
     where: { id: partidoId },
-    include: { anotaciones: { orderBy: [{ ladoMarcador: 'asc' }, { jugadorNombre: 'asc' }, { id: 'asc' }] } },
+    include: {
+      anotaciones: { orderBy: [{ ladoMarcador: 'asc' }, { jugadorNombre: 'asc' }, { id: 'asc' }] },
+      participaciones: { orderBy: [{ ladoMarcador: 'asc' }, { jugadorNombre: 'asc' }, { id: 'asc' }] },
+    },
   })
-  return updated ? exposePartidoRead(updated) : updated
+  return updated ? exposePartidoReadWithNotas(updated) : updated
 }

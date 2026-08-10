@@ -1,10 +1,6 @@
-import 'dotenv/config';
-import { PrismaClient } from '../src/generated/prisma/client';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { createDevelopmentPrismaClient } from '../src/utils/developmentDatabase';
 
-const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
-});
+const prisma = createDevelopmentPrismaClient();
 
 async function main() {
   const user = await prisma.user.findFirstOrThrow({ where: { email: 'demo@tenka.app' } });
@@ -43,4 +39,7 @@ async function main() {
   console.log('\n¡5 equipos creados y asignados exitosamente!');
 }
 
-main().catch(console.error).finally(() => prisma.$disconnect());
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : 'Team seed failed');
+  process.exitCode = 1;
+}).finally(() => prisma.$disconnect());

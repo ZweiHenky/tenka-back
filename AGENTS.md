@@ -8,10 +8,12 @@ Express + TypeScript + Better Auth + Prisma (PostgreSQL).
 |--------|---------|
 | Dev server (hot reload) | `pnpm dev` |
 | Build (tsc) | `pnpm build` |
-| Seed database | `pnpm seed` |
-| Generate Prisma client | `npx prisma generate` |
-| Run Prisma migrations | `npx prisma migrate dev` |
-| Open Prisma Studio | `npx prisma studio` |
+| Seed demo database | `pnpm seed` (solo development) |
+| Seed catalogs | `pnpm seed:catalogs` (solo development) |
+| Generate Prisma client | `pnpm db:generate` |
+| Validate Prisma schema | `pnpm db:validate` |
+| Check development migrations | `pnpm db:status:dev` |
+| Run development migrations | `pnpm db:migrate:dev` |
 | Run tests | `pnpm test` |
 | Run tests (watch) | `pnpm test:watch` |
 
@@ -30,7 +32,8 @@ Uses **pnpm** (see `pnpm-lock.yaml`). Do not use npm/yarn. All scripts and comma
 - Driver adapter: `@prisma/adapter-pg` + `pg` (instanciado en `src/config/database.ts`, compartido con Better Auth).
 - Models: `User`, `Account`, `Session`, `Verification` — modelos de Better Auth con `phoneNumber` + `phoneNumberVerified` en User. Más los modelos de dominio del sistema de ligas (incluye `Jugador`, `EquipoJugador`, `DivisionJugador`, `Goleador`, `Arbitraje`, `DisponibilidadCancha`, etc.).
 - Migration already applied (`prisma/migrations/`).
-- Catalog seed data in `prisma/seed.ts` (categorias, tipos, estadoLiga, tipoCompetencia). Run via `pnpm seed` or `npx prisma db seed`.
+- Seeds and ad hoc database scripts must run through `scripts/development-script.mjs`; direct execution is blocked.
+- Direct Prisma CLI commands are prohibited. Use the `pnpm db:*` scripts documented in `../DATABASE-SAFETY.md`.
 
 ## Data Model
 

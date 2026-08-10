@@ -8,6 +8,7 @@ const mocks = vitest_1.vi.hoisted(() => {
         partido: { findMany: vitest_1.vi.fn(), deleteMany: vitest_1.vi.fn(), updateMany: vitest_1.vi.fn() },
         partidoRefereeAccess: { deleteMany: vitest_1.vi.fn() },
         anotacionPartido: { deleteMany: vitest_1.vi.fn() },
+        participacionPartido: { deleteMany: vitest_1.vi.fn() },
         jornada: { delete: vitest_1.vi.fn() },
     };
     return { tx, transaction: vitest_1.vi.fn() };
@@ -69,6 +70,9 @@ const deleteContext = {
         await service_1.jornadaService.delete('j-semis', owner);
         (0, vitest_1.expect)(mocks.tx.partido.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['final-1'] } } });
         (0, vitest_1.expect)(mocks.tx.partidoRefereeAccess.deleteMany).toHaveBeenCalledWith({
+            where: { partidoId: { in: ['semi-1', 'semi-2'] } },
+        });
+        (0, vitest_1.expect)(mocks.tx.participacionPartido.deleteMany).toHaveBeenCalledWith({
             where: { partidoId: { in: ['semi-1', 'semi-2'] } },
         });
         (0, vitest_1.expect)(mocks.tx.partido.updateMany).toHaveBeenCalledWith({

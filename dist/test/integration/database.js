@@ -7,6 +7,10 @@ const dotenv_1 = require("dotenv");
 const node_path_1 = require("node:path");
 exports.INTEGRATION_SCHEMA = 'myleague_integration';
 let cachedUrl;
+function databaseIdentity(url) {
+    const hostname = url.hostname.toLowerCase().replace('-pooler.', '.');
+    return `${hostname}:${url.port || '5432'}${url.pathname}`;
+}
 function getIntegrationDatabaseUrl() {
     if (cachedUrl)
         return cachedUrl;
@@ -25,17 +29,28 @@ function getIntegrationDatabaseUrl() {
     if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
         throw new Error('TEST_DATABASE_URL must be a PostgreSQL URL');
     }
-    const databaseUrl = process.env.DATABASE_URL;
-    if (databaseUrl) {
-        let parsedDatabaseUrl;
+    if (parsed.hostname.toLowerCase().includes('-pooler.')) {
+        throw new Error('TEST_DATABASE_URL must use a direct connection, not a pooled Neon endpoint');
+    }
+    const applicationTargets = [
+        ['DATABASE_URL', process.env.DATABASE_URL],
+        ['DIRECT_DATABASE_URL', process.env.DIRECT_DATABASE_URL],
+    ];
+    for (const [name, value] of applicationTargets) {
+        if (!value)
+            continue;
+        let applicationUrl;
         try {
-            parsedDatabaseUrl = new URL(databaseUrl);
+            applicationUrl = new URL(value);
         }
         catch {
-            throw new Error('DATABASE_URL must be valid so integration-test safety can be verified');
+            throw new Error(`${name} must be valid so integration-test safety can be verified`);
         }
-        if (parsed.href === parsedDatabaseUrl.href) {
-            throw new Error('TEST_DATABASE_URL must not equal DATABASE_URL');
+        if (!['postgres:', 'postgresql:'].includes(applicationUrl.protocol)) {
+            throw new Error(`${name} must be a PostgreSQL URL so integration-test safety can be verified`);
+        }
+        if (databaseIdentity(parsed) === databaseIdentity(applicationUrl)) {
+            throw new Error(`TEST_DATABASE_URL must not target the same database as ${name}`);
         }
     }
     const configuredSchemas = parsed.searchParams.getAll('schema');
@@ -47,15 +62,6 @@ function getIntegrationDatabaseUrl() {
     }
     if (parsed.searchParams.has('search_path') || /search_path/i.test(parsed.searchParams.get('options') ?? '')) {
         throw new Error('TEST_DATABASE_URL must not override search_path');
-    }
-    if (databaseUrl) {
-        const testTarget = new URL(parsed);
-        const applicationTarget = new URL(databaseUrl);
-        testTarget.searchParams.delete('schema');
-        applicationTarget.searchParams.delete('schema');
-        if (testTarget.href === applicationTarget.href) {
-            throw new Error('TEST_DATABASE_URL must not target the DATABASE_URL database');
-        }
     }
     parsed.searchParams.set('schema', exports.INTEGRATION_SCHEMA);
     if (parsed.searchParams.get('schema') !== exports.INTEGRATION_SCHEMA) {

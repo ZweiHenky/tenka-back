@@ -1,5 +1,6 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+import { createDevelopmentPrismaClient } from '../utils/developmentDatabase';
+
+const prisma = createDevelopmentPrismaClient();
 async function main() {
   const userId = 'bEls5kJSCtEE9V79m5fAOmzLop21ajjQ';
   const names = ['Dragones FC', 'Águilas Azules', 'Tigres Rojos', 'Panteras Negras', 'Leones Dorados', 'Halcones Blancos'];
@@ -11,4 +12,7 @@ async function main() {
   }
   console.log('Equipos creados:', created.length);
 }
-main().catch(console.error).finally(() => prisma.$disconnect());
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : 'Team seed failed');
+  process.exitCode = 1;
+}).finally(() => prisma.$disconnect());

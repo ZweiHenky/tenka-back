@@ -4,7 +4,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../../utils/error
 import type { AuthenticatedUser } from '../../types/auth'
 import { assertOwnerOrAdmin } from '../../utils/authorization'
 import { refereeAccessRepository } from './repository'
-import { exposeAnotacionRead, partidoRepository } from '../partido/repository'
+import { exposeAnotacionRead, exposeParticipacionRead, partidoRepository } from '../partido/repository'
 import type { RefereeResultInput } from './validator'
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock'
 import { getResultContext, writeResultInTransaction } from '../partido/resultWriter'
@@ -103,7 +103,11 @@ export const refereeAccessService = {
       penalesLocal: partido.penalesLocal,
       penalesVisitante: partido.penalesVisitante,
       tipoPartido: partido.tipoPartido,
+      notas: partido.notas,
       anotaciones: partido.anotaciones.map(exposeAnotacionRead),
+      participaciones: partido.participaciones.map(exposeParticipacionRead),
+      registrarParticipaciones: division?.registrarParticipaciones ?? false,
+      usarPenalesEnEmpates: division?.usarPenalesEnEmpates ?? true,
       jugadoresLocal: (division?.jugadores ?? [])
         .filter((row) => row.equipoId === partido.equipoLocal?.id)
         .map((row) => ({ ...row.jugador, dorsal: row.dorsal })) ?? [],
@@ -119,13 +123,15 @@ export const refereeAccessService = {
   async updateResultByToken(authHeader: string | undefined, data: RefereeResultInput) {
     const token = extractBearer(authHeader)
     const tokenHash = hashToken(token)
+    const initialAccess = await prisma.partidoRefereeAccess.findUnique({ where: { tokenHash } })
+    if (!initialAccess || initialAccess.usedAt || initialAccess.expiresAt < new Date()) {
+      throw new ValidationError('Enlace no válido o expirado')
+    }
+    const initial = await getResultContext(prisma, initialAccess.partidoId)
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         return await prisma.$transaction(async (tx) => {
-          const access = await tx.partidoRefereeAccess.findUnique({ where: { tokenHash } })
-          if (!access || access.usedAt || access.expiresAt < new Date()) throw new ValidationError('Enlace no válido o expirado')
-          const initial = await getResultContext(tx, access.partidoId)
           await acquireLeagueScheduleLock(tx, initial.division.liga.id)
 
           const lockedAccess = await tx.partidoRefereeAccess.findUnique({ where: { tokenHash } })
@@ -139,7 +145,7 @@ export const refereeAccessService = {
           const updated = await writeResultInTransaction(tx, lockedAccess.partidoId, data)
           await tx.partidoRefereeAccess.update({ where: { id: lockedAccess.id }, data: { usedAt: new Date() } })
           return updated
-        }, { isolationLevel: 'Serializable' })
+        }, { isolationLevel: 'ReadCommitted' })
       } catch (error: any) {
         if (error?.code === 'P2034' && attempt < 2) continue
         if (error?.code === 'P2034') throw new ConflictError('El resultado cambió durante la actualización; vuelve a intentarlo')

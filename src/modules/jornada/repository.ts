@@ -6,7 +6,13 @@ import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 
 const exposeArbitros = (jornada: any): JornadaEntity => {
   const { generationKey: _generationKey, generationRequestHash: _generationRequestHash, ...publicJornada } = jornada;
-  return { ...publicJornada, partidos: jornada.partidos?.map((partido: any) => ({ ...partido, arbitros: partido.arbitros?.map((row: any) => row.arbitro) })) };
+  return {
+    ...publicJornada,
+    partidos: jornada.partidos?.map((partido: any) => {
+      const { notas: _notas, ...publicPartido } = partido;
+      return { ...publicPartido, arbitros: partido.arbitros?.map((row: any) => row.arbitro) };
+    }),
+  };
 };
 
 const partidosInclude = {

@@ -25,8 +25,13 @@ exports.refereeAccessRepository = {
                         penalesLocal: true,
                         penalesVisitante: true,
                         tipoPartido: true,
+                        notas: true,
                         anotaciones: {
                             select: { id: true, jugadorId: true, equipoId: true, ladoMarcador: true, cantidad: true, jugadorNombre: true, equipoNombre: true, dorsal: true },
+                            orderBy: [{ ladoMarcador: 'asc' }, { jugadorNombre: 'asc' }, { id: 'asc' }],
+                        },
+                        participaciones: {
+                            select: { id: true, jugadorId: true, equipoId: true, ladoMarcador: true, jugadorIdSnapshot: true, equipoIdSnapshot: true, jugadorNombre: true, equipoNombre: true, dorsal: true },
                             orderBy: [{ ladoMarcador: 'asc' }, { jugadorNombre: 'asc' }, { id: 'asc' }],
                         },
                         equipoLocal: { select: { id: true, nombre: true, logo: true } },
@@ -37,6 +42,8 @@ exports.refereeAccessRepository = {
                                 numero: true,
                                 division: { select: {
                                         nombre: true,
+                                        registrarParticipaciones: true,
+                                        usarPenalesEnEmpates: true,
                                         liga: { select: { nombre: true, multiplesCanchas: true } },
                                         jugadores: { select: { equipoId: true, dorsal: true, jugador: { select: { id: true, nombre: true, foto: true } } } },
                                     } },
@@ -46,6 +53,8 @@ exports.refereeAccessRepository = {
                             select: {
                                 division: { select: {
                                         nombre: true,
+                                        registrarParticipaciones: true,
+                                        usarPenalesEnEmpates: true,
                                         liga: { select: { nombre: true, multiplesCanchas: true } },
                                         jugadores: { select: { equipoId: true, dorsal: true, jugador: { select: { id: true, nombre: true, foto: true } } } },
                                     } },

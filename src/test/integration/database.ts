@@ -5,6 +5,11 @@ export const INTEGRATION_SCHEMA = 'myleague_integration';
 
 let cachedUrl: string | undefined;
 
+function databaseIdentity(url: URL): string {
+  const hostname = url.hostname.toLowerCase().replace('-pooler.', '.');
+  return `${hostname}:${url.port || '5432'}${url.pathname}`;
+}
+
 export function getIntegrationDatabaseUrl(): string {
   if (cachedUrl) return cachedUrl;
 
@@ -25,18 +30,27 @@ export function getIntegrationDatabaseUrl(): string {
   if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
     throw new Error('TEST_DATABASE_URL must be a PostgreSQL URL');
   }
+  if (parsed.hostname.toLowerCase().includes('-pooler.')) {
+    throw new Error('TEST_DATABASE_URL must use a direct connection, not a pooled Neon endpoint');
+  }
 
-  const databaseUrl = process.env.DATABASE_URL;
-  if (databaseUrl) {
-    let parsedDatabaseUrl: URL;
+  const applicationTargets = [
+    ['DATABASE_URL', process.env.DATABASE_URL],
+    ['DIRECT_DATABASE_URL', process.env.DIRECT_DATABASE_URL],
+  ] as const;
+  for (const [name, value] of applicationTargets) {
+    if (!value) continue;
+    let applicationUrl: URL;
     try {
-      parsedDatabaseUrl = new URL(databaseUrl);
+      applicationUrl = new URL(value);
     } catch {
-      throw new Error('DATABASE_URL must be valid so integration-test safety can be verified');
+      throw new Error(`${name} must be valid so integration-test safety can be verified`);
     }
-
-    if (parsed.href === parsedDatabaseUrl.href) {
-      throw new Error('TEST_DATABASE_URL must not equal DATABASE_URL');
+    if (!['postgres:', 'postgresql:'].includes(applicationUrl.protocol)) {
+      throw new Error(`${name} must be a PostgreSQL URL so integration-test safety can be verified`);
+    }
+    if (databaseIdentity(parsed) === databaseIdentity(applicationUrl)) {
+      throw new Error(`TEST_DATABASE_URL must not target the same database as ${name}`);
     }
   }
 
@@ -49,16 +63,6 @@ export function getIntegrationDatabaseUrl(): string {
   }
   if (parsed.searchParams.has('search_path') || /search_path/i.test(parsed.searchParams.get('options') ?? '')) {
     throw new Error('TEST_DATABASE_URL must not override search_path');
-  }
-
-  if (databaseUrl) {
-    const testTarget = new URL(parsed);
-    const applicationTarget = new URL(databaseUrl);
-    testTarget.searchParams.delete('schema');
-    applicationTarget.searchParams.delete('schema');
-    if (testTarget.href === applicationTarget.href) {
-      throw new Error('TEST_DATABASE_URL must not target the DATABASE_URL database');
-    }
   }
 
   parsed.searchParams.set('schema', INTEGRATION_SCHEMA);

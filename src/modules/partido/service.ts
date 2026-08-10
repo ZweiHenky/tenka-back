@@ -305,19 +305,19 @@ export const partidoService = {
                 id,
                 jornadaId: currentJornada.id,
                 expected: current,
-                data: { ...data, equipoLocalId: currentLocalId, equipoVisitanteId: currentVisitorId },
+                data: { ...data, equipoLocalId: currentLocalId, equipoVisitanteId: currentVisitorId, notas: null },
               },
               {
                 id: target.id,
                 jornadaId: currentJornada.id,
                 expected: target,
-                data: { equipoLocalId: targetLocalId, equipoVisitanteId: targetVisitorId },
+                data: { equipoLocalId: targetLocalId, equipoVisitanteId: targetVisitorId, notas: null },
               },
               ...recalculated.flatMap((jornada) => jornada.slots.map((slot, index) => ({
                 id: slot.id,
                 jornadaId: jornada.jornadaId,
                 expected: slot,
-                data: { equipoLocalId: jornada.pairs[index][0], equipoVisitanteId: jornada.pairs[index][1] },
+                data: { equipoLocalId: jornada.pairs[index][0], equipoVisitanteId: jornada.pairs[index][1], notas: null },
               }))),
             ].sort((a, b) => a.id.localeCompare(b.id))
 
@@ -402,7 +402,10 @@ export const partidoService = {
               ? { ...data, golesLocal: 0, golesVisitante: 0, penalesLocal: null, penalesVisitante: null, version: { increment: 1 } }
               : data.estado ? { ...data, version: { increment: 1 } } : data
             const partido = await partidoRepository.update(id, playoffData, tx)
-            if (data.estado === 'PROGRAMADO') await tx.anotacionPartido.deleteMany({ where: { partidoId: id } })
+            if (data.estado === 'PROGRAMADO') {
+              await tx.anotacionPartido.deleteMany({ where: { partidoId: id } })
+              await tx.participacionPartido.deleteMany({ where: { partidoId: id } })
+            }
             await rondaPlayoffService.syncAdvancement(tx, lockedCtx.rondaPlayoffId)
             return partido
           }, { isolationLevel: 'Serializable' })
@@ -442,7 +445,10 @@ export const partidoService = {
             }
             if (transactionalData.estado) transactionalData.version = { increment: 1 }
             const partido = await partidoRepository.update(id, transactionalData, tx)
-            if (transactionalData.estado === 'PROGRAMADO') await tx.anotacionPartido.deleteMany({ where: { partidoId: id } })
+            if (transactionalData.estado === 'PROGRAMADO') {
+              await tx.anotacionPartido.deleteMany({ where: { partidoId: id } })
+              await tx.participacionPartido.deleteMany({ where: { partidoId: id } })
+            }
             if ((lockedCtx.estado === 'FINALIZADO' || partido.estado === 'FINALIZADO') && partido.jornadaId) {
               await this._recalcularDivision(partido.jornadaId, tx)
             }
@@ -472,7 +478,7 @@ export const partidoService = {
           assertOwnerOrAdmin(actor, locked.ligaUserId, 'Partido')
           if (locked.ligaId !== initial.ligaId) throw new ConflictError('El partido cambió durante la actualización; vuelve a intentarlo')
           return writeResultInTransaction(tx, id, data)
-        }, { isolationLevel: 'Serializable' })
+        }, { isolationLevel: 'ReadCommitted' })
       } catch (error: any) {
         if (error?.code === 'P2034' && attempt < 2) continue
         if (error?.code === 'P2034') throw new ConflictError('El resultado cambió durante la actualización; vuelve a intentarlo')

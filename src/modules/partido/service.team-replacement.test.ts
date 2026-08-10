@@ -38,11 +38,11 @@ describe('partidoService.update team replacement', () => {
     expect(prisma.partido.findMany).not.toHaveBeenCalled();
     expect(prisma.partido.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: 'partido-2', estado: 'PROGRAMADO', jornadaId: 'jornada-1', tipoPartido: 'REGULAR' }),
-      data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-4' },
+      data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-4', notas: null },
     }));
     expect(prisma.partido.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: 'partido-1', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' }),
-      data: { equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-2' },
+      data: { equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-2', notas: null },
     }));
     expect(prisma.partido.findFirst).toHaveBeenCalledOnce();
     expect(prisma.partido.findFirst).toHaveBeenCalledWith(expect.objectContaining({

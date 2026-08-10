@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => {
     partido: { findMany: vi.fn(), deleteMany: vi.fn(), updateMany: vi.fn() },
     partidoRefereeAccess: { deleteMany: vi.fn() },
     anotacionPartido: { deleteMany: vi.fn() },
+    participacionPartido: { deleteMany: vi.fn() },
     jornada: { delete: vi.fn() },
   };
   return { tx, transaction: vi.fn() };
@@ -79,6 +80,9 @@ describe('jornadaService.delete playoff rollback', () => {
 
     expect(mocks.tx.partido.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['final-1'] } } });
     expect(mocks.tx.partidoRefereeAccess.deleteMany).toHaveBeenCalledWith({
+      where: { partidoId: { in: ['semi-1', 'semi-2'] } },
+    });
+    expect(mocks.tx.participacionPartido.deleteMany).toHaveBeenCalledWith({
       where: { partidoId: { in: ['semi-1', 'semi-2'] } },
     });
     expect(mocks.tx.partido.updateMany).toHaveBeenCalledWith({

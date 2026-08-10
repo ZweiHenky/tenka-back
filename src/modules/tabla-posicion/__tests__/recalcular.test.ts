@@ -28,7 +28,7 @@ function mockTeams() {
   ] as never);
 }
 
-function mockTiedMatch(penalesLocal: number, penalesVisitante: number) {
+function mockTiedMatch(penalesLocal: number | null, penalesVisitante: number | null) {
   vi.mocked(prisma.partido.findMany).mockResolvedValue([
     {
       equipoLocalId: 'local',
@@ -105,6 +105,15 @@ describe('tablaPosicionService.recalcular', () => {
       perdidos: 0,
       puntos: 2,
     });
+  });
+
+  it('registra 1/1 puntos cuando el empate no tiene penales', async () => {
+    mockTiedMatch(null, null);
+
+    await tablaPosicionService.recalcular(divisionId);
+
+    expect(createdRow('local')).toMatchObject({ empatados: 1, puntos: 1 });
+    expect(createdRow('visitante')).toMatchObject({ empatados: 1, puntos: 1 });
   });
 
   it('no registra estadísticas para ningún equipo en partido amistoso (local gana)', async () => {

@@ -85,7 +85,7 @@ exports.tablaPosicionService = {
                     else {
                         local.e++;
                         const tienePenales = p.penalesLocal != null && p.penalesVisitante != null;
-                        if (tienePenales && p.penalesLocal > p.penalesVisitante) {
+                        if (tienePenales && p.penalesLocal !== p.penalesVisitante && p.penalesLocal > p.penalesVisitante) {
                             local.gp++;
                         }
                     }
@@ -109,7 +109,7 @@ exports.tablaPosicionService = {
                     local.e++;
                     visit.e++;
                     const tienePenales = p.penalesLocal != null && p.penalesVisitante != null;
-                    if (tienePenales) {
+                    if (tienePenales && p.penalesLocal !== p.penalesVisitante) {
                         if (p.penalesLocal > p.penalesVisitante) {
                             local.gp++;
                         }

@@ -89,7 +89,7 @@ const service_test_harness_1 = require("./service.test-harness");
         (0, vitest_1.expect)(result.jornadasRecalculadas).toBe(1);
         (0, vitest_1.expect)(service_test_harness_1.prisma.partido.updateMany).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
             where: vitest_1.expect.objectContaining({ id: 'future' }),
-            data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-3' },
+            data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-3', notas: null },
         }));
     });
     (0, vitest_1.it)('prefers the globally least-used perfect matching for a future jornada', async () => {
@@ -116,11 +116,11 @@ const service_test_harness_1 = require("./service.test-harness");
         await service_test_harness_1.partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, service_test_harness_1.owner);
         (0, vitest_1.expect)(service_test_harness_1.prisma.partido.updateMany).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
             where: vitest_1.expect.objectContaining({ id: 'future-a' }),
-            data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-3' },
+            data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-3', notas: null },
         }));
         (0, vitest_1.expect)(service_test_harness_1.prisma.partido.updateMany).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
             where: vitest_1.expect.objectContaining({ id: 'future-b' }),
-            data: { equipoLocalId: 'equipo-2', equipoVisitanteId: 'equipo-4' },
+            data: { equipoLocalId: 'equipo-2', equipoVisitanteId: 'equipo-4', notas: null },
         }));
     });
     (0, vitest_1.it)('aborts without writes when the target changes after the preflight read', async () => {
@@ -145,7 +145,7 @@ const service_test_harness_1 = require("./service.test-harness");
         await (0, vitest_1.expect)(service_test_harness_1.partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, service_test_harness_1.owner)).resolves.toBeDefined();
         (0, vitest_1.expect)(service_test_harness_1.prisma.partido.updateMany).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
             where: vitest_1.expect.objectContaining({ id: 'partido-2', equipoLocalId: 'equipo-4', equipoVisitanteId: 'equipo-3' }),
-            data: { equipoLocalId: 'equipo-4', equipoVisitanteId: 'equipo-1' },
+            data: { equipoLocalId: 'equipo-4', equipoVisitanteId: 'equipo-1', notas: null },
         }));
     });
     (0, vitest_1.it)('retries the full serializable transaction after a conditional plan goes stale', async () => {

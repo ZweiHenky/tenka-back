@@ -3,6 +3,8 @@ export interface DivisionEntity {
   nombre: string;
   maxEquipos: number;
   arbitraje: number;
+  registrarParticipaciones: boolean;
+  usarPenalesEnEmpates: boolean;
   diasPartido: string | null;
   horarioPartido: string | null;
   duracionPartido: number | null;

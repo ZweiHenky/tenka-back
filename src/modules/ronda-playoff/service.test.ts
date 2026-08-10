@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   partidoDelete: vi.fn(),
   partidoUpdate: vi.fn(),
   anotacionDeleteMany: vi.fn(),
+  participacionDeleteMany: vi.fn(),
   executeRaw: vi.fn(),
 }));
 
@@ -92,6 +93,7 @@ describe('rondaPlayoffService batch writes', () => {
       update: mocks.partidoUpdate,
     },
     anotacionPartido: { deleteMany: mocks.anotacionDeleteMany },
+    participacionPartido: { deleteMany: mocks.participacionDeleteMany },
   };
 
   beforeEach(() => {
@@ -367,6 +369,8 @@ describe('rondaPlayoffService batch writes', () => {
       where: { id: 'existing' },
       data: expect.objectContaining({ equipoLocalId: 'team-1', equipoVisitanteId: 'team-7', estado: 'PROGRAMADO' }),
     }));
+    expect(mocks.anotacionDeleteMany).toHaveBeenCalledWith({ where: { partidoId: 'existing' } });
+    expect(mocks.participacionDeleteMany).toHaveBeenCalledWith({ where: { partidoId: 'existing' } });
   });
 
   it('propagates an advancement update failure from the transaction for atomic rollback', async () => {

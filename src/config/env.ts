@@ -7,6 +7,9 @@ const optionalString = (schema: z.ZodType<string>) => z.preprocess(
   schema.optional(),
 );
 const bodyLimit = z.string().trim().regex(/^\d+(kb|mb)$/i, 'must use a value such as 100kb or 1mb');
+const postgresUrl = z.url().refine((value) => ['postgres:', 'postgresql:'].includes(new URL(value).protocol), {
+  message: 'must be a PostgreSQL URL',
+});
 
 function isPrivateHostname(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
@@ -26,11 +29,15 @@ function isPrivateHostname(hostname: string): boolean {
 
 const backendEnvSchema = z.object({
   APP_ENV: z.enum(['local', 'preview', 'production']),
+  DB_TARGET: z.enum(['development', 'preview', 'production']),
   NODE_ENV: z.enum(['development', 'test', 'production']),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  DATABASE_URL: z.url().refine((value) => ['postgres:', 'postgresql:'].includes(new URL(value).protocol), {
-    message: 'must be a PostgreSQL URL',
-  }),
+  DATABASE_URL: optionalString(postgresUrl),
+  DEV_DATABASE_URL: optionalString(postgresUrl),
+  DIRECT_DATABASE_URL: optionalString(postgresUrl),
+  DEV_DIRECT_DATABASE_URL: optionalString(postgresUrl),
+  TEST_DATABASE_URL: optionalString(postgresUrl),
+  SHADOW_DATABASE_URL: optionalString(postgresUrl),
   BETTER_AUTH_SECRET: z.string().min(32, 'must contain at least 32 characters'),
   BETTER_AUTH_URL: z.url(),
   GOOGLE_CLIENT_ID: requiredString,
@@ -70,6 +77,22 @@ const backendEnvSchema = z.object({
   HTTP_HEADERS_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(35000),
   HTTP_KEEP_ALIVE_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(5000),
 }).superRefine((values, context) => {
+  if (values.APP_ENV === 'local') {
+    if (values.DB_TARGET !== 'development') {
+      context.addIssue({ code: 'custom', path: ['DB_TARGET'], message: 'must be development when APP_ENV is local' });
+    }
+    if (!values.DEV_DATABASE_URL) {
+      context.addIssue({ code: 'custom', path: ['DEV_DATABASE_URL'], message: 'is required when APP_ENV is local; DATABASE_URL is never used as fallback' });
+    }
+  } else {
+    if (values.DB_TARGET !== values.APP_ENV) {
+      context.addIssue({ code: 'custom', path: ['DB_TARGET'], message: `must be ${values.APP_ENV} when APP_ENV is ${values.APP_ENV}` });
+    }
+    if (!values.DATABASE_URL) {
+      context.addIssue({ code: 'custom', path: ['DATABASE_URL'], message: `is required when APP_ENV is ${values.APP_ENV}` });
+    }
+  }
+
   if (values.APP_ENV !== 'local' && !['twilio', 'disabled'].includes(values.PHONE_OTP_MODE)) {
     context.addIssue({ code: 'custom', path: ['PHONE_OTP_MODE'], message: 'must be disabled or twilio outside the local app environment' });
   }
@@ -119,7 +142,10 @@ const backendEnvSchema = z.object({
   if (values.HTTP_HEADERS_TIMEOUT_MS <= values.HTTP_KEEP_ALIVE_TIMEOUT_MS) {
     context.addIssue({ code: 'custom', path: ['HTTP_HEADERS_TIMEOUT_MS'], message: 'must be greater than HTTP_KEEP_ALIVE_TIMEOUT_MS' });
   }
-});
+}).transform((values) => ({
+  ...values,
+  DATABASE_URL: values.APP_ENV === 'local' ? values.DEV_DATABASE_URL! : values.DATABASE_URL!,
+}));
 
 export type BackendEnv = z.infer<typeof backendEnvSchema>;
 

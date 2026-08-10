@@ -72,7 +72,7 @@ describe('partidoService future jornada recalculation', () => {
     expect(result.jornadasRecalculadas).toBe(1);
     expect(prisma.partido.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: 'future' }),
-      data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-3' },
+      data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-3', notas: null },
     }));
   });
 
@@ -102,11 +102,11 @@ describe('partidoService future jornada recalculation', () => {
 
     expect(prisma.partido.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: 'future-a' }),
-      data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-3' },
+      data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-3', notas: null },
     }))
     expect(prisma.partido.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: 'future-b' }),
-      data: { equipoLocalId: 'equipo-2', equipoVisitanteId: 'equipo-4' },
+      data: { equipoLocalId: 'equipo-2', equipoVisitanteId: 'equipo-4', notas: null },
     }))
   })
 
@@ -136,7 +136,7 @@ describe('partidoService future jornada recalculation', () => {
     await expect(partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, owner)).resolves.toBeDefined();
     expect(prisma.partido.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: 'partido-2', equipoLocalId: 'equipo-4', equipoVisitanteId: 'equipo-3' }),
-      data: { equipoLocalId: 'equipo-4', equipoVisitanteId: 'equipo-1' },
+      data: { equipoLocalId: 'equipo-4', equipoVisitanteId: 'equipo-1', notas: null },
     }));
   });
 

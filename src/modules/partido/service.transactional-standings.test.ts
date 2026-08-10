@@ -5,6 +5,12 @@ vi.mock('./repository', async () => (await import('./service.test-mocks')).repos
 vi.mock('../tabla-posicion/service', async () => (await import('./service.test-mocks')).tablaPosicionModuleMock);
 vi.mock('../ronda-playoff/service', async () => (await import('./service.test-mocks')).rondaPlayoffModuleMock);
 
+const resultWriterMocks = vi.hoisted(() => ({ writeResultInTransaction: vi.fn() }));
+vi.mock('./resultWriter', () => ({
+  getResultContext: vi.fn(),
+  writeResultInTransaction: resultWriterMocks.writeResultInTransaction,
+}));
+
 import {
   context,
   owner,
@@ -16,9 +22,36 @@ import {
   tablaPosicionService,
 } from './service.test-harness';
 
-beforeEach(resetServiceTestHarness);
+beforeEach(() => {
+  resetServiceTestHarness();
+  resultWriterMocks.writeResultInTransaction.mockReset().mockResolvedValue(partido);
+});
 
 describe('partidoService transactional standings orchestration', () => {
+  it('uses ReadCommitted and reauthorizes after the owner result lock', async () => {
+    await partidoService.updateResult('partido-1', {
+      expectedVersion: 0, estado: 'FINALIZADO', golesLocal: 1, golesVisitante: 0, allocations: [],
+    }, owner);
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'ReadCommitted' });
+    expect(vi.mocked(prisma.$executeRawUnsafe).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(partidoRepository.findAuthorizationContext).mock.invocationCallOrder[1]);
+    expect(vi.mocked(partidoRepository.findAuthorizationContext).mock.invocationCallOrder[1])
+      .toBeLessThan(resultWriterMocks.writeResultInTransaction.mock.invocationCallOrder[0]);
+  });
+
+  it('rejects an owner result when post-lock ownership changed', async () => {
+    vi.mocked(partidoRepository.findAuthorizationContext)
+      .mockResolvedValueOnce(context)
+      .mockResolvedValueOnce({ ...context, ligaUserId: 'other-owner' });
+
+    await expect(partidoService.updateResult('partido-1', {
+      expectedVersion: 0, estado: 'FINALIZADO', golesLocal: 1, golesVisitante: 0, allocations: [],
+    }, owner)).rejects.toMatchObject({ statusCode: 404 });
+
+    expect(resultWriterMocks.writeResultInTransaction).not.toHaveBeenCalled();
+  });
+
   it('uses the same Serializable transaction for lock, reread, result update, and standings', async () => {
     const tx = {
       $executeRawUnsafe: vi.fn().mockResolvedValue(0),

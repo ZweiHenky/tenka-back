@@ -6,6 +6,7 @@ const repository_1 = require("./repository");
 const database_1 = require("../../config/database");
 const authorization_1 = require("../../utils/authorization");
 const divisionVisibility_1 = require("../../utils/divisionVisibility");
+const leagueScheduleLock_1 = require("../../utils/leagueScheduleLock");
 async function assertLigaOwner(ligaId, actor) {
     const liga = await database_1.prisma.liga.findFirst({
         where: (0, authorization_1.isAdmin)(actor) ? { id: ligaId } : { id: ligaId, userId: actor.id },
@@ -25,7 +26,7 @@ async function assertDivisionOwner(id, actor) {
 async function getDivisionUpdateContext(id, actor) {
     const division = await database_1.prisma.division.findFirst({
         where: (0, authorization_1.isAdmin)(actor) ? { id } : { id, liga: { userId: actor.id } },
-        select: { id: true, ligaId: true, canchaUnicaId: true },
+        select: { id: true, ligaId: true, canchaUnicaId: true, registrarParticipaciones: true, usarPenalesEnEmpates: true },
     });
     if (!division)
         throw new errors_1.NotFoundError('Division');
@@ -64,7 +65,7 @@ exports.divisionService = {
         if (data.ligaId && data.canchaUnicaId === undefined && division.canchaUnicaId) {
             updateData = { ...data, canchaUnicaId: null };
         }
-        if (data.canchaUnicaId) {
+        if (data.canchaUnicaId && data.registrarParticipaciones === undefined) {
             const cancha = await database_1.prisma.ligaCancha.findFirst({
                 where: { id: data.canchaUnicaId },
                 select: { ligaId: true, activa: true, liga: { select: { multiplesCanchas: true } } },
@@ -77,6 +78,64 @@ exports.divisionService = {
             }
             if (!cancha.activa)
                 throw new errors_1.ValidationError('La cancha seleccionada no está activa');
+        }
+        if (data.registrarParticipaciones !== undefined || data.usarPenalesEnEmpates !== undefined) {
+            return database_1.prisma.$transaction(async (tx) => {
+                const leagueIds = [...new Set([division.ligaId, ligaId])].sort();
+                for (const lockedLeagueId of leagueIds)
+                    await (0, leagueScheduleLock_1.acquireLeagueScheduleLock)(tx, lockedLeagueId);
+                const lockedDivision = await tx.division.findFirst({
+                    where: (0, authorization_1.isAdmin)(actor) ? { id } : { id, liga: { userId: actor.id } },
+                    select: { id: true, ligaId: true, canchaUnicaId: true, registrarParticipaciones: true, usarPenalesEnEmpates: true },
+                });
+                if (!lockedDivision)
+                    throw new errors_1.NotFoundError('Division');
+                if (lockedDivision.ligaId !== division.ligaId) {
+                    throw new errors_1.ConflictError('La división cambió de liga durante la actualización; vuelve a intentarlo');
+                }
+                if (data.ligaId) {
+                    const targetLeague = await tx.liga.findFirst({
+                        where: (0, authorization_1.isAdmin)(actor) ? { id: data.ligaId } : { id: data.ligaId, userId: actor.id },
+                        select: { id: true },
+                    });
+                    if (!targetLeague)
+                        throw new errors_1.NotFoundError('Liga');
+                }
+                if (data.canchaUnicaId) {
+                    const cancha = await tx.ligaCancha.findFirst({
+                        where: { id: data.canchaUnicaId },
+                        select: { ligaId: true, activa: true, liga: { select: { multiplesCanchas: true } } },
+                    });
+                    if (!cancha || cancha.ligaId !== ligaId) {
+                        throw new errors_1.ValidationError('La cancha indicada no pertenece a esta liga');
+                    }
+                    if (!cancha.liga.multiplesCanchas) {
+                        throw new errors_1.ValidationError('La liga no tiene múltiples canchas habilitadas');
+                    }
+                    if (!cancha.activa)
+                        throw new errors_1.ValidationError('La cancha seleccionada no está activa');
+                }
+                if (data.usarPenalesEnEmpates !== undefined
+                    && data.usarPenalesEnEmpates !== lockedDivision.usarPenalesEnEmpates) {
+                    const finalizedMatches = await tx.partido.count({
+                        where: {
+                            estado: 'FINALIZADO',
+                            OR: [
+                                { jornada: { divisionId: id } },
+                                { rondaPlayoff: { divisionId: id } },
+                            ],
+                        },
+                    });
+                    if (finalizedMatches > 0) {
+                        throw new errors_1.ValidationError('No puedes cambiar la regla de penales porque la división ya tiene partidos finalizados');
+                    }
+                }
+                let lockedUpdateData = data;
+                if (data.ligaId && data.canchaUnicaId === undefined && lockedDivision.canchaUnicaId) {
+                    lockedUpdateData = { ...data, canchaUnicaId: null };
+                }
+                return repository_1.divisionRepository.update(id, lockedUpdateData, tx);
+            }, { isolationLevel: 'ReadCommitted' });
         }
         return repository_1.divisionRepository.update(id, updateData);
     },

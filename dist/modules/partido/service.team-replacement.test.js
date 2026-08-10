@@ -57,11 +57,11 @@ const service_test_harness_1 = require("./service.test-harness");
         (0, vitest_1.expect)(service_test_harness_1.prisma.partido.findMany).not.toHaveBeenCalled();
         (0, vitest_1.expect)(service_test_harness_1.prisma.partido.updateMany).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
             where: vitest_1.expect.objectContaining({ id: 'partido-2', estado: 'PROGRAMADO', jornadaId: 'jornada-1', tipoPartido: 'REGULAR' }),
-            data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-4' },
+            data: { equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-4', notas: null },
         }));
         (0, vitest_1.expect)(service_test_harness_1.prisma.partido.updateMany).toHaveBeenCalledWith(vitest_1.expect.objectContaining({
             where: vitest_1.expect.objectContaining({ id: 'partido-1', equipoLocalId: 'equipo-1', equipoVisitanteId: 'equipo-2' }),
-            data: { equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-2' },
+            data: { equipoLocalId: 'equipo-3', equipoVisitanteId: 'equipo-2', notas: null },
         }));
         (0, vitest_1.expect)(service_test_harness_1.prisma.partido.findFirst).toHaveBeenCalledOnce();
         (0, vitest_1.expect)(service_test_harness_1.prisma.partido.findFirst).toHaveBeenCalledWith(vitest_1.expect.objectContaining({

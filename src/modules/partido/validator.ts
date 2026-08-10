@@ -41,6 +41,19 @@ export const allocationSchema = z.object({
   cantidad: z.number().int().positive().max(99),
 }).strict();
 
+export const participacionSchema = z.object({
+  ladoMarcador: z.enum(['LOCAL', 'VISITANTE']),
+  jugadorId: z.string().min(1),
+}).strict();
+
+export const notasSchema = z
+  .string()
+  .trim()
+  .max(1000, 'Las notas no pueden superar los 1000 caracteres')
+  .transform((value) => (value === '' ? null : value))
+  .nullable()
+  .optional();
+
 export const resultSchema = z.object({
   expectedVersion: z.number().int().min(0),
   estado: z.enum(['FINALIZADO', 'PROGRAMADO', 'SUSPENDIDO']),
@@ -49,6 +62,8 @@ export const resultSchema = z.object({
   penalesLocal: z.number().int().min(0).max(99).nullable().optional(),
   penalesVisitante: z.number().int().min(0).max(99).nullable().optional(),
   allocations: z.array(allocationSchema).max(198),
+  participaciones: z.array(participacionSchema).max(198).optional(),
+  notas: notasSchema,
 }).strict();
 
 export type CreateInput = z.output<typeof createSchema>;

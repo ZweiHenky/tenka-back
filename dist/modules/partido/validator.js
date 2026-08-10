@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resultSchema = exports.allocationSchema = exports.updateSchema = exports.createSchema = void 0;
+exports.resultSchema = exports.notasSchema = exports.participacionSchema = exports.allocationSchema = exports.updateSchema = exports.createSchema = void 0;
 const zod_1 = require("zod");
 exports.createSchema = zod_1.z.object({
     golesLocal: zod_1.z.number().int().min(0).default(0),
@@ -40,6 +40,17 @@ exports.allocationSchema = zod_1.z.object({
     jugadorId: zod_1.z.string().min(1).nullable(),
     cantidad: zod_1.z.number().int().positive().max(99),
 }).strict();
+exports.participacionSchema = zod_1.z.object({
+    ladoMarcador: zod_1.z.enum(['LOCAL', 'VISITANTE']),
+    jugadorId: zod_1.z.string().min(1),
+}).strict();
+exports.notasSchema = zod_1.z
+    .string()
+    .trim()
+    .max(1000, 'Las notas no pueden superar los 1000 caracteres')
+    .transform((value) => (value === '' ? null : value))
+    .nullable()
+    .optional();
 exports.resultSchema = zod_1.z.object({
     expectedVersion: zod_1.z.number().int().min(0),
     estado: zod_1.z.enum(['FINALIZADO', 'PROGRAMADO', 'SUSPENDIDO']),
@@ -48,5 +59,7 @@ exports.resultSchema = zod_1.z.object({
     penalesLocal: zod_1.z.number().int().min(0).max(99).nullable().optional(),
     penalesVisitante: zod_1.z.number().int().min(0).max(99).nullable().optional(),
     allocations: zod_1.z.array(exports.allocationSchema).max(198),
+    participaciones: zod_1.z.array(exports.participacionSchema).max(198).optional(),
+    notas: exports.notasSchema,
 }).strict();
 //# sourceMappingURL=validator.js.map

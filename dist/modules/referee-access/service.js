@@ -99,7 +99,11 @@ exports.refereeAccessService = {
             penalesLocal: partido.penalesLocal,
             penalesVisitante: partido.penalesVisitante,
             tipoPartido: partido.tipoPartido,
+            notas: partido.notas,
             anotaciones: partido.anotaciones.map(repository_2.exposeAnotacionRead),
+            participaciones: partido.participaciones.map(repository_2.exposeParticipacionRead),
+            registrarParticipaciones: division?.registrarParticipaciones ?? false,
+            usarPenalesEnEmpates: division?.usarPenalesEnEmpates ?? true,
             jugadoresLocal: (division?.jugadores ?? [])
                 .filter((row) => row.equipoId === partido.equipoLocal?.id)
                 .map((row) => ({ ...row.jugador, dorsal: row.dorsal })) ?? [],
@@ -114,13 +118,14 @@ exports.refereeAccessService = {
     async updateResultByToken(authHeader, data) {
         const token = extractBearer(authHeader);
         const tokenHash = hashToken(token);
+        const initialAccess = await database_1.prisma.partidoRefereeAccess.findUnique({ where: { tokenHash } });
+        if (!initialAccess || initialAccess.usedAt || initialAccess.expiresAt < new Date()) {
+            throw new errors_1.ValidationError('Enlace no válido o expirado');
+        }
+        const initial = await (0, resultWriter_1.getResultContext)(database_1.prisma, initialAccess.partidoId);
         for (let attempt = 0; attempt < 3; attempt += 1) {
             try {
                 return await database_1.prisma.$transaction(async (tx) => {
-                    const access = await tx.partidoRefereeAccess.findUnique({ where: { tokenHash } });
-                    if (!access || access.usedAt || access.expiresAt < new Date())
-                        throw new errors_1.ValidationError('Enlace no válido o expirado');
-                    const initial = await (0, resultWriter_1.getResultContext)(tx, access.partidoId);
                     await (0, leagueScheduleLock_1.acquireLeagueScheduleLock)(tx, initial.division.liga.id);
                     const lockedAccess = await tx.partidoRefereeAccess.findUnique({ where: { tokenHash } });
                     if (!lockedAccess || lockedAccess.usedAt || lockedAccess.expiresAt < new Date()) {
@@ -133,7 +138,7 @@ exports.refereeAccessService = {
                     const updated = await (0, resultWriter_1.writeResultInTransaction)(tx, lockedAccess.partidoId, data);
                     await tx.partidoRefereeAccess.update({ where: { id: lockedAccess.id }, data: { usedAt: new Date() } });
                     return updated;
-                }, { isolationLevel: 'Serializable' });
+                }, { isolationLevel: 'ReadCommitted' });
             }
             catch (error) {
                 if (error?.code === 'P2034' && attempt < 2)

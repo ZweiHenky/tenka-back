@@ -38,9 +38,36 @@ vitest_1.vi.mock('../../config/database', async () => (await Promise.resolve().t
 vitest_1.vi.mock('./repository', async () => (await Promise.resolve().then(() => __importStar(require('./service.test-mocks')))).repositoryModuleMock);
 vitest_1.vi.mock('../tabla-posicion/service', async () => (await Promise.resolve().then(() => __importStar(require('./service.test-mocks')))).tablaPosicionModuleMock);
 vitest_1.vi.mock('../ronda-playoff/service', async () => (await Promise.resolve().then(() => __importStar(require('./service.test-mocks')))).rondaPlayoffModuleMock);
+const resultWriterMocks = vitest_1.vi.hoisted(() => ({ writeResultInTransaction: vitest_1.vi.fn() }));
+vitest_1.vi.mock('./resultWriter', () => ({
+    getResultContext: vitest_1.vi.fn(),
+    writeResultInTransaction: resultWriterMocks.writeResultInTransaction,
+}));
 const service_test_harness_1 = require("./service.test-harness");
-(0, vitest_1.beforeEach)(service_test_harness_1.resetServiceTestHarness);
+(0, vitest_1.beforeEach)(() => {
+    (0, service_test_harness_1.resetServiceTestHarness)();
+    resultWriterMocks.writeResultInTransaction.mockReset().mockResolvedValue(service_test_harness_1.partido);
+});
 (0, vitest_1.describe)('partidoService transactional standings orchestration', () => {
+    (0, vitest_1.it)('uses ReadCommitted and reauthorizes after the owner result lock', async () => {
+        await service_test_harness_1.partidoService.updateResult('partido-1', {
+            expectedVersion: 0, estado: 'FINALIZADO', golesLocal: 1, golesVisitante: 0, allocations: [],
+        }, service_test_harness_1.owner);
+        (0, vitest_1.expect)(service_test_harness_1.prisma.$transaction).toHaveBeenCalledWith(vitest_1.expect.any(Function), { isolationLevel: 'ReadCommitted' });
+        (0, vitest_1.expect)(vitest_1.vi.mocked(service_test_harness_1.prisma.$executeRawUnsafe).mock.invocationCallOrder[0])
+            .toBeLessThan(vitest_1.vi.mocked(service_test_harness_1.partidoRepository.findAuthorizationContext).mock.invocationCallOrder[1]);
+        (0, vitest_1.expect)(vitest_1.vi.mocked(service_test_harness_1.partidoRepository.findAuthorizationContext).mock.invocationCallOrder[1])
+            .toBeLessThan(resultWriterMocks.writeResultInTransaction.mock.invocationCallOrder[0]);
+    });
+    (0, vitest_1.it)('rejects an owner result when post-lock ownership changed', async () => {
+        vitest_1.vi.mocked(service_test_harness_1.partidoRepository.findAuthorizationContext)
+            .mockResolvedValueOnce(service_test_harness_1.context)
+            .mockResolvedValueOnce({ ...service_test_harness_1.context, ligaUserId: 'other-owner' });
+        await (0, vitest_1.expect)(service_test_harness_1.partidoService.updateResult('partido-1', {
+            expectedVersion: 0, estado: 'FINALIZADO', golesLocal: 1, golesVisitante: 0, allocations: [],
+        }, service_test_harness_1.owner)).rejects.toMatchObject({ statusCode: 404 });
+        (0, vitest_1.expect)(resultWriterMocks.writeResultInTransaction).not.toHaveBeenCalled();
+    });
     (0, vitest_1.it)('uses the same Serializable transaction for lock, reread, result update, and standings', async () => {
         const tx = {
             $executeRawUnsafe: vitest_1.vi.fn().mockResolvedValue(0),

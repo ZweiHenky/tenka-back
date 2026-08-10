@@ -412,6 +412,7 @@ export const jornadaService = {
           if (playoffIds.length > 0) {
             await tx.partidoRefereeAccess.deleteMany({ where: { partidoId: { in: playoffIds } } });
             await tx.anotacionPartido.deleteMany({ where: { partidoId: { in: playoffIds } } });
+            await tx.participacionPartido.deleteMany({ where: { partidoId: { in: playoffIds } } });
             await tx.partido.updateMany({
               where: { id: { in: playoffIds } },
               data: {

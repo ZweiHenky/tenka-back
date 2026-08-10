@@ -11,6 +11,7 @@ export interface PartidoEntity {
   tipoPartido: string;
   exhibicionLocal: boolean;
   exhibicionVisitante: boolean;
+  notas?: string | null;
   createdAt: Date;
   updatedAt: Date;
   version: number;
@@ -33,6 +34,17 @@ export interface PartidoEntity {
     equipoIdSnapshot: string | null;
     jugadorNombre: string | null;
     equipoNombre: string | null;
+    dorsal: number | null;
+  }>;
+  participaciones?: Array<{
+    id: string;
+    jugadorId: string | null;
+    equipoId: string | null;
+    ladoMarcador: 'LOCAL' | 'VISITANTE';
+    jugadorIdSnapshot: string;
+    equipoIdSnapshot: string;
+    jugadorNombre: string;
+    equipoNombre: string;
     dorsal: number | null;
   }>;
   jornadasRecalculadas?: number;
