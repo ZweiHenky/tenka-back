@@ -4,6 +4,7 @@ exports.divisionRouter = void 0;
 const express_1 = require("express");
 const controller_1 = require("./controller");
 const authMiddleware_1 = require("../../middlewares/authMiddleware");
+const rateLimits_1 = require("../../middlewares/rateLimits");
 const router = (0, express_1.Router)();
 exports.divisionRouter = router;
 router.get('/', authMiddleware_1.optionalAuth, controller_1.divisionController.list);
@@ -12,6 +13,6 @@ router.get('/:id', authMiddleware_1.optionalAuth, controller_1.divisionControlle
 router.use(authMiddleware_1.requireAuth);
 router.post('/', controller_1.divisionController.create);
 router.patch('/:id', controller_1.divisionController.update);
-router.delete('/:id', controller_1.divisionController.delete);
-router.post('/:id/reset', controller_1.divisionController.reset);
+router.delete('/:id', rateLimits_1.expensiveOperationLimiter, controller_1.divisionController.delete);
+router.post('/:id/reset', rateLimits_1.expensiveOperationLimiter, controller_1.divisionController.reset);
 //# sourceMappingURL=routes.js.map

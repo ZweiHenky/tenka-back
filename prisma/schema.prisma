@@ -482,6 +482,8 @@ model Partido {
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
   version             Int            @default(0)
+  manualCreationKey   String?        @unique
+  manualCreationHash  String?
 
   jornadaId         String?
   rondaPlayoffId    String?
@@ -688,7 +690,6 @@ model DivisionNotificationSubscription {
   division Division @relation(fields: [divisionId], references: [id], onDelete: Cascade)
   user     User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  @@unique([divisionId, oneSignalId])
   @@unique([divisionId, pushSubscriptionId])
   @@index([oneSignalId])
   @@index([divisionId, userId])

@@ -51,6 +51,8 @@ export function createApp() {
   }));
   app.use(pinoHttp({
     logger,
+    autoLogging: false,
+    quietReqLogger: true,
     genReqId: (req) => req.requestId,
     serializers: {
       req: (req) => ({ id: req.id, method: req.method, path: req.url?.split('?')[0] }),
@@ -62,6 +64,22 @@ export function createApp() {
       return 'info';
     },
   }));
+  app.use((req, res, next) => {
+    const startedAt = process.hrtime.bigint();
+    res.once('finish', () => {
+      const routePath = req.route?.path;
+      const route = typeof routePath === 'string' ? `${req.baseUrl}${routePath}` : 'unmatched';
+      const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+      req.log[level]({
+        event: 'http.request.completed',
+        method: req.method,
+        route,
+        statusCode: res.statusCode,
+        durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
+      });
+    });
+    next();
+  });
   app.use(express.json({ limit: env.JSON_BODY_LIMIT }));
   app.use(express.urlencoded({ extended: false, limit: env.URLENCODED_BODY_LIMIT }));
   app.use(createHealthRouter());

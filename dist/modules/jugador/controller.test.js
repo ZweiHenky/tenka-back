@@ -173,9 +173,19 @@ function response() {
         (0, vitest_1.expect)(next).toHaveBeenCalledWith(vitest_1.expect.objectContaining({ statusCode: 404, message: 'Jugador no encontrado' }));
         (0, vitest_1.expect)(mocks.membershipCreate).not.toHaveBeenCalled();
     });
-    (0, vitest_1.it)('distinguishes an existing team membership', async () => {
+    (0, vitest_1.it)('treats an identical existing team membership as success', async () => {
         mocks.jugadorFindUnique.mockResolvedValue({ id: 'player-1' });
-        mocks.membershipFindUnique.mockResolvedValueOnce({ jugadorId: 'player-1' });
+        mocks.membershipFindUnique.mockResolvedValueOnce({ equipoId: 'team-1', jugadorId: 'player-1', dorsal: 10 });
+        const res = response();
+        const next = vitest_1.vi.fn();
+        await controller_1.jugadorController.assignToTeam(assignmentRequest(), res, next);
+        (0, vitest_1.expect)(res.status).toHaveBeenCalledWith(200);
+        (0, vitest_1.expect)(next).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(mocks.membershipCreate).not.toHaveBeenCalled();
+    });
+    (0, vitest_1.it)('rejects an existing team membership with a different dorsal', async () => {
+        mocks.jugadorFindUnique.mockResolvedValue({ id: 'player-1' });
+        mocks.membershipFindUnique.mockResolvedValueOnce({ equipoId: 'team-1', jugadorId: 'player-1', dorsal: 9 });
         const next = vitest_1.vi.fn();
         await controller_1.jugadorController.assignToTeam(assignmentRequest(), response(), next);
         (0, vitest_1.expect)(next).toHaveBeenCalledWith(vitest_1.expect.objectContaining({ statusCode: 409, message: 'El jugador ya pertenece a este equipo' }));
@@ -187,13 +197,15 @@ function response() {
         await controller_1.jugadorController.assignToTeam(assignmentRequest(), response(), next);
         (0, vitest_1.expect)(next).toHaveBeenCalledWith(vitest_1.expect.objectContaining({ statusCode: 409, message: 'El dorsal ya está ocupado en este equipo' }));
     });
-    (0, vitest_1.it)('classifies a duplicate-membership race after P2002', async () => {
+    (0, vitest_1.it)('treats an identical duplicate-membership race after P2002 as success', async () => {
         mocks.jugadorFindUnique.mockResolvedValue({ id: 'player-1' });
-        mocks.membershipFindUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce({ jugadorId: 'player-1' });
+        mocks.membershipFindUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce({ equipoId: 'team-1', jugadorId: 'player-1', dorsal: 10 });
         mocks.membershipCreate.mockRejectedValue({ code: 'P2002' });
+        const res = response();
         const next = vitest_1.vi.fn();
-        await controller_1.jugadorController.assignToTeam(assignmentRequest(), response(), next);
-        (0, vitest_1.expect)(next).toHaveBeenCalledWith(vitest_1.expect.objectContaining({ statusCode: 409, message: 'El jugador ya pertenece a este equipo' }));
+        await controller_1.jugadorController.assignToTeam(assignmentRequest(), res, next);
+        (0, vitest_1.expect)(res.status).toHaveBeenCalledWith(200);
+        (0, vitest_1.expect)(next).not.toHaveBeenCalled();
     });
     (0, vitest_1.it)('refreshes preserved division dorsals when a player rejoins the team', async () => {
         mocks.jugadorFindUnique.mockResolvedValue({ id: 'player-1' });

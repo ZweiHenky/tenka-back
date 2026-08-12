@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { notificationSubscriptionService } from './service';
-import { noContent, created } from '../../utils/response';
+import { noContent, created, ok } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 
 const id = z.string().trim().min(1).max(200);
@@ -14,12 +14,32 @@ const subscribeSchema = z.object({
 
 const unsubscribeSchema = z.object({
   divisionId: id,
+  oneSignalId: id.optional(),
   pushSubscriptionId: id,
 });
 
-export const notificationSubscriptionSchemas = { subscribeSchema, unsubscribeSchema };
+export const NOTIFICATION_SYNC_DIVISION_LIMIT = 100;
+
+const syncSchema = z.object({
+  oneSignalId: id,
+  pushSubscriptionId: id,
+  divisionIds: z.array(id).max(NOTIFICATION_SYNC_DIVISION_LIMIT),
+});
+
+export const notificationSubscriptionSchemas = { subscribeSchema, unsubscribeSchema, syncSchema };
 
 export const notificationSubscriptionController = {
+  async sync(req: Request, res: Response, next: NextFunction) {
+    try {
+      const parsed = syncSchema.safeParse(req.body);
+      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      const state = await notificationSubscriptionService.sync({ ...parsed.data, userId: req.user?.id ?? null });
+      ok(res, state);
+    } catch (err) {
+      next(err);
+    }
+  },
+
   async subscribe(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = subscribeSchema.safeParse(req.body);

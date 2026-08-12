@@ -3,10 +3,11 @@ import { premioService } from './service';
 import { createSchema, updateSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
+import { parsePagination } from '../../utils/pagination';
 
 export const premioController = {
   async list(req: Request, res: Response, next: NextFunction) {
-    try { ok(res, await premioService.list(req.user)); } catch (e) { next(e); }
+    try { ok(res, await premioService.list(parsePagination(req.query), req.user)); } catch (e) { next(e); }
   },
 
   async getById(req: Request, res: Response, next: NextFunction) {

@@ -5,10 +5,11 @@ const service_1 = require("./service");
 const validator_1 = require("./validator");
 const response_1 = require("../../utils/response");
 const errors_1 = require("../../utils/errors");
+const pagination_1 = require("../../utils/pagination");
 exports.ubicacionController = {
-    async list(_req, res, next) {
+    async list(req, res, next) {
         try {
-            (0, response_1.ok)(res, await service_1.ubicacionService.list());
+            (0, response_1.ok)(res, await service_1.ubicacionService.listPaginated((0, pagination_1.parsePagination)(req.query)));
         }
         catch (e) {
             next(e);

@@ -50,6 +50,27 @@ function assertEnvironment(env, target) {
   }
 }
 
+function assertRailwayProduction(env) {
+  if (env.RAILWAY_ENVIRONMENT_NAME !== 'production') {
+    throw new Error('Production database access requires the Railway production environment')
+  }
+  if (!env.RAILWAY_PROJECT_ID || !env.RAILWAY_SERVICE_ID) {
+    throw new Error('Production database access requires Railway project and service context')
+  }
+}
+
+function assertProductionMigrationApproval(env, options) {
+  if (!/^[a-f0-9]{64}$/i.test(env.PRODUCTION_MIGRATION_TOKEN ?? '')) {
+    throw new Error('PRODUCTION_MIGRATION_TOKEN must be a 64-character hexadecimal secret')
+  }
+  if (!options.includes('--confirm=production')) {
+    throw new Error('Production migration requires --confirm=production')
+  }
+  if (!options.includes('--confirm-snapshot')) {
+    throw new Error('Production migration requires --confirm-snapshot')
+  }
+}
+
 function resolveTargetUrl(target, env) {
   assertEnvironment(env, target)
   if (target === 'development') {
@@ -73,7 +94,7 @@ export function resolveDevelopmentScriptDatabase(env = process.env) {
   return parsePostgresUrl('DEV_DATABASE_URL', env.DEV_DATABASE_URL).href
 }
 
-export function resolvePrismaCommand(action, target, env = process.env) {
+export function resolvePrismaCommand(action, target, env = process.env, options = []) {
   if (action === 'generate') {
     return { args: ['generate'], databaseUrl: SAFE_PRISMA_URL }
   }
@@ -81,6 +102,7 @@ export function resolvePrismaCommand(action, target, env = process.env) {
     return { args: ['validate'], databaseUrl: SAFE_PRISMA_URL }
   }
   if (action === 'status') {
+    if (target === 'production') assertRailwayProduction(env)
     return { args: ['migrate', 'status'], databaseUrl: resolveTargetUrl(target, env) }
   }
   if (action === 'migrate-dev') {
@@ -94,7 +116,9 @@ export function resolvePrismaCommand(action, target, env = process.env) {
   }
   if (action === 'migrate-deploy') {
     if (target === 'production') {
-      throw new Error('Production migrations are disabled until the protected production command is implemented')
+      assertRailwayProduction(env)
+      assertProductionMigrationApproval(env, options)
+      return { args: ['migrate', 'deploy'], databaseUrl: resolveTargetUrl(target, env) }
     }
     if (target !== 'preview') {
       throw new Error('migrate deploy is only allowed for preview in this implementation stage')

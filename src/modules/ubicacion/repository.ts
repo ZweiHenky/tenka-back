@@ -7,6 +7,14 @@ export const ubicacionRepository: UbicacionRepository = {
     return prisma.ubicacion.findMany({ orderBy: { nombreCompleto: 'asc' } });
   },
 
+  async findAllPaginated({ skip, take }): Promise<{ rows: UbicacionEntity[]; total: number }> {
+    const [rows, total] = await Promise.all([
+      prisma.ubicacion.findMany({ orderBy: { nombreCompleto: 'asc' }, skip, take }),
+      prisma.ubicacion.count(),
+    ]);
+    return { rows, total };
+  },
+
   async findById(id: string): Promise<UbicacionEntity | null> {
     return prisma.ubicacion.findUnique({ where: { id } });
   },

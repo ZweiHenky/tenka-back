@@ -278,8 +278,13 @@ function computeRRPairing(sorted, round) {
     return pairing;
 }
 exports.jornadaService = {
-    async list(actor) {
-        return database_1.prisma.jornada.findMany({ where: { division: (0, divisionVisibility_1.visibleDivisionWhere)(actor) } });
+    async list(pagination, actor) {
+        const where = { division: (0, divisionVisibility_1.visibleDivisionWhere)(actor) };
+        const [rows, total] = await Promise.all([
+            database_1.prisma.jornada.findMany({ where, orderBy: { createdAt: 'desc' }, skip: pagination.skip, take: pagination.take }),
+            database_1.prisma.jornada.count({ where }),
+        ]);
+        return { rows, total };
     },
     async getById(id, actor) {
         const t = await repository_1.jornadaRepository.findVisibleById(id, actor);

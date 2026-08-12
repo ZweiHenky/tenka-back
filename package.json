@@ -23,6 +23,7 @@
     "db:status:preview": "node scripts/prisma-command.mjs status preview",
     "db:migrate:preview": "node scripts/prisma-command.mjs migrate-deploy preview",
     "db:status:production": "node scripts/prisma-command.mjs status production",
+    "db:migrate:production": "node scripts/prisma-command.mjs migrate-deploy production",
     "db:script:create-teams": "node scripts/development-script.mjs create-teams",
     "db:script:assign-teams": "node scripts/development-script.mjs assign-teams",
     "db:script:check-teams": "node scripts/development-script.mjs check-teams",
@@ -48,6 +49,8 @@
     "pg": "^8.22.0",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
+    "rate-limit-redis": "^6.0.1",
+    "redis": "^6.2.0",
     "twilio": "^6.0.2",
     "zod": "^4.4.3"
   },

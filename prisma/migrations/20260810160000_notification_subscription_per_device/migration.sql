@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS "division_notification_subscriptions_divisionId_oneSignalId_key";

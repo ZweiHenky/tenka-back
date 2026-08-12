@@ -33,8 +33,13 @@ async function getDivisionUpdateContext(id, actor) {
     return division;
 }
 exports.divisionService = {
-    async list(actor) {
-        return database_1.prisma.division.findMany({ where: (0, divisionVisibility_1.visibleDivisionWhere)(actor), orderBy: { createdAt: 'desc' } });
+    async list(pagination, actor) {
+        const where = (0, divisionVisibility_1.visibleDivisionWhere)(actor);
+        const [rows, total] = await Promise.all([
+            database_1.prisma.division.findMany({ where, orderBy: { createdAt: 'desc' }, skip: pagination.skip, take: pagination.take }),
+            database_1.prisma.division.count({ where }),
+        ]);
+        return { rows, total };
     },
     async getById(id, actor) {
         const division = await database_1.prisma.division.findFirst({

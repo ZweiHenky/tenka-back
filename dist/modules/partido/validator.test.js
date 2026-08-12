@@ -2,6 +2,25 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const vitest_1 = require("vitest");
 const validator_1 = require("./validator");
+(0, vitest_1.describe)('partido createInJornadaSchema', () => {
+    const base = {
+        equipoLocalId: 'team-1',
+        equipoVisitanteId: 'team-2',
+        tipoPartido: 'REGULAR',
+        fecha: '2026-08-13',
+        horaInicio: '20:00',
+        horaFin: '21:00',
+        canchaId: null,
+    };
+    (0, vitest_1.it)('accepts the same civil date and time contract as jornada generation', () => {
+        (0, vitest_1.expect)(validator_1.createInJornadaSchema.safeParse(base).success).toBe(true);
+    });
+    (0, vitest_1.it)('rejects ISO instants and missing civil times', () => {
+        (0, vitest_1.expect)(validator_1.createInJornadaSchema.safeParse({ ...base, fecha: '2026-08-14T02:00:00.000Z' }).success).toBe(false);
+        const { horaInicio: _horaInicio, ...withoutStart } = base;
+        (0, vitest_1.expect)(validator_1.createInJornadaSchema.safeParse(withoutStart).success).toBe(false);
+    });
+});
 (0, vitest_1.describe)('partido updateSchema', () => {
     vitest_1.it.each(['canchaId', 'fecha', 'fechaFin'])('rejects structural field %s', (field) => {
         (0, vitest_1.expect)(validator_1.updateSchema.safeParse({ [field]: '2099-01-01T18:00:00.000Z' }).success).toBe(false);

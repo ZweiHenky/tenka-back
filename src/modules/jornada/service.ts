@@ -10,6 +10,7 @@ import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 import { logger } from '../../config/logger';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
 import type { JornadaGenerationHistory } from './repository.interface';
+import type { Pagination } from '../../utils/pagination';
 
 const DAY_MAP: Record<string, number> = {
   dom: 0, domingo: 0,
@@ -339,8 +340,13 @@ function computeRRPairing(
 }
 
 export const jornadaService = {
-  async list(actor?: AuthenticatedUser): Promise<JornadaEntity[]> {
-    return prisma.jornada.findMany({ where: { division: visibleDivisionWhere(actor) } });
+  async list(pagination: Pagination, actor?: AuthenticatedUser) {
+    const where = { division: visibleDivisionWhere(actor) };
+    const [rows, total] = await Promise.all([
+      prisma.jornada.findMany({ where, orderBy: { createdAt: 'desc' }, skip: pagination.skip, take: pagination.take }),
+      prisma.jornada.count({ where }),
+    ]);
+    return { rows, total };
   },
 
   async getById(id: string, actor?: AuthenticatedUser): Promise<JornadaEntity> {

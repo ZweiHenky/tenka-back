@@ -6,6 +6,7 @@ import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
 import { prisma } from '../../config/database';
 import { runInTransaction } from '../../utils/transaction';
+import type { Pagination } from '../../utils/pagination';
 
 const DUPLICATE_NAME_MESSAGE = 'Ya tienes un equipo con ese nombre';
 
@@ -16,6 +17,10 @@ function isUniqueConstraintError(error: unknown): boolean {
 export const equipoService = {
   async list(): Promise<EquipoEntity[]> {
     return equipoRepository.findAll();
+  },
+
+  async listPaginated(pagination: Pagination) {
+    return equipoRepository.findAllPaginated(pagination);
   },
 
   async listByUser(userId: string): Promise<EquipoEntity[]> {

@@ -4,15 +4,24 @@ exports.partidoRepository = exports.PARTIDO_READ_INCLUDE = exports.exposePartido
 const database_1 = require("../../config/database");
 const divisionVisibility_1 = require("../../utils/divisionVisibility");
 const exposeAnotacionRead = (anotacion) => ({
-    ...anotacion,
+    id: anotacion.id,
+    ladoMarcador: anotacion.ladoMarcador,
+    cantidad: anotacion.cantidad,
     jugadorId: anotacion.jugadorId ?? anotacion.jugadorIdSnapshot ?? null,
     equipoId: anotacion.equipoId ?? anotacion.equipoIdSnapshot ?? null,
+    jugadorNombre: anotacion.jugadorNombre ?? null,
+    equipoNombre: anotacion.equipoNombre ?? null,
+    dorsal: anotacion.dorsal ?? null,
 });
 exports.exposeAnotacionRead = exposeAnotacionRead;
 const exposeParticipacionRead = (participacion) => ({
-    ...participacion,
+    id: participacion.id,
+    ladoMarcador: participacion.ladoMarcador,
     jugadorId: participacion.jugadorId ?? participacion.jugadorIdSnapshot ?? null,
     equipoId: participacion.equipoId ?? participacion.equipoIdSnapshot ?? null,
+    jugadorNombre: participacion.jugadorNombre,
+    equipoNombre: participacion.equipoNombre,
+    dorsal: participacion.dorsal ?? null,
 });
 exports.exposeParticipacionRead = exposeParticipacionRead;
 const exposePartidoRead = (partido) => {
@@ -120,6 +129,20 @@ exports.partidoRepository = {
             include: exports.PARTIDO_READ_INCLUDE,
         });
         return partidos.map(exports.exposePartidoRead);
+    },
+    async findAllVisiblePaginated({ skip, take }, actor) {
+        const divisionWhere = (0, divisionVisibility_1.visibleDivisionWhere)(actor);
+        const where = {
+            OR: [
+                { jornada: { division: divisionWhere } },
+                { rondaPlayoff: { division: divisionWhere } },
+            ],
+        };
+        const [partidos, total] = await Promise.all([
+            database_1.prisma.partido.findMany({ where, include: exports.PARTIDO_READ_INCLUDE, orderBy: { createdAt: 'desc' }, skip, take }),
+            database_1.prisma.partido.count({ where }),
+        ]);
+        return { rows: partidos.map(exports.exposePartidoRead), total };
     },
     async findById(id) {
         const partido = await database_1.prisma.partido.findUnique({

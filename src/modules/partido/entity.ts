@@ -30,8 +30,6 @@ export interface PartidoEntity {
     equipoId: string | null;
     ladoMarcador: 'LOCAL' | 'VISITANTE';
     cantidad: number;
-    jugadorIdSnapshot: string | null;
-    equipoIdSnapshot: string | null;
     jugadorNombre: string | null;
     equipoNombre: string | null;
     dorsal: number | null;
@@ -41,8 +39,6 @@ export interface PartidoEntity {
     jugadorId: string | null;
     equipoId: string | null;
     ladoMarcador: 'LOCAL' | 'VISITANTE';
-    jugadorIdSnapshot: string;
-    equipoIdSnapshot: string;
     jugadorNombre: string;
     equipoNombre: string;
     dorsal: number | null;

@@ -10,6 +10,7 @@ import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
 import { validatePlayoffFinalizationSchedule } from './playoffFinalization';
 import { writeResultInTransaction } from './resultWriter';
 import type { ResultInput } from './validator';
+import type { Pagination } from '../../utils/pagination';
 import { collectScheduleChanges, enqueueScheduleChange } from '../notification/scheduleChangeOutbox';
 
 const pairKey = (a: string, b: string) => a < b ? `${a}|${b}` : `${b}|${a}`
@@ -96,6 +97,10 @@ export function findDeterministicMatching(teamIds: string[], occurrences: Readon
 export const partidoService = {
   async list(actor?: AuthenticatedUser): Promise<PartidoEntity[]> {
     return partidoRepository.findAllVisible(actor);
+  },
+
+  async listPaginated(pagination: Pagination, actor?: AuthenticatedUser) {
+    return partidoRepository.findAllVisiblePaginated(pagination, actor);
   },
 
   async getById(id: string, actor?: AuthenticatedUser): Promise<PartidoEntity> {

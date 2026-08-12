@@ -3,10 +3,11 @@ import { rondaPlayoffService } from './service';
 import { createSchema, generateSchema, updateSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
+import { parsePagination } from '../../utils/pagination';
 
 export const rondaPlayoffController = {
   async list(req: Request, res: Response, next: NextFunction) {
-    try { ok(res, await rondaPlayoffService.list(req.user)); } catch (e) { next(e); }
+    try { ok(res, await rondaPlayoffService.list(parsePagination(req.query), req.user)); } catch (e) { next(e); }
   },
 
   async getById(req: Request, res: Response, next: NextFunction) {

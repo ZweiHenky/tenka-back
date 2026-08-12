@@ -1,5 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { resultSchema, updateSchema } from './validator';
+import { createInJornadaSchema, resultSchema, updateSchema } from './validator';
+
+describe('partido createInJornadaSchema', () => {
+  const base = {
+    equipoLocalId: 'team-1',
+    equipoVisitanteId: 'team-2',
+    tipoPartido: 'REGULAR',
+    fecha: '2026-08-13',
+    horaInicio: '20:00',
+    horaFin: '21:00',
+    canchaId: null,
+  };
+
+  it('accepts the same civil date and time contract as jornada generation', () => {
+    expect(createInJornadaSchema.safeParse(base).success).toBe(true);
+  });
+
+  it('rejects ISO instants and missing civil times', () => {
+    expect(createInJornadaSchema.safeParse({ ...base, fecha: '2026-08-14T02:00:00.000Z' }).success).toBe(false);
+    const { horaInicio: _horaInicio, ...withoutStart } = base;
+    expect(createInJornadaSchema.safeParse(withoutStart).success).toBe(false);
+  });
+});
 
 describe('partido updateSchema', () => {
   it.each(['canchaId', 'fecha', 'fechaFin'])('rejects structural field %s', (field) => {

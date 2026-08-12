@@ -332,6 +332,8 @@ exports.PartidoScalarFieldEnum = {
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     version: 'version',
+    manualCreationKey: 'manualCreationKey',
+    manualCreationHash: 'manualCreationHash',
     jornadaId: 'jornadaId',
     rondaPlayoffId: 'rondaPlayoffId',
     equipoLocalId: 'equipoLocalId',

@@ -4,6 +4,7 @@ import { createSchema, updateSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import { getTeamCode } from '../../utils/teamCode';
+import { parsePagination } from '../../utils/pagination';
 
 function toTeamResponse(team: Awaited<ReturnType<typeof equipoService.getById>>, actorId?: string) {
   const { logoPublicId: _logoPublicId, nombreNormalizado: _nombreNormalizado, userId, ...publicTeam } = team;
@@ -14,8 +15,13 @@ export const equipoController = {
   async list(req: Request, res: Response, next: NextFunction) {
     try {
       const { userId } = req.query;
-      const data = userId ? await equipoService.listByUser(userId as string) : await equipoService.list();
-      ok(res, data.map((team) => toTeamResponse(team, req.user?.id)));
+      if (userId) {
+        const data = await equipoService.listByUser(userId as string);
+        ok(res, data.map((team) => toTeamResponse(team, req.user?.id)));
+        return;
+      }
+      const result = await equipoService.listPaginated(parsePagination(req.query));
+      ok(res, { ...result, rows: result.rows.map((team) => toTeamResponse(team, req.user?.id)) });
     } catch (e) { next(e); }
   },
 

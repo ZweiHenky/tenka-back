@@ -5,6 +5,7 @@ import { prisma } from '../../config/database';
 import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
 import { assertVisibleDivision, visibleDivisionWhere } from '../../utils/divisionVisibility';
+import type { Pagination } from '../../utils/pagination';
 
 async function assertDivisionOwner(divisionId: string, actor: AuthenticatedUser): Promise<void> {
   const division = await prisma.division.findUnique({
@@ -23,8 +24,13 @@ async function findForWrite(id: string, actor: AuthenticatedUser): Promise<Premi
 }
 
 export const premioService = {
-  async list(actor?: AuthenticatedUser): Promise<PremioEntity[]> {
-    return prisma.premio.findMany({ where: { division: visibleDivisionWhere(actor) } });
+  async list(pagination: Pagination, actor?: AuthenticatedUser) {
+    const where = { division: visibleDivisionWhere(actor) };
+    const [rows, total] = await Promise.all([
+      prisma.premio.findMany({ where, orderBy: { createdAt: 'desc' }, skip: pagination.skip, take: pagination.take }),
+      prisma.premio.count({ where }),
+    ]);
+    return { rows, total };
   },
 
   async getById(id: string, actor?: AuthenticatedUser): Promise<PremioEntity> {

@@ -120,6 +120,26 @@ describe('partidoRepository public reads', () => {
       include: expect.objectContaining({ participaciones: expect.any(Object) }),
     }));
     expect(result?.participaciones).toEqual([expect.objectContaining({ jugadorId: 'player-1', equipoId: 'team-1' })]);
+    expect(result?.participaciones?.[0]).not.toHaveProperty('jugadorIdSnapshot');
+    expect(result?.participaciones?.[0]).not.toHaveProperty('equipoIdSnapshot');
+  });
+
+  it('exposes scorer snapshots through public fields without internal snapshot ids', async () => {
+    mocks.partidoFindFirst.mockResolvedValue({
+      ...partido,
+      anotaciones: [{
+        id: 'goal-1', jugadorId: null, equipoId: null, jugadorIdSnapshot: 'player-1', equipoIdSnapshot: 'team-1',
+        ladoMarcador: 'LOCAL', cantidad: 2, jugadorNombre: 'Ana', equipoNombre: 'Locales', dorsal: 9,
+      }],
+    });
+
+    const result = await partidoRepository.findVisibleById('partido-1');
+
+    expect(result?.anotaciones?.[0]).toEqual({
+      id: 'goal-1', jugadorId: 'player-1', equipoId: 'team-1', ladoMarcador: 'LOCAL', cantidad: 2,
+      jugadorNombre: 'Ana', equipoNombre: 'Locales', dorsal: 9,
+    });
+    expect(result?.anotaciones?.[0]).not.toHaveProperty('jugadorIdSnapshot');
   });
 
   it('exposes private notas only to the league owner and strips them from other reads', async () => {

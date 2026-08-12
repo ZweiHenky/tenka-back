@@ -23,8 +23,13 @@ async function findForWrite(id, actor) {
     return premio;
 }
 exports.premioService = {
-    async list(actor) {
-        return database_1.prisma.premio.findMany({ where: { division: (0, divisionVisibility_1.visibleDivisionWhere)(actor) } });
+    async list(pagination, actor) {
+        const where = { division: (0, divisionVisibility_1.visibleDivisionWhere)(actor) };
+        const [rows, total] = await Promise.all([
+            database_1.prisma.premio.findMany({ where, orderBy: { createdAt: 'desc' }, skip: pagination.skip, take: pagination.take }),
+            database_1.prisma.premio.count({ where }),
+        ]);
+        return { rows, total };
     },
     async getById(id, actor) {
         const t = await repository_1.premioRepository.findVisibleById(id, actor);

@@ -6,6 +6,13 @@ exports.ubicacionRepository = {
     async findAll() {
         return database_1.prisma.ubicacion.findMany({ orderBy: { nombreCompleto: 'asc' } });
     },
+    async findAllPaginated({ skip, take }) {
+        const [rows, total] = await Promise.all([
+            database_1.prisma.ubicacion.findMany({ orderBy: { nombreCompleto: 'asc' }, skip, take }),
+            database_1.prisma.ubicacion.count(),
+        ]);
+        return { rows, total };
+    },
     async findById(id) {
         return database_1.prisma.ubicacion.findUnique({ where: { id } });
     },

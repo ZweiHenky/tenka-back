@@ -10,6 +10,9 @@ const bodyLimit = z.string().trim().regex(/^\d+(kb|mb)$/i, 'must use a value suc
 const postgresUrl = z.url().refine((value) => ['postgres:', 'postgresql:'].includes(new URL(value).protocol), {
   message: 'must be a PostgreSQL URL',
 });
+const redisUrl = z.url().refine((value) => ['redis:', 'rediss:'].includes(new URL(value).protocol), {
+  message: 'must be a Redis URL',
+});
 
 function isPrivateHostname(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
@@ -38,6 +41,7 @@ const backendEnvSchema = z.object({
   DEV_DIRECT_DATABASE_URL: optionalString(postgresUrl),
   TEST_DATABASE_URL: optionalString(postgresUrl),
   SHADOW_DATABASE_URL: optionalString(postgresUrl),
+  REDIS_URL: redisUrl,
   BETTER_AUTH_SECRET: z.string().min(32, 'must contain at least 32 characters'),
   BETTER_AUTH_URL: z.url(),
   GOOGLE_CLIENT_ID: requiredString,
@@ -67,12 +71,15 @@ const backendEnvSchema = z.object({
   CORS_ALLOWED_ORIGINS: z.string().trim().default('http://localhost:8081,http://localhost:19006,http://localhost:3000'),
   JSON_BODY_LIMIT: bodyLimit.default('100kb'),
   URLENCODED_BODY_LIMIT: bodyLimit.default('100kb'),
-  GLOBAL_RATE_LIMIT: z.coerce.number().int().min(1).max(10000).default(300),
+  GLOBAL_RATE_LIMIT: z.coerce.number().int().min(1).max(10000).default(400),
   AUTH_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(100),
   OTP_SEND_RATE_LIMIT: z.coerce.number().int().min(1).max(100).default(5),
   OTP_VERIFY_RATE_LIMIT: z.coerce.number().int().min(1).max(100).default(10),
   SUBSCRIPTION_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(30),
   UPLOAD_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(30),
+  PLAYER_PHONE_LOOKUP_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(30),
+  REFEREE_READ_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(40),
+  EXPENSIVE_OPERATION_RATE_LIMIT: z.coerce.number().int().min(1).max(100).default(20),
   HTTP_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(30000),
   HTTP_HEADERS_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(35000),
   HTTP_KEEP_ALIVE_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(5000),

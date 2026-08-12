@@ -5,6 +5,7 @@ import { optionalAuth } from '../../middlewares/authMiddleware';
 
 const router = Router();
 
+router.post('/sync', subscriptionLimiter, optionalAuth, notificationSubscriptionController.sync);
 router.post('/subscribe', subscriptionLimiter, optionalAuth, notificationSubscriptionController.subscribe);
 router.post('/unsubscribe', subscriptionLimiter, optionalAuth, notificationSubscriptionController.unsubscribe);
 

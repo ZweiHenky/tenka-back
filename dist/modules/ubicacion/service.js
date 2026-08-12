@@ -7,6 +7,9 @@ exports.ubicacionService = {
     async list() {
         return repository_1.ubicacionRepository.findAll();
     },
+    async listPaginated(pagination) {
+        return repository_1.ubicacionRepository.findAllPaginated(pagination);
+    },
     async getById(id) {
         const t = await repository_1.ubicacionRepository.findById(id);
         if (!t)

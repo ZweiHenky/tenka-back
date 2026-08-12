@@ -1,10 +1,15 @@
 import { NotFoundError } from '../../utils/errors';
 import { ubicacionRepository } from './repository';
 import type { UbicacionEntity } from './entity';
+import type { Pagination } from '../../utils/pagination';
 
 export const ubicacionService = {
   async list(): Promise<UbicacionEntity[]> {
     return ubicacionRepository.findAll();
+  },
+
+  async listPaginated(pagination: Pagination) {
+    return ubicacionRepository.findAllPaginated(pagination);
   },
 
   async getById(id: string): Promise<UbicacionEntity> {
