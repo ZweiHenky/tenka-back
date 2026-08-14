@@ -114,6 +114,27 @@ export function resolvePrismaCommand(action, target, env = process.env, options 
     }
     return { args: ['migrate', 'dev'], databaseUrl, shadowDatabaseUrl: shadow.href }
   }
+  if (action === 'migrate-reset') {
+    if (target !== 'development') throw new Error('migrate reset is only allowed for the development target')
+    if (!options.includes('--confirm=development-reset')) {
+      throw new Error('Development reset requires --confirm=development-reset')
+    }
+    return { args: ['migrate', 'reset', '--force'], databaseUrl: resolveTargetUrl(target, env) }
+  }
+  if (action === 'migrate-resolve') {
+    if (target !== 'production') throw new Error('migrate resolve is only allowed for the production target')
+    assertRailwayProduction(env)
+    assertProductionMigrationApproval(env, options)
+    const migrationOption = options.find((option) => option.startsWith('--migration='))
+    const migration = migrationOption?.slice('--migration='.length)
+    if (!migration || !/^\d{14}_[a-z0-9_]+$/.test(migration)) {
+      throw new Error('Production migration resolve requires a valid --migration=<migration_name>')
+    }
+    return {
+      args: ['migrate', 'resolve', '--rolled-back', migration],
+      databaseUrl: resolveTargetUrl(target, env),
+    }
+  }
   if (action === 'migrate-deploy') {
     if (target === 'production') {
       assertRailwayProduction(env)

@@ -67,6 +67,21 @@ test('migrate dev requires a separate shadow target and permits an isolated inte
   }).args, ['migrate', 'dev'])
 })
 
+test('development reset requires its explicit confirmation and cannot target production', () => {
+  assert.deepEqual(
+    resolvePrismaCommand('migrate-reset', 'development', developmentEnv, ['--confirm=development-reset']).args,
+    ['migrate', 'reset', '--force'],
+  )
+  assert.throws(
+    () => resolvePrismaCommand('migrate-reset', 'development', developmentEnv),
+    /requires --confirm=development-reset/,
+  )
+  assert.throws(
+    () => resolvePrismaCommand('migrate-reset', 'production', productionEnv, ['--confirm=development-reset']),
+    /only allowed for the development target/,
+  )
+})
+
 test('production status requires Railway production context', () => {
   assert.deepEqual(resolvePrismaCommand('status', 'production', productionEnv).args, ['migrate', 'status'])
   assert.throws(() => resolvePrismaCommand('status', 'production', {
@@ -98,6 +113,27 @@ test('production deploy requires Railway, token, production and snapshot confirm
   assert.throws(() => resolvePrismaCommand('migrate-deploy', 'production', productionEnv, [
     '--confirm=production',
   ]), /requires --confirm-snapshot/)
+})
+
+test('production resolve only rolls back a named migration behind production guards', () => {
+  const migration = '20260813233356_league_timezone_and_instant'
+  assert.deepEqual(
+    resolvePrismaCommand('migrate-resolve', 'production', productionEnv, [
+      ...productionOptions,
+      `--migration=${migration}`,
+    ]).args,
+    ['migrate', 'resolve', '--rolled-back', migration],
+  )
+  assert.throws(
+    () => resolvePrismaCommand('migrate-resolve', 'production', productionEnv, productionOptions),
+    /requires a valid --migration/,
+  )
+  assert.throws(
+    () => resolvePrismaCommand('migrate-resolve', 'development', developmentEnv, [
+      '--migration=20260813233356_league_timezone_and_instant',
+    ]),
+    /only allowed for the production target/,
+  )
 })
 
 test('production guard errors never expose the migration token', () => {
