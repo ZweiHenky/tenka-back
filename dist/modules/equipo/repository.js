@@ -6,6 +6,13 @@ exports.equipoRepository = {
     async findAll() {
         return database_1.prisma.equipo.findMany({ orderBy: { nombre: 'asc' } });
     },
+    async findAllPaginated({ skip, take }) {
+        const [rows, total] = await Promise.all([
+            database_1.prisma.equipo.findMany({ orderBy: { nombre: 'asc' }, skip, take }),
+            database_1.prisma.equipo.count(),
+        ]);
+        return { rows, total };
+    },
     async findByUser(userId) {
         return database_1.prisma.equipo.findMany({ where: { userId }, orderBy: { nombre: 'asc' } });
     },

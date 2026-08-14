@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resultSchema = exports.notasSchema = exports.participacionSchema = exports.allocationSchema = exports.updateSchema = exports.createSchema = void 0;
+exports.resultSchema = exports.notasSchema = exports.participacionSchema = exports.allocationSchema = exports.updateSchema = exports.createInJornadaSchema = exports.createSchema = void 0;
 const zod_1 = require("zod");
 exports.createSchema = zod_1.z.object({
     golesLocal: zod_1.z.number().int().min(0).default(0),
@@ -20,6 +20,19 @@ exports.createSchema = zod_1.z.object({
     exhibicionLocal: zod_1.z.boolean().optional(),
     exhibicionVisitante: zod_1.z.boolean().optional(),
 });
+exports.createInJornadaSchema = zod_1.z.object({
+    equipoLocalId: zod_1.z.string().min(1),
+    equipoVisitanteId: zod_1.z.string().min(1),
+    tipoPartido: zod_1.z.enum(['REGULAR', 'COMPLEMENTO']),
+    fecha: zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha debe tener formato YYYY-MM-DD').refine((value) => {
+        const [year, month, day] = value.split('-').map(Number);
+        const date = new Date(year, month - 1, day);
+        return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+    }, 'La fecha no es válida'),
+    horaInicio: zod_1.z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'La hora de inicio debe tener formato HH:mm'),
+    horaFin: zod_1.z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'La hora fin debe tener formato HH:mm'),
+    canchaId: zod_1.z.string().min(1).nullable().optional(),
+}).strict();
 exports.updateSchema = zod_1.z.object({
     golesLocal: zod_1.z.number().int().min(0).optional(),
     golesVisitante: zod_1.z.number().int().min(0).optional(),

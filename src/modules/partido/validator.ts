@@ -19,6 +19,20 @@ export const createSchema = z.object({
   exhibicionVisitante: z.boolean().optional(),
 });
 
+export const createInJornadaSchema = z.object({
+  equipoLocalId: z.string().min(1),
+  equipoVisitanteId: z.string().min(1),
+  tipoPartido: z.enum(['REGULAR', 'COMPLEMENTO']),
+  fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha debe tener formato YYYY-MM-DD').refine((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+  }, 'La fecha no es válida'),
+  horaInicio: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'La hora de inicio debe tener formato HH:mm'),
+  horaFin: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'La hora fin debe tener formato HH:mm'),
+  canchaId: z.string().min(1).nullable().optional(),
+}).strict();
+
 export const updateSchema = z.object({
   golesLocal: z.number().int().min(0).optional(),
   golesVisitante: z.number().int().min(0).optional(),
@@ -67,5 +81,6 @@ export const resultSchema = z.object({
 }).strict();
 
 export type CreateInput = z.output<typeof createSchema>;
+export type CreateInJornadaInput = z.output<typeof createInJornadaSchema>;
 export type UpdateInput = z.output<typeof updateSchema>;
 export type ResultInput = z.output<typeof resultSchema>;

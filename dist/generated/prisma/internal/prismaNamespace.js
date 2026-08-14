@@ -210,7 +210,8 @@ exports.UbicacionScalarFieldEnum = {
     lng: 'lng',
     nombreCompleto: 'nombreCompleto',
     estado: 'estado',
-    municipio: 'municipio'
+    municipio: 'municipio',
+    timeZone: 'timeZone'
 };
 exports.EstadoLigaScalarFieldEnum = {
     id: 'id',
@@ -232,6 +233,7 @@ exports.LigaScalarFieldEnum = {
     multiplesCanchas: 'multiplesCanchas',
     usaArbitros: 'usaArbitros',
     reglas: 'reglas',
+    timeZone: 'timeZone',
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     ubicacionId: 'ubicacionId',
@@ -361,6 +363,8 @@ exports.PartidoScalarFieldEnum = {
     createdAt: 'createdAt',
     updatedAt: 'updatedAt',
     version: 'version',
+    manualCreationKey: 'manualCreationKey',
+    manualCreationHash: 'manualCreationHash',
     jornadaId: 'jornadaId',
     rondaPlayoffId: 'rondaPlayoffId',
     equipoLocalId: 'equipoLocalId',

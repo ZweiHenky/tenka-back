@@ -1,9 +1,11 @@
 import type { PartidoEntity } from './entity';
 import type { AuthenticatedUser } from '../../types/auth';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client';
+import type { PaginatedResult, Pagination } from '../../utils/pagination';
 
 export interface PartidoRepository {
   findAllVisible(actor?: AuthenticatedUser): Promise<PartidoEntity[]>;
+  findAllVisiblePaginated(pagination: Pagination, actor?: AuthenticatedUser): Promise<PaginatedResult<PartidoEntity>>;
   findById(id: string): Promise<PartidoEntity | null>;
   findVisibleById(id: string, actor?: AuthenticatedUser): Promise<PartidoEntity | null>;
   findByJornada(jornadaId: string): Promise<PartidoEntity[]>;

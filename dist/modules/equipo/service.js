@@ -14,6 +14,9 @@ exports.equipoService = {
     async list() {
         return repository_1.equipoRepository.findAll();
     },
+    async listPaginated(pagination) {
+        return repository_1.equipoRepository.findAllPaginated(pagination);
+    },
     async listByUser(userId) {
         return repository_1.equipoRepository.findByUser(userId);
     },

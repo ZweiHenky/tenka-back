@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   partidoCount: vi.fn(),
   divisionCount: vi.fn(),
   partidoArbitroCount: vi.fn(),
+  ubicacionFindUnique: vi.fn(),
 }));
 
 vi.mock('./repository', () => ({
@@ -75,6 +76,9 @@ vi.mock('../../config/database', () => ({
     partidoArbitro: {
       count: mocks.partidoArbitroCount,
     },
+    ubicacion: {
+      findUnique: mocks.ubicacionFindUnique,
+    },
   },
 }));
 
@@ -105,6 +109,7 @@ export const existingLiga = {
 
 export function resetServiceMocks() {
   vi.clearAllMocks();
+  mocks.ubicacionFindUnique.mockResolvedValue({ timeZone: 'America/Mexico_City' });
 }
 
 export function getServiceMocks() {

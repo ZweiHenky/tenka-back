@@ -14,6 +14,8 @@ Express + TypeScript + Better Auth + Prisma (PostgreSQL).
 | Validate Prisma schema | `pnpm db:validate` |
 | Check development migrations | `pnpm db:status:dev` |
 | Run development migrations | `pnpm db:migrate:dev` |
+| Check production migrations | `railway run pnpm run db:status:production` |
+| Run production migrations | Protected command documented in `../DATABASE-SAFETY.md` |
 | Run tests | `pnpm test` |
 | Run tests (watch) | `pnpm test:watch` |
 
@@ -216,7 +218,7 @@ interface ApiResponse<T> { success: boolean; data?: T; message?: string; error?:
 **`rateLimits`** (`src/middlewares/rateLimits.ts`):
 - `createRateLimiter({ limit, windowMs })` con `express-rate-limit`
 - Exporta: `globalApiLimiter` (montado en `/api`), `authLimiter`, `otpSendLimiter`, `otpVerifyLimiter`, `subscriptionLimiter`, `uploadLimiter`, `playerPhoneLookupLimiter`, `refereeReadLimiter`, `refereeWriteLimiter`
-- Límites configurables vía env (`GLOBAL_RATE_LIMIT`, `AUTH_RATE_LIMIT`, `OTP_SEND_RATE_LIMIT`, `OTP_VERIFY_RATE_LIMIT`, `SUBSCRIPTION_RATE_LIMIT`, `UPLOAD_RATE_LIMIT`)
+- Límites configurables vía env (`GLOBAL_RATE_LIMIT`, `AUTH_RATE_LIMIT`, `OTP_SEND_RATE_LIMIT`, `OTP_VERIFY_RATE_LIMIT`, `SUBSCRIPTION_RATE_LIMIT`, `UPLOAD_RATE_LIMIT`, `PLAYER_PHONE_LOOKUP_RATE_LIMIT`, `REFEREE_READ_RATE_LIMIT`, `EXPENSIVE_OPERATION_RATE_LIMIT`)
 
 ## Workers
 
@@ -333,12 +335,15 @@ Todas se validan en `src/config/env.ts` con zod. `APP_ENV` debe ser `local` en d
 **Rate limits**
 | Var | Default | Uso |
 |-----|---------|-----|
-| `GLOBAL_RATE_LIMIT` | 300 | globalApiLimiter (15 min) |
+| `GLOBAL_RATE_LIMIT` | 400 | globalApiLimiter (15 min) |
 | `AUTH_RATE_LIMIT` | 100 | authLimiter (15 min) |
 | `OTP_SEND_RATE_LIMIT` | 5 | otpSendLimiter (10 min) |
 | `OTP_VERIFY_RATE_LIMIT` | 10 | otpVerifyLimiter (10 min) |
 | `SUBSCRIPTION_RATE_LIMIT` | 30 | subscriptionLimiter (15 min) |
 | `UPLOAD_RATE_LIMIT` | 30 | uploadLimiter (15 min) |
+| `PLAYER_PHONE_LOOKUP_RATE_LIMIT` | 30 | playerPhoneLookupLimiter (10 min) |
+| `REFEREE_READ_RATE_LIMIT` | 40 | refereeReadLimiter (15 min) |
+| `EXPENSIVE_OPERATION_RATE_LIMIT` | 20 | expensiveOperationLimiter (60 min) |
 
 **HTTP / CORS**
 | Var | Default | Notes |

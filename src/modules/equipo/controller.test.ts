@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from 'express';
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
+  listPaginated: vi.fn(),
   listByUser: vi.fn(),
   getById: vi.fn(),
   create: vi.fn(),
@@ -31,16 +32,17 @@ describe('equipoController public DTO', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('adds the short code and ownership flag while removing internal fields', async () => {
-    mocks.list.mockResolvedValue([team]);
-    const req = { query: {}, user: { id: 'owner-1' } } as unknown as Request;
+    mocks.listPaginated.mockResolvedValue({ rows: [team], total: 1 });
+    const req = { query: { page: '1', limit: '20' }, user: { id: 'owner-1' } } as unknown as Request;
     const res = response();
     const next = vi.fn() as NextFunction;
 
     await equipoController.list(req, res, next);
 
-    expect(res.json).toHaveBeenCalledWith({ success: true, data: [{
-      id: 'cm-team-ab12', nombre: 'Leones', logo: null, codigo: 'AB12', esPropio: true,
-    }] });
+    expect(res.json).toHaveBeenCalledWith({ success: true, data: {
+      rows: [{ id: 'cm-team-ab12', nombre: 'Leones', logo: null, codigo: 'AB12', esPropio: true }],
+      total: 1,
+    } });
     expect(next).not.toHaveBeenCalled();
   });
 

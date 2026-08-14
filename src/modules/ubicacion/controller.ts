@@ -3,10 +3,11 @@ import { ubicacionService } from './service';
 import { createSchema, updateSchema, findOrCreateSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
+import { parsePagination } from '../../utils/pagination';
 
 export const ubicacionController = {
-  async list(_req: Request, res: Response, next: NextFunction) {
-    try { ok(res, await ubicacionService.list()); } catch (e) { next(e); }
+  async list(req: Request, res: Response, next: NextFunction) {
+    try { ok(res, await ubicacionService.listPaginated(parsePagination(req.query))); } catch (e) { next(e); }
   },
 
   async getById(req: Request, res: Response, next: NextFunction) {

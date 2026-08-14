@@ -18,7 +18,7 @@ let observer;
 });
 async function createDivisionFixture(suffix) {
     const user = await prisma.user.create({ data: { id: `user-${suffix}`, email: `${suffix}@integration.test` } });
-    const ubicacion = await prisma.ubicacion.create({ data: { id: `location-${suffix}`, lat: 0, lng: 0, nombreCompleto: 'Test', estado: 'Test', municipio: 'Test' } });
+    const ubicacion = await prisma.ubicacion.create({ data: { id: `location-${suffix}`, lat: 0, lng: 0, nombreCompleto: 'Test', estado: 'Test', municipio: 'Test', timeZone: 'UTC' } });
     const liga = await prisma.liga.create({ data: { id: `league-${suffix}`, nombre: 'Test', nombreNormalizado: `test-${suffix}`, descripcion: 'Test', userId: user.id, ubicacionId: ubicacion.id } });
     const [categoria, tipo, estadoLiga, tipoCompetencia] = await Promise.all([
         prisma.categoria.create({ data: { id: `category-${suffix}`, nombre: 'Test' } }),

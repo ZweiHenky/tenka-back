@@ -3,11 +3,12 @@ import { divisionService } from './service';
 import { createDivisionSchema, updateDivisionSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
+import { parsePagination } from '../../utils/pagination';
 
 export const divisionController = {
   async list(req: Request, res: Response, next: NextFunction) {
     try {
-      const divisions = await divisionService.list(req.user);
+      const divisions = await divisionService.list(parsePagination(req.query), req.user);
       ok(res, divisions);
     } catch (err) {
       next(err);

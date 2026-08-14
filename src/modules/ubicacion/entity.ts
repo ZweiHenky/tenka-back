@@ -5,4 +5,5 @@ export interface UbicacionEntity {
   nombreCompleto: string;
   estado: string;
   municipio: string;
+  timeZone: string;
 }

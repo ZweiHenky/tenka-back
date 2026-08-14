@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../config/database';
 import { env } from '../config/env';
 import { isReadyForTraffic } from '../config/readiness';
+import { redis } from '../config/redis';
 
 type HealthDependencies = {
   checkDatabase: () => Promise<unknown>;
@@ -10,7 +11,7 @@ type HealthDependencies = {
 };
 
 const defaultDependencies: HealthDependencies = {
-  checkDatabase: () => prisma.$queryRawUnsafe('SELECT 1'),
+  checkDatabase: () => Promise.all([prisma.$queryRawUnsafe('SELECT 1'), redis.ping()]),
   isReady: isReadyForTraffic,
   timeoutMs: env.READINESS_TIMEOUT_MS,
 };

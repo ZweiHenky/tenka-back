@@ -7,6 +7,7 @@ const rateLimits_1 = require("../../middlewares/rateLimits");
 const authMiddleware_1 = require("../../middlewares/authMiddleware");
 const router = (0, express_1.Router)();
 exports.notificationSubscriptionRouter = router;
+router.post('/sync', rateLimits_1.subscriptionLimiter, authMiddleware_1.optionalAuth, controller_1.notificationSubscriptionController.sync);
 router.post('/subscribe', rateLimits_1.subscriptionLimiter, authMiddleware_1.optionalAuth, controller_1.notificationSubscriptionController.subscribe);
 router.post('/unsubscribe', rateLimits_1.subscriptionLimiter, authMiddleware_1.optionalAuth, controller_1.notificationSubscriptionController.unsubscribe);
 //# sourceMappingURL=routes.js.map

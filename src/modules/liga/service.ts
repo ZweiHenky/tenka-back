@@ -131,6 +131,9 @@ export const ligaService = {
     userId: string;
   }): Promise<LigaEntity> {
     const { canchas, arbitros, logoAssetId, coverAssetId, ...ligaData } = data;
+    const location = await prisma.ubicacion.findUnique({ where: { id: data.ubicacionId }, select: { timeZone: true } });
+    if (!location) throw new NotFoundError('Ubicación');
+    const authoritativeLigaData = { ...ligaData, timeZone: location.timeZone };
     validateCanchas(data.multiplesCanchas ?? false, canchas ?? []);
     validateArbitros(data.usaArbitros ?? false, arbitros ?? []);
     const nombre = data.nombre.trim();
@@ -145,13 +148,13 @@ export const ligaService = {
         activa: data.multiplesCanchas === true,
       }));
       if (logoAssetId === undefined && coverAssetId === undefined) {
-        return await ligaRepository.create({ ...ligaData, nombre, nombreNormalizado }, courtWrites, arbitros);
+        return await ligaRepository.create({ ...authoritativeLigaData, nombre, nombreNormalizado }, courtWrites, arbitros);
       }
       return await runInTransaction(async (tx) => {
         const logo = logoAssetId !== undefined ? await mediaService.prepareAttachment(tx, logoAssetId, data.userId, 'LEAGUE_LOGO') : undefined;
         const cover = coverAssetId !== undefined ? await mediaService.prepareAttachment(tx, coverAssetId, data.userId, 'LEAGUE_COVER') : undefined;
         return ligaRepository.create({
-          ...ligaData,
+          ...authoritativeLigaData,
           nombre,
           nombreNormalizado,
           ...(logo && { logo: logo.url, logoPublicId: logo.publicId }),
@@ -180,6 +183,11 @@ export const ligaService = {
     if (!old) throw new NotFoundError('Liga');
     const { canchas, arbitros, logoAssetId, coverAssetId, ...rawLigaData } = data;
     const ligaData: LigaWriteData = rawLigaData;
+    if (data.ubicacionId) {
+      const location = await prisma.ubicacion.findUnique({ where: { id: data.ubicacionId }, select: { timeZone: true } });
+      if (!location) throw new NotFoundError('Ubicación');
+      ligaData.timeZone = location.timeZone;
+    }
     const multiplesCanchas = data.multiplesCanchas ?? old.multiplesCanchas;
     let courtWrites: LigaCanchaWrite[] | undefined;
     if (canchas !== undefined) {

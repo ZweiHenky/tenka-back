@@ -6,21 +6,31 @@ import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client';
 
 export const exposeAnotacionRead = (anotacion: any) => ({
-  ...anotacion,
+  id: anotacion.id,
+  ladoMarcador: anotacion.ladoMarcador,
+  cantidad: anotacion.cantidad,
   jugadorId: anotacion.jugadorId ?? anotacion.jugadorIdSnapshot ?? null,
   equipoId: anotacion.equipoId ?? anotacion.equipoIdSnapshot ?? null,
+  jugadorNombre: anotacion.jugadorNombre ?? null,
+  equipoNombre: anotacion.equipoNombre ?? null,
+  dorsal: anotacion.dorsal ?? null,
 });
 
 export const exposeParticipacionRead = (participacion: any) => ({
-  ...participacion,
+  id: participacion.id,
+  ladoMarcador: participacion.ladoMarcador,
   jugadorId: participacion.jugadorId ?? participacion.jugadorIdSnapshot ?? null,
   equipoId: participacion.equipoId ?? participacion.equipoIdSnapshot ?? null,
+  jugadorNombre: participacion.jugadorNombre,
+  equipoNombre: participacion.equipoNombre,
+  dorsal: participacion.dorsal ?? null,
 });
 
 export const exposePartidoRead = (partido: any): PartidoEntity => {
   const { notas: _notas, jornada: _jornada, rondaPlayoff: _rondaPlayoff, ...publicPartido } = partido;
   return {
     ...publicPartido,
+    timeZone: partido.jornada?.division?.liga?.timeZone ?? partido.rondaPlayoff?.division?.liga?.timeZone,
     arbitros: partido.arbitros?.map((row: any) => row.arbitro),
     anotaciones: partido.anotaciones?.map(exposeAnotacionRead),
     participaciones: partido.participaciones?.map(exposeParticipacionRead),
@@ -31,6 +41,7 @@ export const exposePartidoReadWithNotas = (partido: any): PartidoEntity => {
   const { jornada: _jornada, rondaPlayoff: _rondaPlayoff, ...rest } = partido;
   return {
     ...rest,
+    timeZone: partido.jornada?.division?.liga?.timeZone ?? partido.rondaPlayoff?.division?.liga?.timeZone,
     arbitros: partido.arbitros?.map((row: any) => row.arbitro),
     anotaciones: partido.anotaciones?.map(exposeAnotacionRead),
     participaciones: partido.participaciones?.map(exposeParticipacionRead),
@@ -38,8 +49,8 @@ export const exposePartidoReadWithNotas = (partido: any): PartidoEntity => {
 };
 
 const PARTIDO_OWNER_CONTEXT = {
-  jornada: { select: { division: { select: { liga: { select: { userId: true } } } } } },
-  rondaPlayoff: { select: { division: { select: { liga: { select: { userId: true } } } } } },
+  jornada: { select: { division: { select: { liga: { select: { userId: true, timeZone: true } } } } } },
+  rondaPlayoff: { select: { division: { select: { liga: { select: { userId: true, timeZone: true } } } } } },
 } as const;
 
 function isPartidoOwner(partido: any, actor?: AuthenticatedUser): boolean {
@@ -124,6 +135,21 @@ export const partidoRepository: PartidoRepository = {
       include: PARTIDO_READ_INCLUDE,
     });
     return partidos.map(exposePartidoRead);
+  },
+
+  async findAllVisiblePaginated({ skip, take }, actor?: AuthenticatedUser): Promise<{ rows: PartidoEntity[]; total: number }> {
+    const divisionWhere = visibleDivisionWhere(actor);
+    const where = {
+        OR: [
+          { jornada: { division: divisionWhere } },
+          { rondaPlayoff: { division: divisionWhere } },
+        ],
+      };
+    const [partidos, total] = await Promise.all([
+      prisma.partido.findMany({ where, include: PARTIDO_READ_INCLUDE, orderBy: { createdAt: 'desc' }, skip, take }),
+      prisma.partido.count({ where }),
+    ]);
+    return { rows: partidos.map(exposePartidoRead), total };
   },
 
   async findById(id: string): Promise<PartidoEntity | null> {

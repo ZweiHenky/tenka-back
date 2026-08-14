@@ -75,7 +75,7 @@ async function seedFixture() {
         data: { id: ids.user, email: owner.email, name: 'Integration Owner', rol: 'LIGA' },
     });
     await database_1.prisma.ubicacion.create({
-        data: { id: ids.ubicacion, lat: 19.4326, lng: -99.1332, nombreCompleto: 'Integration Venue', estado: 'Test', municipio: 'Test' },
+        data: { id: ids.ubicacion, lat: 19.4326, lng: -99.1332, nombreCompleto: 'Integration Venue', estado: 'Test', municipio: 'Test', timeZone: 'America/Mexico_City' },
     });
     await Promise.all([
         database_1.prisma.categoria.create({ data: { id: ids.categoria, nombre: 'Integration Category' } }),

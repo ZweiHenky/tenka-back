@@ -3,6 +3,7 @@ import { ligaService } from './service';
 import { createLigaSchema, updateLigaSchema, createCanchaSchema, updateCanchaSchema, createArbitroSchema, updateArbitroSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
+import { parsePagination } from '../../utils/pagination';
 
 function publicLiga<T extends { logoPublicId?: unknown; canchaPublicId?: unknown }>(liga: T) {
   const { logoPublicId: _logo, canchaPublicId: _cover, ...safe } = liga;
@@ -14,21 +15,19 @@ export const ligaController = {
     try {
       const { userId, page, limit, search, categoriaId, tipoId, estadoLigaId } = req.query;
 
-      if (page && limit) {
+      if (!userId) {
+        const pagination = parsePagination(req.query);
         const result = await ligaService.listPaginated({
-          page: Number(page),
-          limit: Number(limit),
+          page: pagination.page,
+          limit: pagination.limit,
           search: search as string | undefined,
           categoriaId: categoriaId as string | undefined,
           tipoId: tipoId as string | undefined,
           estadoLigaId: estadoLigaId as string | undefined,
         });
         ok(res, { ...result, rows: result.rows.map(publicLiga) });
-      } else if (userId) {
-        const ligas = await ligaService.listByUser(userId as string, req.user);
-        ok(res, ligas.map(publicLiga));
       } else {
-        const ligas = await ligaService.list();
+        const ligas = await ligaService.listByUser(userId as string, req.user);
         ok(res, ligas.map(publicLiga));
       }
     } catch (err) {

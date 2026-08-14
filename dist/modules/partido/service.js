@@ -96,6 +96,9 @@ exports.partidoService = {
     async list(actor) {
         return repository_1.partidoRepository.findAllVisible(actor);
     },
+    async listPaginated(pagination, actor) {
+        return repository_1.partidoRepository.findAllVisiblePaginated(pagination, actor);
+    },
     async getById(id, actor) {
         const t = await repository_1.partidoRepository.findVisibleById(id, actor);
         if (!t)

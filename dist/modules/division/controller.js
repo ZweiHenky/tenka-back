@@ -5,10 +5,11 @@ const service_1 = require("./service");
 const validator_1 = require("./validator");
 const response_1 = require("../../utils/response");
 const errors_1 = require("../../utils/errors");
+const pagination_1 = require("../../utils/pagination");
 exports.divisionController = {
     async list(req, res, next) {
         try {
-            const divisions = await service_1.divisionService.list(req.user);
+            const divisions = await service_1.divisionService.list((0, pagination_1.parsePagination)(req.query), req.user);
             (0, response_1.ok)(res, divisions);
         }
         catch (err) {

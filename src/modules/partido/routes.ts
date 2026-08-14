@@ -8,6 +8,8 @@ const router = Router();
 router.get('/', optionalAuth, partidoController.list);
 router.get('/jornada/:jornadaId', optionalAuth, partidoController.findByJornada);
 router.get('/ronda-playoff/:rondaPlayoffId', optionalAuth, partidoController.findByRondaPlayoff);
+router.get('/jornada/:jornadaId/creation-options', requireAuth, partidoController.getJornadaCreationOptions);
+router.post('/jornada/:jornadaId', requireAuth, partidoController.createInJornada);
 router.get('/:id', optionalAuth, partidoController.getById);
 router.use(requireAuth);
 router.patch('/:id/resultado', partidoController.updateResult);

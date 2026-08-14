@@ -8,6 +8,7 @@ const authorization_1 = require("../../utils/authorization");
 const validator_1 = require("./validator");
 const service_1 = require("../media/service");
 const divisionVisibility_1 = require("../../utils/divisionVisibility");
+const pagination_1 = require("../../utils/pagination");
 function sanitizePublic(jugador) {
     return {
         ...jugador,
@@ -49,12 +50,17 @@ exports.jugadorController = {
                 where.equipos = { some: { equipoId: equipoId } };
             if (search)
                 where.nombre = { contains: search, mode: 'insensitive' };
-            const jugadores = await database_1.prisma.jugador.findMany({
-                where,
-                orderBy: { nombre: 'asc' },
-                include: jugadorInclude,
-            });
-            (0, response_1.ok)(res, jugadores.map(sanitizePublic));
+            if (equipoId) {
+                const jugadores = await database_1.prisma.jugador.findMany({ where, orderBy: { nombre: 'asc' }, include: jugadorInclude });
+                (0, response_1.ok)(res, jugadores.map(sanitizePublic));
+                return;
+            }
+            const { skip, take } = (0, pagination_1.parsePagination)(req.query);
+            const [jugadores, total] = await Promise.all([
+                database_1.prisma.jugador.findMany({ where, orderBy: { nombre: 'asc' }, include: jugadorInclude, skip, take }),
+                database_1.prisma.jugador.count({ where }),
+            ]);
+            (0, response_1.ok)(res, { rows: jugadores.map(sanitizePublic), total });
         }
         catch (e) {
             next(e);
@@ -175,10 +181,13 @@ exports.jugadorController = {
                     throw new errors_1.NotFoundError('Jugador');
                 const membership = await tx.equipoJugador.findUnique({
                     where: { equipoId_jugadorId: { equipoId: p.data.equipoId, jugadorId: p.data.jugadorId } },
-                    select: { jugadorId: true },
+                    select: { equipoId: true, jugadorId: true, dorsal: true },
                 });
-                if (membership)
-                    throw new errors_1.ConflictError('El jugador ya pertenece a este equipo');
+                if (membership) {
+                    if (membership.dorsal !== p.data.dorsal)
+                        throw new errors_1.ConflictError('El jugador ya pertenece a este equipo');
+                    return { membership, alreadyAssigned: true };
+                }
                 const occupiedDorsal = await tx.equipoJugador.findUnique({
                     where: { equipoId_dorsal: { equipoId: p.data.equipoId, dorsal: p.data.dorsal } },
                     select: { jugadorId: true },
@@ -190,9 +199,12 @@ exports.jugadorController = {
                     where: { equipoId: p.data.equipoId, jugadorId: p.data.jugadorId },
                     data: { dorsal: p.data.dorsal },
                 });
-                return createdMembership;
+                return { membership: createdMembership, alreadyAssigned: false };
             });
-            (0, response_1.created)(res, result, 'Jugador asignado al equipo');
+            if (result.alreadyAssigned)
+                (0, response_1.ok)(res, result.membership, 'Jugador ya asignado al equipo');
+            else
+                (0, response_1.created)(res, result.membership, 'Jugador asignado al equipo');
         }
         catch (e) {
             if (e?.code === 'P2002') {
@@ -201,8 +213,10 @@ exports.jugadorController = {
                     return next(e);
                 const membership = await database_1.prisma.equipoJugador.findUnique({
                     where: { equipoId_jugadorId: { equipoId: data.data.equipoId, jugadorId: data.data.jugadorId } },
-                    select: { jugadorId: true },
+                    select: { equipoId: true, jugadorId: true, dorsal: true },
                 });
+                if (membership?.dorsal === data.data.dorsal)
+                    return (0, response_1.ok)(res, membership, 'Jugador ya asignado al equipo');
                 if (membership)
                     return next(new errors_1.ConflictError('El jugador ya pertenece a este equipo'));
                 return next(new errors_1.ConflictError('El dorsal ya está ocupado en este equipo'));

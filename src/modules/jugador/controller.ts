@@ -6,6 +6,7 @@ import { assertOwnerOrAdmin, isAdmin } from '../../utils/authorization';
 import { assignJugadorSchema, createJugadorSchema, createMeSchema, divisionJugadorSchema, lookupJugadorByPhoneSchema, updateJugadorSchema, updateMeSchema } from './validator';
 import { mediaService } from '../media/service';
 import { visibleDivisionWhere } from '../../utils/divisionVisibility';
+import { parsePagination } from '../../utils/pagination';
 
 function sanitizePublic(jugador: any) {
   return {
@@ -49,12 +50,17 @@ export const jugadorController = {
       if (equipoId) where.equipos = { some: { equipoId: equipoId as string } };
       if (search) where.nombre = { contains: search as string, mode: 'insensitive' };
 
-      const jugadores = await prisma.jugador.findMany({
-        where,
-        orderBy: { nombre: 'asc' },
-        include: jugadorInclude,
-      });
-      ok(res, jugadores.map(sanitizePublic));
+      if (equipoId) {
+        const jugadores = await prisma.jugador.findMany({ where, orderBy: { nombre: 'asc' }, include: jugadorInclude });
+        ok(res, jugadores.map(sanitizePublic));
+        return;
+      }
+      const { skip, take } = parsePagination(req.query);
+      const [jugadores, total] = await Promise.all([
+        prisma.jugador.findMany({ where, orderBy: { nombre: 'asc' }, include: jugadorInclude, skip, take }),
+        prisma.jugador.count({ where }),
+      ]);
+      ok(res, { rows: jugadores.map(sanitizePublic), total });
     } catch (e) { next(e); }
   },
 
@@ -161,9 +167,12 @@ export const jugadorController = {
 
         const membership = await tx.equipoJugador.findUnique({
           where: { equipoId_jugadorId: { equipoId: p.data.equipoId, jugadorId: p.data.jugadorId } },
-          select: { jugadorId: true },
+          select: { equipoId: true, jugadorId: true, dorsal: true },
         });
-        if (membership) throw new ConflictError('El jugador ya pertenece a este equipo');
+        if (membership) {
+          if (membership.dorsal !== p.data.dorsal) throw new ConflictError('El jugador ya pertenece a este equipo');
+          return { membership, alreadyAssigned: true };
+        }
 
         const occupiedDorsal = await tx.equipoJugador.findUnique({
           where: { equipoId_dorsal: { equipoId: p.data.equipoId, dorsal: p.data.dorsal } },
@@ -176,17 +185,19 @@ export const jugadorController = {
           where: { equipoId: p.data.equipoId, jugadorId: p.data.jugadorId },
           data: { dorsal: p.data.dorsal },
         });
-        return createdMembership;
+        return { membership: createdMembership, alreadyAssigned: false };
       });
-      created(res, result, 'Jugador asignado al equipo');
+      if (result.alreadyAssigned) ok(res, result.membership, 'Jugador ya asignado al equipo');
+      else created(res, result.membership, 'Jugador asignado al equipo');
     } catch (e: any) {
       if (e?.code === 'P2002') {
         const data = assignJugadorSchema.safeParse(req.body);
         if (!data.success) return next(e);
         const membership = await prisma.equipoJugador.findUnique({
           where: { equipoId_jugadorId: { equipoId: data.data.equipoId, jugadorId: data.data.jugadorId } },
-          select: { jugadorId: true },
+          select: { equipoId: true, jugadorId: true, dorsal: true },
         });
+        if (membership?.dorsal === data.data.dorsal) return ok(res, membership, 'Jugador ya asignado al equipo');
         if (membership) return next(new ConflictError('El jugador ya pertenece a este equipo'));
         return next(new ConflictError('El dorsal ya está ocupado en este equipo'));
       }

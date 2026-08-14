@@ -6,6 +6,7 @@ import type { AuthenticatedUser } from '../../types/auth';
 import { isAdmin } from '../../utils/authorization';
 import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
+import type { Pagination } from '../../utils/pagination';
 
 async function assertLigaOwner(ligaId: string, actor: AuthenticatedUser): Promise<void> {
   const liga = await prisma.liga.findFirst({
@@ -33,8 +34,13 @@ async function getDivisionUpdateContext(id: string, actor: AuthenticatedUser) {
 }
 
 export const divisionService = {
-  async list(actor?: AuthenticatedUser): Promise<DivisionEntity[]> {
-    return prisma.division.findMany({ where: visibleDivisionWhere(actor), orderBy: { createdAt: 'desc' } });
+  async list(pagination: Pagination, actor?: AuthenticatedUser) {
+    const where = visibleDivisionWhere(actor);
+    const [rows, total] = await Promise.all([
+      prisma.division.findMany({ where, orderBy: { createdAt: 'desc' }, skip: pagination.skip, take: pagination.take }),
+      prisma.division.count({ where }),
+    ]);
+    return { rows, total };
   },
 
   async getById(id: string, actor?: AuthenticatedUser): Promise<DivisionEntity> {

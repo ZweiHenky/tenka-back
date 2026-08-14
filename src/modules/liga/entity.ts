@@ -77,6 +77,7 @@ export interface LigaEntity {
   canchaPublicId: string | null;
   multiplesCanchas: boolean;
   usaArbitros: boolean;
+  timeZone: string;
   reglas?: LigaReglaItem[] | null;
   createdAt: Date;
   updatedAt: Date;
@@ -94,6 +95,7 @@ export interface LigaEntity {
     municipio: string;
     lat: number;
     lng: number;
+    timeZone: string;
   };
   divisiones?: DivisionConRelaciones[];
   canchas?: LigaCanchaEntity[];

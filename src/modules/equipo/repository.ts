@@ -8,6 +8,14 @@ export const equipoRepository: EquipoRepository = {
     return prisma.equipo.findMany({ orderBy: { nombre: 'asc' } });
   },
 
+  async findAllPaginated({ skip, take }): Promise<{ rows: EquipoEntity[]; total: number }> {
+    const [rows, total] = await Promise.all([
+      prisma.equipo.findMany({ orderBy: { nombre: 'asc' }, skip, take }),
+      prisma.equipo.count(),
+    ]);
+    return { rows, total };
+  },
+
   async findByUser(userId: string): Promise<EquipoEntity[]> {
     return prisma.equipo.findMany({ where: { userId }, orderBy: { nombre: 'asc' } });
   },

@@ -55,7 +55,11 @@ function generateNext(_divisionId: string, slots?: Parameters<typeof rawJornadaS
   return rawJornadaService.generateNext(divisionId, owner, slots, undefined, undefined, generationKey);
 }
 
-export const jornadaService = { ...rawJornadaService, generateNext };
+function generateNextWithSelection(slots: Parameters<typeof rawJornadaService.generateNext>[2], equipoIds: string[], descansoEquipoId?: string, generationKey = 'test-selection-key') {
+  return rawJornadaService.generateNext(divisionId, owner, slots, equipoIds, descansoEquipoId, generationKey);
+}
+
+export const jornadaService = { ...rawJornadaService, generateNext, generateNextWithSelection };
 
 export const TEAMS = [
   { id: 't1', nombre: 'Águilas' },

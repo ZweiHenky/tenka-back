@@ -6,10 +6,12 @@ const validator_1 = require("./validator");
 const response_1 = require("../../utils/response");
 const errors_1 = require("../../utils/errors");
 const service_2 = require("../referee-access/service");
+const pagination_1 = require("../../utils/pagination");
+const jornadaCreation_1 = require("./jornadaCreation");
 exports.partidoController = {
     async list(req, res, next) {
         try {
-            (0, response_1.ok)(res, await service_1.partidoService.list(req.user));
+            (0, response_1.ok)(res, await service_1.partidoService.listPaginated((0, pagination_1.parsePagination)(req.query), req.user));
         }
         catch (e) {
             next(e);
@@ -34,6 +36,26 @@ exports.partidoController = {
     async findByRondaPlayoff(req, res, next) {
         try {
             (0, response_1.ok)(res, await service_1.partidoService.findByRondaPlayoff(req.params.rondaPlayoffId, req.user));
+        }
+        catch (e) {
+            next(e);
+        }
+    },
+    async getJornadaCreationOptions(req, res, next) {
+        try {
+            (0, response_1.ok)(res, await jornadaCreation_1.jornadaPartidoCreationService.getOptions(req.params.jornadaId, req.user));
+        }
+        catch (e) {
+            next(e);
+        }
+    },
+    async createInJornada(req, res, next) {
+        try {
+            const parsed = validator_1.createInJornadaSchema.safeParse(req.body);
+            if (!parsed.success)
+                throw new errors_1.ValidationError(parsed.error.issues[0].message);
+            const key = req.header('Idempotency-Key') ?? '';
+            (0, response_1.created)(res, await jornadaCreation_1.jornadaPartidoCreationService.create(req.params.jornadaId, parsed.data, key, req.user), 'Partido agregado a la jornada');
         }
         catch (e) {
             next(e);

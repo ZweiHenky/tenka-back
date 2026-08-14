@@ -7,6 +7,7 @@ import { assertOwnerOrAdmin, isAdmin } from '../../utils/authorization';
 import { assertVisibleDivision, visibleDivisionWhere } from '../../utils/divisionVisibility';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
 import type { Prisma } from '../../generated/prisma/client';
+import type { Pagination } from '../../utils/pagination';
 
 async function assertDivisionOwner(divisionId: string, actor: AuthenticatedUser): Promise<void> {
   const division = await prisma.division.findUnique({
@@ -82,8 +83,13 @@ async function lockedDivision(tx: Prisma.TransactionClient, divisionId: string, 
 }
 
 export const rondaPlayoffService = {
-  async list(actor?: AuthenticatedUser): Promise<RondaPlayoffEntity[]> {
-    return prisma.rondaPlayoff.findMany({ where: { division: visibleDivisionWhere(actor) } });
+  async list(pagination: Pagination, actor?: AuthenticatedUser) {
+    const where = { division: visibleDivisionWhere(actor) };
+    const [rows, total] = await Promise.all([
+      prisma.rondaPlayoff.findMany({ where, orderBy: { createdAt: 'desc' }, skip: pagination.skip, take: pagination.take }),
+      prisma.rondaPlayoff.count({ where }),
+    ]);
+    return { rows, total };
   },
 
   async getById(id: string, actor?: AuthenticatedUser): Promise<RondaPlayoffEntity> {

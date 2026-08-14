@@ -5,6 +5,7 @@ const service_1 = require("./service");
 const validator_1 = require("./validator");
 const response_1 = require("../../utils/response");
 const errors_1 = require("../../utils/errors");
+const pagination_1 = require("../../utils/pagination");
 function publicLiga(liga) {
     const { logoPublicId: _logo, canchaPublicId: _cover, ...safe } = liga;
     return safe;
@@ -13,10 +14,11 @@ exports.ligaController = {
     async list(req, res, next) {
         try {
             const { userId, page, limit, search, categoriaId, tipoId, estadoLigaId } = req.query;
-            if (page && limit) {
+            if (!userId) {
+                const pagination = (0, pagination_1.parsePagination)(req.query);
                 const result = await service_1.ligaService.listPaginated({
-                    page: Number(page),
-                    limit: Number(limit),
+                    page: pagination.page,
+                    limit: pagination.limit,
                     search: search,
                     categoriaId: categoriaId,
                     tipoId: tipoId,
@@ -24,12 +26,8 @@ exports.ligaController = {
                 });
                 (0, response_1.ok)(res, { ...result, rows: result.rows.map(publicLiga) });
             }
-            else if (userId) {
-                const ligas = await service_1.ligaService.listByUser(userId, req.user);
-                (0, response_1.ok)(res, ligas.map(publicLiga));
-            }
             else {
-                const ligas = await service_1.ligaService.list();
+                const ligas = await service_1.ligaService.listByUser(userId, req.user);
                 (0, response_1.ok)(res, ligas.map(publicLiga));
             }
         }

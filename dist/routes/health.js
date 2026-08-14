@@ -5,8 +5,9 @@ const express_1 = require("express");
 const database_1 = require("../config/database");
 const env_1 = require("../config/env");
 const readiness_1 = require("../config/readiness");
+const redis_1 = require("../config/redis");
 const defaultDependencies = {
-    checkDatabase: () => database_1.prisma.$queryRawUnsafe('SELECT 1'),
+    checkDatabase: () => Promise.all([database_1.prisma.$queryRawUnsafe('SELECT 1'), redis_1.redis.ping()]),
     isReady: readiness_1.isReadyForTraffic,
     timeoutMs: env_1.env.READINESS_TIMEOUT_MS,
 };

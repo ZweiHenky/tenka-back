@@ -10,6 +10,8 @@ exports.partidoRouter = router;
 router.get('/', authMiddleware_1.optionalAuth, controller_1.partidoController.list);
 router.get('/jornada/:jornadaId', authMiddleware_1.optionalAuth, controller_1.partidoController.findByJornada);
 router.get('/ronda-playoff/:rondaPlayoffId', authMiddleware_1.optionalAuth, controller_1.partidoController.findByRondaPlayoff);
+router.get('/jornada/:jornadaId/creation-options', authMiddleware_1.requireAuth, controller_1.partidoController.getJornadaCreationOptions);
+router.post('/jornada/:jornadaId', authMiddleware_1.requireAuth, controller_1.partidoController.createInJornada);
 router.get('/:id', authMiddleware_1.optionalAuth, controller_1.partidoController.getById);
 router.use(authMiddleware_1.requireAuth);
 router.patch('/:id/resultado', controller_1.partidoController.updateResult);

@@ -3,10 +3,17 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { PRISMA_COMMAND_AUTH, resolvePrismaCommand } from './db-safety.mjs'
 
-const [action, target] = process.argv.slice(2)
+const [action, target, ...options] = process.argv.slice(2)
 
 try {
-  const command = resolvePrismaCommand(action, target)
+  const command = resolvePrismaCommand(action, target, process.env, options)
+  if (options.includes('--dry-run')) {
+    if (action !== 'migrate-deploy' || target !== 'production') {
+      throw new Error('--dry-run is only supported for production migration validation')
+    }
+    console.log('Production migration guard validated. No database connection was opened.')
+    process.exit(0)
+  }
   const childEnv = { ...process.env }
   for (const name of [
     'DATABASE_URL', 'DIRECT_DATABASE_URL', 'DEV_DATABASE_URL', 'DEV_DIRECT_DATABASE_URL',
@@ -14,6 +21,7 @@ try {
   ]) {
     delete childEnv[name]
   }
+  delete childEnv.PRODUCTION_MIGRATION_TOKEN
   childEnv.PRISMA_COMMAND_AUTH = PRISMA_COMMAND_AUTH
   childEnv.PRISMA_DATABASE_URL = command.databaseUrl
   if (command.shadowDatabaseUrl) {

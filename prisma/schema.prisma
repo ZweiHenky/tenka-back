@@ -187,6 +187,7 @@ model Ubicacion {
   nombreCompleto String
   estado         String
   municipio      String
+  timeZone       String
 
   ligas Liga[]
 
@@ -223,6 +224,7 @@ model Liga {
   multiplesCanchas  Boolean  @default(false)
   usaArbitros       Boolean  @default(false)
   reglas            Json?
+  timeZone          String   @default("America/Mexico_City")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -433,8 +435,8 @@ model Premio {
 model Jornada {
   id                    String    @id @default(cuid())
   numero                Int
-  fechaInicio           DateTime?
-  fechaFin              DateTime?
+  fechaInicio           DateTime? @db.Timestamptz(3)
+  fechaFin              DateTime? @db.Timestamptz(3)
   generationKey         String?
   generationRequestHash String?
   createdAt             DateTime  @default(now())
@@ -471,8 +473,8 @@ model Partido {
   golesVisitante      Int            @default(0)
   penalesLocal        Int?
   penalesVisitante    Int?
-  fecha               DateTime?
-  fechaFin            DateTime?
+  fecha               DateTime?      @db.Timestamptz(3)
+  fechaFin            DateTime?      @db.Timestamptz(3)
   estado              EstadoPartido?
   llave               Int?
   tipoPartido         TipoPartido    @default(REGULAR)
@@ -482,6 +484,8 @@ model Partido {
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
   version             Int            @default(0)
+  manualCreationKey   String?        @unique
+  manualCreationHash  String?
 
   jornadaId         String?
   rondaPlayoffId    String?
@@ -688,7 +692,6 @@ model DivisionNotificationSubscription {
   division Division @relation(fields: [divisionId], references: [id], onDelete: Cascade)
   user     User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
-  @@unique([divisionId, oneSignalId])
   @@unique([divisionId, pushSubscriptionId])
   @@index([oneSignalId])
   @@index([divisionId, userId])

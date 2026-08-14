@@ -4,6 +4,7 @@ import { getCorsAllowedOrigins, parseBackendEnv } from './env';
 const validEnv = {
   APP_ENV: 'local', DB_TARGET: 'development', NODE_ENV: 'test', PORT: '3000',
   DEV_DATABASE_URL: 'postgresql://user:password@dev-db.example.com:5432/app',
+  REDIS_URL: 'redis://redis.example.com:6379',
   BETTER_AUTH_SECRET: 'a'.repeat(32), BETTER_AUTH_URL: 'http://localhost:3000',
   GOOGLE_CLIENT_ID: 'google-client-id', GOOGLE_CLIENT_SECRET: 'google-client-secret',
   ONESIGNAL_APP_ID: 'onesignal-app-id', ONESIGNAL_REST_API_KEY: 'onesignal-rest-api-key',
@@ -33,13 +34,45 @@ const productionEnv = {
 
 describe('parseBackendEnv', () => {
   it('parses and normalizes a valid environment', () => {
-    expect(parseBackendEnv(validEnv)).toMatchObject({ APP_ENV: 'local', NODE_ENV: 'test', PORT: 3000 });
+    expect(parseBackendEnv(validEnv)).toMatchObject({
+      APP_ENV: 'local',
+      NODE_ENV: 'test',
+      PORT: 3000,
+      GLOBAL_RATE_LIMIT: 400,
+      PLAYER_PHONE_LOOKUP_RATE_LIMIT: 30,
+      REFEREE_READ_RATE_LIMIT: 40,
+      JORNADA_GENERATION_RATE_LIMIT: 30,
+      JORNADA_GENERATION_RATE_WINDOW_MINUTES: 10,
+      PLAYOFF_GENERATION_RATE_LIMIT: 15,
+      PLAYOFF_GENERATION_RATE_WINDOW_MINUTES: 15,
+      DESTRUCTIVE_OPERATION_RATE_LIMIT: 20,
+      DESTRUCTIVE_OPERATION_RATE_WINDOW_MINUTES: 60,
+    });
+  });
+
+  it('parses independent generation and destructive rate limits', () => {
+    expect(parseBackendEnv({
+      ...validEnv,
+      JORNADA_GENERATION_RATE_LIMIT: '45',
+      JORNADA_GENERATION_RATE_WINDOW_MINUTES: '12',
+      PLAYOFF_GENERATION_RATE_LIMIT: '18',
+      PLAYOFF_GENERATION_RATE_WINDOW_MINUTES: '20',
+      DESTRUCTIVE_OPERATION_RATE_LIMIT: '25',
+      DESTRUCTIVE_OPERATION_RATE_WINDOW_MINUTES: '90',
+    })).toMatchObject({
+      JORNADA_GENERATION_RATE_LIMIT: 45,
+      JORNADA_GENERATION_RATE_WINDOW_MINUTES: 12,
+      PLAYOFF_GENERATION_RATE_LIMIT: 18,
+      PLAYOFF_GENERATION_RATE_WINDOW_MINUTES: 20,
+      DESTRUCTIVE_OPERATION_RATE_LIMIT: 25,
+      DESTRUCTIVE_OPERATION_RATE_WINDOW_MINUTES: 90,
+    });
   });
 
   it.each([
     'DEV_DATABASE_URL', 'DB_TARGET', 'BETTER_AUTH_SECRET', 'BETTER_AUTH_URL', 'GOOGLE_CLIENT_ID',
     'GOOGLE_CLIENT_SECRET', 'ONESIGNAL_APP_ID', 'ONESIGNAL_REST_API_KEY',
-    'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET',
+    'CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET', 'REDIS_URL',
   ])('requires %s', (name) => {
     expect(() => parseBackendEnv({ ...validEnv, [name]: undefined })).toThrow(name);
   });
@@ -50,6 +83,10 @@ describe('parseBackendEnv', () => {
 
   it('rejects non-PostgreSQL database URLs', () => {
     expect(() => parseBackendEnv({ ...validEnv, DEV_DATABASE_URL: 'https://db.example.com' })).toThrow('DEV_DATABASE_URL');
+  });
+
+  it('rejects non-Redis URLs', () => {
+    expect(() => parseBackendEnv({ ...validEnv, REDIS_URL: 'https://redis.example.com' })).toThrow('REDIS_URL');
   });
 
   it('never falls back to DATABASE_URL in local development', () => {
