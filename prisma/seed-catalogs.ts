@@ -10,6 +10,7 @@ async function main() {
       { nombre: 'FEMENIL' },
       { nombre: 'INFANTIL' },
       { nombre: 'INFANTIL FEMENIL' },
+      { nombre: 'JUVENIL' },
       { nombre: 'SUB-15' },
       { nombre: 'SUB-15 FEMENIL' },
       { nombre: 'SUB-18' },
@@ -48,10 +49,7 @@ async function main() {
 
   await prisma.tipoCompetencia.createMany({
     data: [
-      { nombre: 'Liga' },
-      { nombre: 'Copa' },
       { nombre: 'Liga y Eliminatorias' },
-      { nombre: 'Grupos y Eliminatorias' },
     ],
     skipDuplicates: true,
   });

@@ -242,10 +242,10 @@ interface ApiResponse<T> { success: boolean; data?: T; message?: string; error?:
 **Catálogos:**
 | Tabla | Registros |
 |-------|-----------|
-| `categorias` | LIBRE, MASCULINO, FEMENINO, INFANTIL, SUB-18, SUB-20, VETERANOS, MIXTO |
+| `categorias` | LIBRE, VARONIL, FEMENIL, INFANTIL, INFANTIL FEMENIL, JUVENIL, SUB-15, SUB-15 FEMENIL, SUB-18, SUB-18 FEMENIL, SUB-20, SUB-20 FEMENIL, VETERANOS, VETERANOS FEMENIL, MIXTO |
 | `tipos` | FUTBOL 7, RAPIDO, FUTBOL 9, SOCCER, SALA, FUTBOL 5 |
 | `estados_liga` | Borrador, Abierta, En Curso, Finalizada, Cancelada |
-| `tipos_competencia` | Liga, Copa, Liga y Eliminatorias, Grupos y Eliminatorias |
+| `tipos_competencia` | Liga y Eliminatorias |
 
 **Demo data** (creada con `upsert` para ser idempotente):
 | Entidad | ID fijo | Detalle |
@@ -255,10 +255,10 @@ interface ApiResponse<T> { success: boolean; data?: T; message?: string; error?:
 | **Ubicación** | (autogenerado) | Monterrey, Nuevo León |
 | **Liga** | `seed-liga-1` | Liga Nocturna CDMX (Fut 7, viernes) |
 | **Liga** | `seed-liga-2` | Liga Premier Monterrey (soccer, domingos) |
-| **División** | `seed-div-1` | Libre Varomil — CDMX — Abierta — Liga |
-| **División** | `seed-div-2` | Femenil — CDMX — **Borrador** — Copa |
+| **División** | `seed-div-1` | Libre Varomil — CDMX — Abierta — Liga y Eliminatorias |
+| **División** | `seed-div-2` | Femenil — CDMX — **Borrador** — Liga y Eliminatorias |
 | **División** | `seed-div-3` | Primera Fuerza — Monterrey — En Curso — Liga y Eliminatorias |
-| **División** | `seed-div-4` | Sala Mixto — Monterrey — Finalizada — Liga |
+| **División** | `seed-div-4` | Sala Mixto — Monterrey — Finalizada — Liga y Eliminatorias |
 
 ## Better Auth
 

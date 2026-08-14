@@ -35,12 +35,12 @@
     "sentry:test": "node dist/scripts/test-sentry.js"
   },
   "dependencies": {
-    "@better-auth/expo": "^1.6.20",
-    "@better-auth/prisma-adapter": "^1.6.20",
+    "@better-auth/expo": "^1.6.28",
+    "@better-auth/prisma-adapter": "^1.6.28",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@sentry/node": "^10.68.0",
-    "better-auth": "^1.6.20",
+    "better-auth": "^1.6.28",
     "cloudinary": "^2.10.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",

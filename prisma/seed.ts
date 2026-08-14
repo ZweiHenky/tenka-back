@@ -12,6 +12,7 @@ async function main() {
       { nombre: 'FEMENIL' },
       { nombre: 'INFANTIL' },
       { nombre: 'INFANTIL FEMENIL' },
+      { nombre: 'JUVENIL' },
       { nombre: 'SUB-15' },
       { nombre: 'SUB-15 FEMENIL' },
       { nombre: 'SUB-18' },
@@ -50,10 +51,7 @@ async function main() {
 
   await prisma.tipoCompetencia.createMany({
     data: [
-      { nombre: 'Liga' },
-      { nombre: 'Copa' },
       { nombre: 'Liga y Eliminatorias' },
-      { nombre: 'Grupos y Eliminatorias' },
     ],
     skipDuplicates: true,
   });
@@ -74,8 +72,6 @@ async function main() {
   const enCurso = await prisma.estadoLiga.findFirstOrThrow({ where: { nombre: 'En Curso' } });
   const finalizada = await prisma.estadoLiga.findFirstOrThrow({ where: { nombre: 'Finalizada' } });
 
-  const ligaComp = await prisma.tipoCompetencia.findFirstOrThrow({ where: { nombre: 'Liga' } });
-  const copa = await prisma.tipoCompetencia.findFirstOrThrow({ where: { nombre: 'Copa' } });
   const ligaElim = await prisma.tipoCompetencia.findFirstOrThrow({ where: { nombre: 'Liga y Eliminatorias' } });
 
   // ── Demo user ────────────────────────────────────────────────────
@@ -158,7 +154,7 @@ async function main() {
       estadoLigaId: abierta.id,
       categoriaId: libre.id,
       tipoId: fb7.id,
-      tipoCompetenciaId: ligaComp.id,
+      tipoCompetenciaId: ligaElim.id,
     },
   });
 
@@ -176,7 +172,7 @@ async function main() {
       estadoLigaId: borrador.id,
       categoriaId: femenil.id,
       tipoId: fb7.id,
-      tipoCompetenciaId: copa.id,
+      tipoCompetenciaId: ligaElim.id,
     },
   });
 
@@ -213,7 +209,7 @@ async function main() {
       estadoLigaId: finalizada.id,
       categoriaId: mixto.id,
       tipoId: sala.id,
-      tipoCompetenciaId: ligaComp.id,
+      tipoCompetenciaId: ligaElim.id,
     },
   });
 
