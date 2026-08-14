@@ -30,6 +30,7 @@ export const exposePartidoRead = (partido: any): PartidoEntity => {
   const { notas: _notas, jornada: _jornada, rondaPlayoff: _rondaPlayoff, ...publicPartido } = partido;
   return {
     ...publicPartido,
+    timeZone: partido.jornada?.division?.liga?.timeZone ?? partido.rondaPlayoff?.division?.liga?.timeZone,
     arbitros: partido.arbitros?.map((row: any) => row.arbitro),
     anotaciones: partido.anotaciones?.map(exposeAnotacionRead),
     participaciones: partido.participaciones?.map(exposeParticipacionRead),
@@ -40,6 +41,7 @@ export const exposePartidoReadWithNotas = (partido: any): PartidoEntity => {
   const { jornada: _jornada, rondaPlayoff: _rondaPlayoff, ...rest } = partido;
   return {
     ...rest,
+    timeZone: partido.jornada?.division?.liga?.timeZone ?? partido.rondaPlayoff?.division?.liga?.timeZone,
     arbitros: partido.arbitros?.map((row: any) => row.arbitro),
     anotaciones: partido.anotaciones?.map(exposeAnotacionRead),
     participaciones: partido.participaciones?.map(exposeParticipacionRead),
@@ -47,8 +49,8 @@ export const exposePartidoReadWithNotas = (partido: any): PartidoEntity => {
 };
 
 const PARTIDO_OWNER_CONTEXT = {
-  jornada: { select: { division: { select: { liga: { select: { userId: true } } } } } },
-  rondaPlayoff: { select: { division: { select: { liga: { select: { userId: true } } } } } },
+  jornada: { select: { division: { select: { liga: { select: { userId: true, timeZone: true } } } } } },
+  rondaPlayoff: { select: { division: { select: { liga: { select: { userId: true, timeZone: true } } } } } },
 } as const;
 
 function isPartidoOwner(partido: any, actor?: AuthenticatedUser): boolean {

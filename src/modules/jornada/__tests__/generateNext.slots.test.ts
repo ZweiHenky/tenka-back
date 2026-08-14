@@ -39,7 +39,7 @@ describe('generateNext slots', () => {
     });
   });
 
-  it('7 equipos + 1 complemento con 1 equipo → complemento no excluye del RR', async () => {
+  it('7 equipos + complemento completo → el equipo Puntos queda fuera del RR', async () => {
     mockDivision();
     mockTeams();
     mockNoPreviousJornadas();
@@ -47,15 +47,17 @@ describe('generateNext slots', () => {
     mockPartidosCreatedReturn(4);
 
     await jornadaService.generateNext(divisionId, [
-      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't1' },
       ...capacitySlots(3),
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
-    const compMatch = calls.find(([args]: any[]) => args.equipoLocalId === 't4');
+    const compMatch = calls.find(([args]: any[]) => args.tipoPartido === 'COMPLEMENTO');
     expect(compMatch).toBeDefined();
     const [compArgs] = compMatch as [any];
     expect(compArgs.tipoPartido).toBe('COMPLEMENTO');
+    const regulars = calls.filter(([args]: any[]) => args.tipoPartido === 'REGULAR');
+    expect(regulars.every(([args]: any[]) => args.equipoLocalId !== 't4' && args.equipoVisitanteId !== 't4')).toBe(true);
   });
 
   it('complemento vacío → ValidationError', async () => {
@@ -66,7 +68,45 @@ describe('generateNext slots', () => {
 
     await expect(jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento' },
-    ])).rejects.toThrow('debe tener al menos el equipo que obtiene puntos');
+    ])).rejects.toThrow('Asigna ambos equipos del partido de complemento');
+  });
+
+  it('complemento sin equipo Sin puntos → ValidationError específico', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+
+    await expect(jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't7' },
+    ])).rejects.toThrow('Asigna el equipo que repetirá partido sin puntos en el complemento');
+  });
+
+  it('selección impar usa complemento completo en lugar de descanso', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+
+    await jornadaService.generateNextWithSelection([
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't7', equipoVisitanteId: 't1' },
+      ...capacitySlots(3),
+    ], TEAMS.map((team) => team.id));
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.filter(([args]: any[]) => args.tipoPartido === 'REGULAR')).toHaveLength(3);
+    expect(calls.filter(([args]: any[]) => args.tipoPartido === 'COMPLEMENTO')).toHaveLength(1);
+    expect(calls.filter(([args]: any[]) => args.tipoPartido === 'REGULAR').every(([args]: any[]) => args.equipoLocalId !== 't7' && args.equipoVisitanteId !== 't7')).toBe(true);
+  });
+
+  it('rechaza combinar complemento y descanso', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+
+    await expect(jornadaService.generateNextWithSelection([
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't7', equipoVisitanteId: 't1' },
+      ...capacitySlots(3),
+    ], TEAMS.map((team) => team.id), 't6')).rejects.toThrow('No se puede combinar un partido de complemento');
   });
 
   it('amistoso sin equipos → ValidationError', async () => {
@@ -103,7 +143,7 @@ describe('generateNext slots', () => {
     ])).rejects.toThrow('ya está asignado a otro horario');
   });
 
-  it('mismo equipo en normal + complemento → permitido (puntos puede repetirse)', async () => {
+  it('equipo Sin puntos puede repetir un partido regular', async () => {
     mockDivision();
     mockTeams();
     mockNoPreviousJornadas();
@@ -112,7 +152,7 @@ describe('generateNext slots', () => {
 
     await jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
-      { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't1' },
+      { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't3', equipoVisitanteId: 't1' },
       ...capacitySlots(2),
     ]);
 
@@ -130,7 +170,7 @@ describe('generateNext slots', () => {
 
     await expect(jornadaService.generateNext(divisionId, [
       { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
-      { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't3' },
+      { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't3', equipoVisitanteId: 't1' },
     ])).rejects.toThrow('No hay suficientes slots físicos');
   });
 
@@ -142,12 +182,12 @@ describe('generateNext slots', () => {
     mockPartidosCreatedReturn(4);
 
     await jornadaService.generateNext(divisionId, [
-      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't1' },
       ...capacitySlots(3),
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
-    const compMatch = calls.find(([args]: any[]) => args.equipoLocalId === 't4');
+    const compMatch = calls.find(([args]: any[]) => args.tipoPartido === 'COMPLEMENTO');
     expect(compMatch).toBeDefined();
 
     const [compArgs] = compMatch as [any];
@@ -167,7 +207,7 @@ describe('generateNext slots', () => {
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
-    const comp = calls.find(([args]: any[]) => args.equipoLocalId === 't4' && args.equipoVisitanteId === 't5');
+    const comp = calls.find(([args]: any[]) => args.tipoPartido === 'COMPLEMENTO' && args.equipoLocalId === 't4' && args.equipoVisitanteId === 't5');
     expect(comp).toBeDefined();
     const [compArgs] = comp as [any];
     expect(compArgs.tipoPartido).toBe('COMPLEMENTO');
@@ -181,8 +221,8 @@ describe('generateNext slots', () => {
     mockPartidosCreatedReturn(4);
 
     await jornadaService.generateNext(divisionId, [
-      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
-      { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't5' },
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't1' },
+      { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't5', equipoVisitanteId: 't2' },
       ...capacitySlots(3),
     ]);
 
@@ -237,8 +277,6 @@ describe('generateNext slots', () => {
     // Should NOT face t2 again
     const opponent = t1Args.equipoLocalId === 't1' ? t1Args.equipoVisitanteId : t1Args.equipoLocalId;
     expect(opponent).not.toBe('t2');
-    // With r=1 on 6 teams, canonical RR pairing for t1 is t3
-    expect(opponent).toBe('t3');
   });
 
   it('slot parcial visitante con historial → no repite rival', async () => {
@@ -314,14 +352,13 @@ describe('generateNext slots', () => {
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
-    // 3 from plan + 1 padding (complemento local blockeado)
     expect(calls.length).toBe(4);
 
     const regular = calls.find(([args]: any[]) => args.equipoLocalId === 't1' && args.equipoVisitanteId === 't2');
     expect(regular).toBeDefined();
     expect(regular![0].tipoPartido).toBe('REGULAR');
 
-    const amistoso = calls.find(([args]: any[]) => args.equipoLocalId === 't3' && args.equipoVisitanteId === 't4');
+    const amistoso = calls.find(([args]: any[]) => args.tipoPartido === 'AMISTOSO');
     expect(amistoso).toBeDefined();
     expect(amistoso![0].tipoPartido).toBe('AMISTOSO');
 

@@ -2,6 +2,7 @@ import { NotFoundError } from '../../utils/errors';
 import { ubicacionRepository } from './repository';
 import type { UbicacionEntity } from './entity';
 import type { Pagination } from '../../utils/pagination';
+import { resolveTimeZone } from './timeZoneProvider';
 
 export const ubicacionService = {
   async list(): Promise<UbicacionEntity[]> {
@@ -19,11 +20,13 @@ export const ubicacionService = {
   },
 
   async findOrCreate(data: { lat: number; lng: number; nombreCompleto: string; estado: string; municipio: string }): Promise<UbicacionEntity> {
-    return ubicacionRepository.findOrCreate(data);
+    const timeZone = await resolveTimeZone(data.lat, data.lng);
+    return ubicacionRepository.findOrCreate({ ...data, timeZone });
   },
 
   async create(data: { lat: number; lng: number; nombreCompleto: string; estado: string; municipio: string }): Promise<UbicacionEntity> {
-    return ubicacionRepository.create(data);
+    const timeZone = await resolveTimeZone(data.lat, data.lng);
+    return ubicacionRepository.create({ ...data, timeZone });
   },
 
   async update(id: string, data: Record<string, unknown>): Promise<UbicacionEntity> {

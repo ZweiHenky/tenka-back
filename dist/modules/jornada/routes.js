@@ -11,6 +11,6 @@ router.get('/', authMiddleware_1.optionalAuth, controller_1.jornadaController.li
 router.get('/division/:divisionId', authMiddleware_1.optionalAuth, controller_1.jornadaController.findByDivision);
 router.get('/:id', authMiddleware_1.optionalAuth, controller_1.jornadaController.getById);
 router.use(authMiddleware_1.requireAuth);
-router.post('/generate-next/:divisionId', rateLimits_1.expensiveOperationLimiter, controller_1.jornadaController.generateNext);
-router.delete('/:id', rateLimits_1.expensiveOperationLimiter, controller_1.jornadaController.delete);
+router.post('/generate-next/:divisionId', rateLimits_1.jornadaGenerationLimiter, controller_1.jornadaController.generateNext);
+router.delete('/:id', rateLimits_1.destructiveOperationLimiter, controller_1.jornadaController.delete);
 //# sourceMappingURL=routes.js.map

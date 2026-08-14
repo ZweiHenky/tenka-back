@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.expensiveOperationLimiter = exports.refereeWriteLimiter = exports.refereeReadLimiter = exports.playerPhoneLookupLimiter = exports.uploadLimiter = exports.subscriptionLimiter = exports.otpVerifyLimiter = exports.otpSendLimiter = exports.authLimiter = exports.globalApiLimiter = exports.rateLimitActorKey = void 0;
+exports.destructiveOperationLimiter = exports.playoffGenerationLimiter = exports.jornadaGenerationLimiter = exports.refereeWriteLimiter = exports.refereeReadLimiter = exports.playerPhoneLookupLimiter = exports.uploadLimiter = exports.subscriptionLimiter = exports.otpVerifyLimiter = exports.otpSendLimiter = exports.authLimiter = exports.globalApiLimiter = exports.rateLimitActorKey = void 0;
 exports.createRateLimiter = createRateLimiter;
 const express_rate_limit_1 = require("express-rate-limit");
 const rate_limit_redis_1 = require("rate-limit-redis");
@@ -45,10 +45,22 @@ exports.playerPhoneLookupLimiter = createRateLimiter({
 });
 exports.refereeReadLimiter = createRateLimiter({ name: 'referee-read', windowMs: 15 * 60 * 1000, limit: env_1.env.REFEREE_READ_RATE_LIMIT });
 exports.refereeWriteLimiter = createRateLimiter({ name: 'referee-write', windowMs: 15 * 60 * 1000, limit: 5 });
-exports.expensiveOperationLimiter = createRateLimiter({
-    name: 'expensive-operation',
-    windowMs: 60 * 60 * 1000,
-    limit: env_1.env.EXPENSIVE_OPERATION_RATE_LIMIT,
+exports.jornadaGenerationLimiter = createRateLimiter({
+    name: 'jornada-generation',
+    windowMs: env_1.env.JORNADA_GENERATION_RATE_WINDOW_MINUTES * 60 * 1000,
+    limit: env_1.env.JORNADA_GENERATION_RATE_LIMIT,
+    keyGenerator: actorKey,
+});
+exports.playoffGenerationLimiter = createRateLimiter({
+    name: 'playoff-generation',
+    windowMs: env_1.env.PLAYOFF_GENERATION_RATE_WINDOW_MINUTES * 60 * 1000,
+    limit: env_1.env.PLAYOFF_GENERATION_RATE_LIMIT,
+    keyGenerator: actorKey,
+});
+exports.destructiveOperationLimiter = createRateLimiter({
+    name: 'destructive-operation',
+    windowMs: env_1.env.DESTRUCTIVE_OPERATION_RATE_WINDOW_MINUTES * 60 * 1000,
+    limit: env_1.env.DESTRUCTIVE_OPERATION_RATE_LIMIT,
     keyGenerator: actorKey,
 });
 //# sourceMappingURL=rateLimits.js.map

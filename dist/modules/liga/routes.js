@@ -13,7 +13,7 @@ router.get('/:id', authMiddleware_1.optionalAuth, controller_1.ligaController.ge
 router.use(authMiddleware_1.requireAuth);
 router.post('/', (0, authMiddleware_1.requireRole)('LIGA'), controller_1.ligaController.create);
 router.patch('/:id', controller_1.ligaController.update);
-router.delete('/:id', rateLimits_1.expensiveOperationLimiter, controller_1.ligaController.delete);
+router.delete('/:id', rateLimits_1.destructiveOperationLimiter, controller_1.ligaController.delete);
 router.get('/:ligaId/programacion-reciente', controller_1.ligaController.getRecentSchedule);
 router.get('/:ligaId/canchas', controller_1.ligaController.listCanchas);
 router.post('/:ligaId/canchas', controller_1.ligaController.createCancha);

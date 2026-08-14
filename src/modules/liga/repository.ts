@@ -5,7 +5,7 @@ import type { AuthenticatedUser } from '../../types/auth';
 import type { Prisma } from '../../generated/prisma/client';
 
 const UBICACION_SELECT = {
-  select: { id: true, nombreCompleto: true, estado: true, municipio: true, lat: true, lng: true },
+  select: { id: true, nombreCompleto: true, estado: true, municipio: true, lat: true, lng: true, timeZone: true },
 } as const;
 
 const CANCHAS_SELECT = {

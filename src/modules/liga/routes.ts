@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { ligaController } from './controller';
 import { optionalAuth, requireAuth, requireRole } from '../../middlewares/authMiddleware';
 import { arbitrajeController } from '../arbitraje/controller';
-import { expensiveOperationLimiter } from '../../middlewares/rateLimits';
+import { destructiveOperationLimiter } from '../../middlewares/rateLimits';
 
 const router = Router();
 
@@ -11,7 +11,7 @@ router.get('/:id', optionalAuth, ligaController.getById);
 router.use(requireAuth);
 router.post('/', requireRole('LIGA'), ligaController.create);
 router.patch('/:id', ligaController.update);
-router.delete('/:id', expensiveOperationLimiter, ligaController.delete);
+router.delete('/:id', destructiveOperationLimiter, ligaController.delete);
 
 router.get('/:ligaId/programacion-reciente', ligaController.getRecentSchedule);
 

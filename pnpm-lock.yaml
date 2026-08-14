@@ -35,6 +35,9 @@ importers:
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
+      edmonds-blossom:
+        specifier: ^1.0.0
+        version: 1.0.0
       express:
         specifier: ^4.18.2
         version: 4.22.2
@@ -72,6 +75,9 @@ importers:
       '@types/cors':
         specifier: ^2.8.19
         version: 2.8.19
+      '@types/edmonds-blossom':
+        specifier: ^1.0.4
+        version: 1.0.4
       '@types/express':
         specifier: ^4.17.21
         version: 4.17.25
@@ -681,6 +687,9 @@ packages:
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
+  '@types/edmonds-blossom@1.0.4':
+    resolution: {integrity: sha512-fqvPg7o20+XDGsx6UrzKe9ZWidWy2GJxw9L4C0i/wwueEwwUbxmo7eDcrTAvj2568ZRYobauAJMYjCCNlQsYiQ==}
+
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
@@ -1088,6 +1097,9 @@ packages:
 
   ecdsa-sig-formatter@1.0.11:
     resolution: {integrity: sha512-nagl3RYrbNv6kQkeJIpt6NJZy8twLB/2vtz6yN9Z4vRKHN4/QZJIEbqohALSgwKdnksuY3k5Addp5lg8sVoVcQ==}
+
+  edmonds-blossom@1.0.0:
+    resolution: {integrity: sha512-wz18RgLg21nW4afc80d080fZuAjiaePfSoHje56aOiH8mO6O5Mc/VAv7s8bCBJkxsks37e0cYTS0dNirsQ4/rg==}
 
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
@@ -2707,6 +2719,8 @@ snapshots:
 
   '@types/deep-eql@4.0.2': {}
 
+  '@types/edmonds-blossom@1.0.4': {}
+
   '@types/estree@1.0.9': {}
 
   '@types/express-serve-static-core@4.19.8':
@@ -3100,6 +3114,8 @@ snapshots:
   ecdsa-sig-formatter@1.0.11:
     dependencies:
       safe-buffer: 5.2.1
+
+  edmonds-blossom@1.0.0: {}
 
   ee-first@1.1.1: {}
 

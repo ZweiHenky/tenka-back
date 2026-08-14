@@ -103,6 +103,10 @@ exports.ligaService = {
     },
     async create(data) {
         const { canchas, arbitros, logoAssetId, coverAssetId, ...ligaData } = data;
+        const location = await database_1.prisma.ubicacion.findUnique({ where: { id: data.ubicacionId }, select: { timeZone: true } });
+        if (!location)
+            throw new errors_1.NotFoundError('Ubicación');
+        const authoritativeLigaData = { ...ligaData, timeZone: location.timeZone };
         validateCanchas(data.multiplesCanchas ?? false, canchas ?? []);
         validateArbitros(data.usaArbitros ?? false, arbitros ?? []);
         const nombre = data.nombre.trim();
@@ -117,13 +121,13 @@ exports.ligaService = {
                 activa: data.multiplesCanchas === true,
             }));
             if (logoAssetId === undefined && coverAssetId === undefined) {
-                return await repository_1.ligaRepository.create({ ...ligaData, nombre, nombreNormalizado }, courtWrites, arbitros);
+                return await repository_1.ligaRepository.create({ ...authoritativeLigaData, nombre, nombreNormalizado }, courtWrites, arbitros);
             }
             return await (0, transaction_1.runInTransaction)(async (tx) => {
                 const logo = logoAssetId !== undefined ? await service_1.mediaService.prepareAttachment(tx, logoAssetId, data.userId, 'LEAGUE_LOGO') : undefined;
                 const cover = coverAssetId !== undefined ? await service_1.mediaService.prepareAttachment(tx, coverAssetId, data.userId, 'LEAGUE_COVER') : undefined;
                 return repository_1.ligaRepository.create({
-                    ...ligaData,
+                    ...authoritativeLigaData,
                     nombre,
                     nombreNormalizado,
                     ...(logo && { logo: logo.url, logoPublicId: logo.publicId }),
@@ -143,6 +147,12 @@ exports.ligaService = {
             throw new errors_1.NotFoundError('Liga');
         const { canchas, arbitros, logoAssetId, coverAssetId, ...rawLigaData } = data;
         const ligaData = rawLigaData;
+        if (data.ubicacionId) {
+            const location = await database_1.prisma.ubicacion.findUnique({ where: { id: data.ubicacionId }, select: { timeZone: true } });
+            if (!location)
+                throw new errors_1.NotFoundError('Ubicación');
+            ligaData.timeZone = location.timeZone;
+        }
         const multiplesCanchas = data.multiplesCanchas ?? old.multiplesCanchas;
         let courtWrites;
         if (canchas !== undefined) {

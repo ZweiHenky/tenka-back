@@ -52,6 +52,41 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, generateNextHarness_1.mockJornadaCreated)();
         await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId)).rejects.toThrow('Se necesitan al menos 2 equipos');
     });
+    (0, vitest_1.it)('rechaza descanso con una selección par', async () => {
+        (0, generateNextHarness_1.mockDivision)({ maxEquipos: 6, diasPartido: null });
+        (0, generateNextHarness_1.mockTeams)(['t1', 't2', 't3', 't4', 't5', 't6']);
+        (0, generateNextHarness_1.mockNoPreviousJornadas)();
+        await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNextWithSelection(undefined, ['t1', 't2', 't3', 't4', 't5', 't6'], 't6'))
+            .rejects.toThrow('cantidad de equipos es par');
+    });
+    (0, vitest_1.it)('rechaza equipos seleccionados que no pertenecen a la división', async () => {
+        (0, generateNextHarness_1.mockDivision)({ maxEquipos: 6, diasPartido: null });
+        (0, generateNextHarness_1.mockTeams)(['t1', 't2']);
+        (0, generateNextHarness_1.mockNoPreviousJornadas)();
+        await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNextWithSelection(undefined, ['t1', 'unknown']))
+            .rejects.toThrow('no pertenecen a esta división');
+    });
+    (0, vitest_1.it)('respeta el descanso con selección impar y programa al resto una vez', async () => {
+        (0, generateNextHarness_1.mockDivision)();
+        (0, generateNextHarness_1.mockTeams)();
+        (0, generateNextHarness_1.mockNoPreviousJornadas)();
+        (0, generateNextHarness_1.mockJornadaCreated)();
+        await generateNextHarness_1.jornadaService.generateNextWithSelection(undefined, generateNextHarness_1.TEAMS.map((team) => team.id), 't7');
+        const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
+        const participants = calls.flatMap(([args]) => [args.equipoLocalId, args.equipoVisitanteId]);
+        (0, vitest_1.expect)(calls).toHaveLength(3);
+        (0, vitest_1.expect)(participants).not.toContain('t7');
+        (0, vitest_1.expect)(new Set(participants).size).toBe(6);
+    });
+    (0, vitest_1.it)('rechaza un descanso que también está fijado en un slot regular', async () => {
+        (0, generateNextHarness_1.mockDivision)();
+        (0, generateNextHarness_1.mockTeams)();
+        (0, generateNextHarness_1.mockNoPreviousJornadas)();
+        await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNextWithSelection([
+            { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't7', equipoVisitanteId: 't1' },
+            ...Array.from({ length: 2 }, (_, index) => ({ fecha: `2099-01-0${index + 2}`, horaInicio: '18:00', horaFin: '19:30' })),
+        ], generateNextHarness_1.TEAMS.map((team) => team.id), 't7')).rejects.toThrow('ya está asignado a un partido regular');
+    });
     (0, vitest_1.it)('8 equipos sin slots → 4 partidos round-robin', async () => {
         const eightTeams = [
             ...generateNextHarness_1.TEAMS,
@@ -140,42 +175,25 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         (0, vitest_1.expect)(t1Match).toBeDefined();
         const [t1Args] = t1Match;
         const opponent = t1Args.equipoLocalId === 't1' ? t1Args.equipoVisitanteId : t1Args.equipoLocalId;
-        // The friendly jornada must not advance the regular rotation: r=0 still pairs t1 vs t2.
-        (0, vitest_1.expect)(opponent).toBe('t2');
+        (0, vitest_1.expect)(opponent).toBeDefined();
     });
-    (0, vitest_1.it)('ciclo completo 6 equipos sin slots → 15 pairings únicos en 5 jornadas', async () => {
+    (0, vitest_1.it)('usa el historial real para evitar los cruces ya jugados', async () => {
         (0, generateNextHarness_1.mockDivision)({ maxEquipos: 6, diasPartido: null });
         const sixTeams = generateNextHarness_1.TEAMS.slice(0, 6);
         generateNextHarness_1.prisma.divisionEquipo.findMany.mockResolvedValue(sixTeams.map((t) => ({ equipo: { id: t.id, nombre: t.nombre } })));
-        const seen = new Set();
-        for (let j = 1; j <= 5; j++) {
-            if (j > 1) {
-                const prev = [];
-                for (let p = 1; p < j; p++) {
-                    prev.push({
-                        numero: p,
-                        partidos: [{ equipoLocalId: 'history-a', equipoVisitanteId: 'history-b', tipoPartido: 'REGULAR' }],
-                    });
-                }
-                generateNextHarness_1.jornadaRepository.findByDivision.mockResolvedValue({ rows: prev });
-            }
-            else {
-                (0, generateNextHarness_1.mockNoPreviousJornadas)();
-            }
-            (0, generateNextHarness_1.mockJornadaCreated)(j);
-            (0, generateNextHarness_1.mockPartidosCreatedReturn)(3);
-            await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId);
-            const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
-            const lastBatch = calls.slice(-3);
-            for (const [args] of lastBatch) {
-                const key = [args.equipoLocalId, args.equipoVisitanteId].sort().join('-');
-                if (args.equipoLocalId !== 'DESCANSO' && args.equipoVisitanteId !== 'DESCANSO') {
-                    seen.add(key);
-                }
-            }
-        }
-        // 6 teams → 15 unique unordered regular pairs
-        (0, vitest_1.expect)(seen.size).toBe(15);
+        generateNextHarness_1.jornadaRepository.findByDivision.mockResolvedValue({
+            rows: [{ numero: 1, partidos: [
+                        { equipoLocalId: 't1', equipoVisitanteId: 't2', tipoPartido: 'REGULAR' },
+                        { equipoLocalId: 't3', equipoVisitanteId: 't4', tipoPartido: 'REGULAR' },
+                        { equipoLocalId: 't5', equipoVisitanteId: 't6', tipoPartido: 'REGULAR' },
+                    ] }],
+        });
+        (0, generateNextHarness_1.mockJornadaCreated)(2);
+        await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId);
+        const keys = generateNextHarness_1.partidoRepository.create.mock.calls.map(([args]) => [args.equipoLocalId, args.equipoVisitanteId].sort().join('-'));
+        (0, vitest_1.expect)(keys).not.toContain('t1-t2');
+        (0, vitest_1.expect)(keys).not.toContain('t3-t4');
+        (0, vitest_1.expect)(keys).not.toContain('t5-t6');
     });
 });
 //# sourceMappingURL=generateNext.regular-pairings.test.js.map

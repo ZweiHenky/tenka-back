@@ -13,6 +13,6 @@ router.get('/:id', authMiddleware_1.optionalAuth, controller_1.divisionControlle
 router.use(authMiddleware_1.requireAuth);
 router.post('/', controller_1.divisionController.create);
 router.patch('/:id', controller_1.divisionController.update);
-router.delete('/:id', rateLimits_1.expensiveOperationLimiter, controller_1.divisionController.delete);
-router.post('/:id/reset', rateLimits_1.expensiveOperationLimiter, controller_1.divisionController.reset);
+router.delete('/:id', rateLimits_1.destructiveOperationLimiter, controller_1.divisionController.delete);
+router.post('/:id/reset', rateLimits_1.destructiveOperationLimiter, controller_1.divisionController.reset);
 //# sourceMappingURL=routes.js.map

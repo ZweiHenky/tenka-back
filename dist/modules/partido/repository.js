@@ -28,6 +28,7 @@ const exposePartidoRead = (partido) => {
     const { notas: _notas, jornada: _jornada, rondaPlayoff: _rondaPlayoff, ...publicPartido } = partido;
     return {
         ...publicPartido,
+        timeZone: partido.jornada?.division?.liga?.timeZone ?? partido.rondaPlayoff?.division?.liga?.timeZone,
         arbitros: partido.arbitros?.map((row) => row.arbitro),
         anotaciones: partido.anotaciones?.map(exports.exposeAnotacionRead),
         participaciones: partido.participaciones?.map(exports.exposeParticipacionRead),
@@ -38,6 +39,7 @@ const exposePartidoReadWithNotas = (partido) => {
     const { jornada: _jornada, rondaPlayoff: _rondaPlayoff, ...rest } = partido;
     return {
         ...rest,
+        timeZone: partido.jornada?.division?.liga?.timeZone ?? partido.rondaPlayoff?.division?.liga?.timeZone,
         arbitros: partido.arbitros?.map((row) => row.arbitro),
         anotaciones: partido.anotaciones?.map(exports.exposeAnotacionRead),
         participaciones: partido.participaciones?.map(exports.exposeParticipacionRead),
@@ -45,8 +47,8 @@ const exposePartidoReadWithNotas = (partido) => {
 };
 exports.exposePartidoReadWithNotas = exposePartidoReadWithNotas;
 const PARTIDO_OWNER_CONTEXT = {
-    jornada: { select: { division: { select: { liga: { select: { userId: true } } } } } },
-    rondaPlayoff: { select: { division: { select: { liga: { select: { userId: true } } } } } },
+    jornada: { select: { division: { select: { liga: { select: { userId: true, timeZone: true } } } } } },
+    rondaPlayoff: { select: { division: { select: { liga: { select: { userId: true, timeZone: true } } } } } },
 };
 function isPartidoOwner(partido, actor) {
     if (!actor)

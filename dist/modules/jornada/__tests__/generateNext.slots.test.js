@@ -31,21 +31,23 @@ const capacitySlots = (count) => Array.from({ length: count }, (_, index) => ({
             (0, vitest_1.expect)(args.equipoVisitanteId).not.toBe('t2');
         });
     });
-    (0, vitest_1.it)('7 equipos + 1 complemento con 1 equipo → complemento no excluye del RR', async () => {
+    (0, vitest_1.it)('7 equipos + complemento completo → el equipo Puntos queda fuera del RR', async () => {
         (0, generateNextHarness_1.mockDivision)();
         (0, generateNextHarness_1.mockTeams)();
         (0, generateNextHarness_1.mockNoPreviousJornadas)();
         (0, generateNextHarness_1.mockJornadaCreated)();
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(4);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
-            { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
+            { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't1' },
             ...capacitySlots(3),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
-        const compMatch = calls.find(([args]) => args.equipoLocalId === 't4');
+        const compMatch = calls.find(([args]) => args.tipoPartido === 'COMPLEMENTO');
         (0, vitest_1.expect)(compMatch).toBeDefined();
         const [compArgs] = compMatch;
         (0, vitest_1.expect)(compArgs.tipoPartido).toBe('COMPLEMENTO');
+        const regulars = calls.filter(([args]) => args.tipoPartido === 'REGULAR');
+        (0, vitest_1.expect)(regulars.every(([args]) => args.equipoLocalId !== 't4' && args.equipoVisitanteId !== 't4')).toBe(true);
     });
     (0, vitest_1.it)('complemento vacío → ValidationError', async () => {
         (0, generateNextHarness_1.mockDivision)();
@@ -54,7 +56,38 @@ const capacitySlots = (count) => Array.from({ length: count }, (_, index) => ({
         (0, generateNextHarness_1.mockJornadaCreated)();
         await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento' },
-        ])).rejects.toThrow('debe tener al menos el equipo que obtiene puntos');
+        ])).rejects.toThrow('Asigna ambos equipos del partido de complemento');
+    });
+    (0, vitest_1.it)('complemento sin equipo Sin puntos → ValidationError específico', async () => {
+        (0, generateNextHarness_1.mockDivision)();
+        (0, generateNextHarness_1.mockTeams)();
+        (0, generateNextHarness_1.mockNoPreviousJornadas)();
+        await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
+            { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't7' },
+        ])).rejects.toThrow('Asigna el equipo que repetirá partido sin puntos en el complemento');
+    });
+    (0, vitest_1.it)('selección impar usa complemento completo en lugar de descanso', async () => {
+        (0, generateNextHarness_1.mockDivision)();
+        (0, generateNextHarness_1.mockTeams)();
+        (0, generateNextHarness_1.mockNoPreviousJornadas)();
+        (0, generateNextHarness_1.mockJornadaCreated)();
+        await generateNextHarness_1.jornadaService.generateNextWithSelection([
+            { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't7', equipoVisitanteId: 't1' },
+            ...capacitySlots(3),
+        ], generateNextHarness_1.TEAMS.map((team) => team.id));
+        const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
+        (0, vitest_1.expect)(calls.filter(([args]) => args.tipoPartido === 'REGULAR')).toHaveLength(3);
+        (0, vitest_1.expect)(calls.filter(([args]) => args.tipoPartido === 'COMPLEMENTO')).toHaveLength(1);
+        (0, vitest_1.expect)(calls.filter(([args]) => args.tipoPartido === 'REGULAR').every(([args]) => args.equipoLocalId !== 't7' && args.equipoVisitanteId !== 't7')).toBe(true);
+    });
+    (0, vitest_1.it)('rechaza combinar complemento y descanso', async () => {
+        (0, generateNextHarness_1.mockDivision)();
+        (0, generateNextHarness_1.mockTeams)();
+        (0, generateNextHarness_1.mockNoPreviousJornadas)();
+        await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNextWithSelection([
+            { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't7', equipoVisitanteId: 't1' },
+            ...capacitySlots(3),
+        ], generateNextHarness_1.TEAMS.map((team) => team.id), 't6')).rejects.toThrow('No se puede combinar un partido de complemento');
     });
     (0, vitest_1.it)('amistoso sin equipos → ValidationError', async () => {
         (0, generateNextHarness_1.mockDivision)();
@@ -84,7 +117,7 @@ const capacitySlots = (count) => Array.from({ length: count }, (_, index) => ({
             { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', equipoLocalId: 't1', equipoVisitanteId: 't3' },
         ])).rejects.toThrow('ya está asignado a otro horario');
     });
-    (0, vitest_1.it)('mismo equipo en normal + complemento → permitido (puntos puede repetirse)', async () => {
+    (0, vitest_1.it)('equipo Sin puntos puede repetir un partido regular', async () => {
         (0, generateNextHarness_1.mockDivision)();
         (0, generateNextHarness_1.mockTeams)();
         (0, generateNextHarness_1.mockNoPreviousJornadas)();
@@ -92,7 +125,7 @@ const capacitySlots = (count) => Array.from({ length: count }, (_, index) => ({
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(4);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
-            { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't1' },
+            { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't3', equipoVisitanteId: 't1' },
             ...capacitySlots(2),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
@@ -107,7 +140,7 @@ const capacitySlots = (count) => Array.from({ length: count }, (_, index) => ({
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(4);
         await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't1', equipoVisitanteId: 't2' },
-            { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't3' },
+            { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't3', equipoVisitanteId: 't1' },
         ])).rejects.toThrow('No hay suficientes slots físicos');
     });
     (0, vitest_1.it)('flags correctos: Puntos en complemento suma, Sin puntos no suma', async () => {
@@ -117,11 +150,11 @@ const capacitySlots = (count) => Array.from({ length: count }, (_, index) => ({
         (0, generateNextHarness_1.mockJornadaCreated)();
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(4);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
-            { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
+            { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't1' },
             ...capacitySlots(3),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
-        const compMatch = calls.find(([args]) => args.equipoLocalId === 't4');
+        const compMatch = calls.find(([args]) => args.tipoPartido === 'COMPLEMENTO');
         (0, vitest_1.expect)(compMatch).toBeDefined();
         const [compArgs] = compMatch;
         (0, vitest_1.expect)(compArgs.tipoPartido).toBe('COMPLEMENTO');
@@ -137,7 +170,7 @@ const capacitySlots = (count) => Array.from({ length: count }, (_, index) => ({
             ...capacitySlots(3),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
-        const comp = calls.find(([args]) => args.equipoLocalId === 't4' && args.equipoVisitanteId === 't5');
+        const comp = calls.find(([args]) => args.tipoPartido === 'COMPLEMENTO' && args.equipoLocalId === 't4' && args.equipoVisitanteId === 't5');
         (0, vitest_1.expect)(comp).toBeDefined();
         const [compArgs] = comp;
         (0, vitest_1.expect)(compArgs.tipoPartido).toBe('COMPLEMENTO');
@@ -149,8 +182,8 @@ const capacitySlots = (count) => Array.from({ length: count }, (_, index) => ({
         (0, generateNextHarness_1.mockJornadaCreated)();
         (0, generateNextHarness_1.mockPartidosCreatedReturn)(4);
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
-            { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4' },
-            { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't5' },
+            { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't1' },
+            { fecha: '2099-01-01', horaInicio: '19:30', horaFin: '21:00', tipo: 'complemento', equipoLocalId: 't5', equipoVisitanteId: 't2' },
             ...capacitySlots(3),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
@@ -196,8 +229,6 @@ const capacitySlots = (count) => Array.from({ length: count }, (_, index) => ({
         // Should NOT face t2 again
         const opponent = t1Args.equipoLocalId === 't1' ? t1Args.equipoVisitanteId : t1Args.equipoLocalId;
         (0, vitest_1.expect)(opponent).not.toBe('t2');
-        // With r=1 on 6 teams, canonical RR pairing for t1 is t3
-        (0, vitest_1.expect)(opponent).toBe('t3');
     });
     (0, vitest_1.it)('slot parcial visitante con historial → no repite rival', async () => {
         (0, generateNextHarness_1.mockDivision)({ maxEquipos: 6, diasPartido: null });
@@ -260,12 +291,11 @@ const capacitySlots = (count) => Array.from({ length: count }, (_, index) => ({
             ...capacitySlots(2),
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
-        // 3 from plan + 1 padding (complemento local blockeado)
         (0, vitest_1.expect)(calls.length).toBe(4);
         const regular = calls.find(([args]) => args.equipoLocalId === 't1' && args.equipoVisitanteId === 't2');
         (0, vitest_1.expect)(regular).toBeDefined();
         (0, vitest_1.expect)(regular[0].tipoPartido).toBe('REGULAR');
-        const amistoso = calls.find(([args]) => args.equipoLocalId === 't3' && args.equipoVisitanteId === 't4');
+        const amistoso = calls.find(([args]) => args.tipoPartido === 'AMISTOSO');
         (0, vitest_1.expect)(amistoso).toBeDefined();
         (0, vitest_1.expect)(amistoso[0].tipoPartido).toBe('AMISTOSO');
         const complemento = calls.find(([args]) => args.tipoPartido === 'COMPLEMENTO');

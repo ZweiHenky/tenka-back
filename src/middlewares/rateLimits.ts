@@ -47,9 +47,21 @@ export const playerPhoneLookupLimiter = createRateLimiter({
 });
 export const refereeReadLimiter = createRateLimiter({ name: 'referee-read', windowMs: 15 * 60 * 1000, limit: env.REFEREE_READ_RATE_LIMIT });
 export const refereeWriteLimiter = createRateLimiter({ name: 'referee-write', windowMs: 15 * 60 * 1000, limit: 5 });
-export const expensiveOperationLimiter = createRateLimiter({
-  name: 'expensive-operation',
-  windowMs: 60 * 60 * 1000,
-  limit: env.EXPENSIVE_OPERATION_RATE_LIMIT,
+export const jornadaGenerationLimiter = createRateLimiter({
+  name: 'jornada-generation',
+  windowMs: env.JORNADA_GENERATION_RATE_WINDOW_MINUTES * 60 * 1000,
+  limit: env.JORNADA_GENERATION_RATE_LIMIT,
+  keyGenerator: actorKey,
+});
+export const playoffGenerationLimiter = createRateLimiter({
+  name: 'playoff-generation',
+  windowMs: env.PLAYOFF_GENERATION_RATE_WINDOW_MINUTES * 60 * 1000,
+  limit: env.PLAYOFF_GENERATION_RATE_LIMIT,
+  keyGenerator: actorKey,
+});
+export const destructiveOperationLimiter = createRateLimiter({
+  name: 'destructive-operation',
+  windowMs: env.DESTRUCTIVE_OPERATION_RATE_WINDOW_MINUTES * 60 * 1000,
+  limit: env.DESTRUCTIVE_OPERATION_RATE_LIMIT,
   keyGenerator: actorKey,
 });

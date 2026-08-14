@@ -20,6 +20,7 @@ export interface PartidoEntity {
   equipoLocalId: string | null;
   equipoVisitanteId: string | null;
   canchaId: string | null;
+  timeZone?: string;
   equipoLocal?: { id: string; nombre: string; logo: string | null } | null;
   equipoVisitante?: { id: string; nombre: string; logo: string | null } | null;
   cancha?: { id: string; nombre: string } | null;

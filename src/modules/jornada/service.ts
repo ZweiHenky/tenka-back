@@ -11,6 +11,8 @@ import { logger } from '../../config/logger';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
 import type { JornadaGenerationHistory } from './repository.interface';
 import type { Pagination } from '../../utils/pagination';
+import { civilToInstant, dateKeyInTimeZone } from '../../utils/timeZone';
+import { computeMinimumHistoryMatching } from './regularMatching';
 
 const DAY_MAP: Record<string, number> = {
   dom: 0, domingo: 0,
@@ -138,21 +140,20 @@ type CourtValidationClient = {
   }>> };
 };
 
-function getSlotInterval(slot: SlotInput): { start: Date; end: Date } | null {
+function getSlotInterval(slot: SlotInput, timeZone: string): { start: Date; end: Date } | null {
   const dateMatch = slot.fecha?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   const startMatch = slot.horaInicio?.match(/^(\d{2}):(\d{2})$/);
   const endMatch = slot.horaFin?.match(/^(\d{2}):(\d{2})$/);
   if (!dateMatch || !startMatch || !endMatch) return null;
 
-  const [year, month, day] = dateMatch.slice(1).map(Number);
-  const start = new Date(year, month - 1, day, Number(startMatch[1]), Number(startMatch[2]));
-  const end = new Date(year, month - 1, day, Number(endMatch[1]), Number(endMatch[2]));
-  if (end <= start) end.setDate(end.getDate() + 1);
+  const start = civilToInstant(slot.fecha, slot.horaInicio, timeZone);
+  let end = civilToInstant(slot.fecha, slot.horaFin, timeZone);
+  if (end <= start) end = new Date(end.getTime() + 24 * 60 * 60_000);
   return { start, end };
 }
 
-function getAuthoritativeSlotInterval(slot: SlotInput, durationMinutes: number | null): { start: Date; end: Date } {
-  const submitted = getSlotInterval(slot);
+function getAuthoritativeSlotInterval(slot: SlotInput, durationMinutes: number | null, timeZone: string): { start: Date; end: Date } {
+  const submitted = getSlotInterval(slot, timeZone);
   if (!submitted) {
     throw new ValidationError(`El horario ${slot.fecha} ${slot.horaInicio}-${slot.horaFin} no es válido`);
   }
@@ -192,6 +193,7 @@ async function validateLeagueCourtCapacity(
     multiplesCanchas: boolean;
     durationMinutes: number | null;
     fixedCourtId?: string | null;
+    timeZone: string;
     slots: SlotInput[];
     excludedPartidoIds: string[];
   },
@@ -224,7 +226,7 @@ async function validateLeagueCourtCapacity(
     if (input.multiplesCanchas && (!slot.canchaId || !activeById.has(slot.canchaId))) {
       throw new ValidationError(`El slot #${index} debe usar una cancha activa de esta liga`);
     }
-    const interval = getAuthoritativeSlotInterval(slot, input.durationMinutes);
+    const interval = getAuthoritativeSlotInterval(slot, input.durationMinutes, input.timeZone);
     return { id: `slot-${index}`, canchaId: input.multiplesCanchas ? slot.canchaId! : null, ...interval, slot };
   });
 
@@ -305,38 +307,6 @@ function buildHistoricalMatchCounts(existing: Array<{ partidos: Array<{ equipoLo
 function getMatchCount(counts: Map<string, Map<string, number>>, a: string, b: string): number {
   const [keyA, keyB] = a < b ? [a, b] : [b, a];
   return counts.get(keyA)?.get(keyB) ?? 0;
-}
-
-function computeRRPairing(
-  sorted: Array<{ id: string; nombre: string }>,
-  round: number,
-): Map<string, string> {
-  const pairing = new Map<string, string>();
-  if (sorted.length < 2) return pairing;
-
-  const pool = [...sorted];
-  if (pool.length % 2 !== 0) {
-    pool.push({ id: 'DESCANSO', nombre: 'Descanso' });
-  }
-
-  const n = pool.length;
-  const fixed = pool[0];
-  const rotators = pool.slice(1);
-  const r = round % (n - 1);
-
-  pairing.set(fixed.id, rotators[r].id);
-  pairing.set(rotators[r].id, fixed.id);
-
-  for (let m = 1; m < n / 2; m++) {
-    const idxA = (r + m) % rotators.length;
-    const idxB = (r + rotators.length - m) % rotators.length;
-    const a = rotators[idxA].id;
-    const b = rotators[idxB].id;
-    pairing.set(a, b);
-    pairing.set(b, a);
-  }
-
-  return pairing;
 }
 
 export const jornadaService = {
@@ -459,7 +429,7 @@ export const jornadaService = {
         duracionPartido: true,
         ligaId: true,
         canchaUnicaId: true,
-        liga: { select: { userId: true, multiplesCanchas: true } },
+        liga: { select: { userId: true, multiplesCanchas: true, timeZone: true } },
       },
     });
     if (!division) throw new NotFoundError('División');
@@ -501,11 +471,38 @@ export const jornadaService = {
     });
 
     const allTeams = links.map((l) => ({ id: l.equipo.id, nombre: l.equipo.nombre }));
+    if (equipoIds) {
+      const allTeamIds = new Set(allTeams.map((team) => team.id));
+      if (equipoIds.some((id) => !allTeamIds.has(id))) {
+        throw new ValidationError('Uno o más equipos seleccionados no pertenecen a esta división');
+      }
+    }
     const teams = equipoIds
       ? allTeams.filter((t) => equipoIds.includes(t.id))
       : allTeams;
 
     if (teams.length < 2) throw new ValidationError('Se necesitan al menos 2 equipos');
+
+    if (!playoffMode) {
+      const complementoSlots = (slots ?? []).filter((slot) => slot.tipo === 'complemento');
+      for (const slot of complementoSlots) {
+        const hasLocal = Boolean(slot.equipoLocalId && slot.equipoLocalId !== 'DESCANSO');
+        const hasVisitor = Boolean(slot.equipoVisitanteId && slot.equipoVisitanteId !== 'DESCANSO');
+        if (!hasLocal && !hasVisitor) throw new ValidationError('Asigna ambos equipos del partido de complemento antes de generar la jornada');
+        if (!hasLocal) throw new ValidationError('Asigna el equipo que gana puntos en el partido de complemento');
+        if (!hasVisitor) throw new ValidationError('Asigna el equipo que repetirá partido sin puntos en el complemento');
+        if (slot.equipoLocalId === slot.equipoVisitanteId) throw new ValidationError('Los equipos del partido de complemento deben ser diferentes');
+      }
+      if (complementoSlots.length > 0 && descansoEquipoId) {
+        throw new ValidationError('No se puede combinar un partido de complemento con un equipo que descansa');
+      }
+      if (teams.length % 2 === 0 && descansoEquipoId) {
+        throw new ValidationError('No se permite seleccionar un equipo que descansa cuando la cantidad de equipos es par');
+      }
+      if (equipoIds && teams.length % 2 !== 0 && complementoSlots.length === 0 && !descansoEquipoId) {
+        throw new ValidationError('Selecciona el equipo que descansará en esta jornada');
+      }
+    }
 
     const teamIds = new Set(teams.map((t) => t.id));
 
@@ -581,7 +578,7 @@ export const jornadaService = {
           if (slot.fecha) {
             const fechaMatch = slot.fecha.match(/^(\d{4})-(\d{2})-(\d{2})$/);
             if (fechaMatch) {
-              const fecha = new Date(Number(fechaMatch[1]), Number(fechaMatch[2]) - 1, Number(fechaMatch[3]), h, m);
+              const fecha = civilToInstant(slot.fecha, `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, division.liga.timeZone);
               if (fecha < tomorrowDate()) {
                 throw new ValidationError(`La fecha del partido de eliminatoria ${slot.partidoId} (${slot.fecha}) no puede ser antes de mañana`);
               }
@@ -610,6 +607,7 @@ export const jornadaService = {
           multiplesCanchas: division.liga.multiplesCanchas,
           durationMinutes: division.duracionPartido,
           fixedCourtId: division.canchaUnicaId,
+          timeZone: division.liga.timeZone,
           slots: slots ?? [],
           excludedPartidoIds: pendingPlayoffUpdates.map((update) => update.id),
         });
@@ -644,7 +642,7 @@ export const jornadaService = {
           if (slot.fecha) {
             const fechaMatch = slot.fecha.match(/^(\d{4})-(\d{2})-(\d{2})$/);
             if (fechaMatch) {
-              fecha = new Date(Number(fechaMatch[1]), Number(fechaMatch[2]) - 1, Number(fechaMatch[3]), h, m);
+              fecha = civilToInstant(slot.fecha, `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, division.liga.timeZone);
             }
           }
           if (!fecha && weekStart && parsedDays.length > 0) {
@@ -661,14 +659,14 @@ export const jornadaService = {
             if (slot.tipo === 'amistoso' && !playoffMode && (!slot.equipoLocalId || slot.equipoLocalId === 'DESCANSO' || !slot.equipoVisitanteId || slot.equipoVisitanteId === 'DESCANSO')) {
               throw new ValidationError(`El slot amistoso #${i} debe tener ambos equipos asignados`);
             }
-            if (slot.tipo === 'complemento' && (!slot.equipoLocalId || slot.equipoLocalId === 'DESCANSO')) {
-              throw new ValidationError(`El slot de complemento #${i} debe tener al menos el equipo que obtiene puntos asignado`);
-            }
             if (slot.tipo === 'complemento') {
               const localId = slot.equipoLocalId && slot.equipoLocalId !== 'DESCANSO' ? slot.equipoLocalId : undefined;
               const visitaId = slot.equipoVisitanteId && slot.equipoVisitanteId !== 'DESCANSO' ? slot.equipoVisitanteId : undefined;
-              if (localId && !teamIds.has(localId)) throw new ValidationError('El equipo puntos no pertenece a esta división');
-              if (localId) usedTeamIds.add(localId);
+              if (!localId || !visitaId) throw new ValidationError('Asigna ambos equipos del partido de complemento antes de generar la jornada');
+              if (!teamIds.has(localId)) throw new ValidationError('El equipo que gana puntos en el complemento no pertenece a esta división');
+              if (!teamIds.has(visitaId)) throw new ValidationError('El equipo que repite sin puntos en el complemento no pertenece a esta división');
+              if (usedTeamIds.has(localId)) throw new ValidationError('El equipo que gana puntos en el complemento ya está asignado a otro partido');
+              usedTeamIds.add(localId);
               plan.push({ localId, visitaId, fecha, tipo: 'complemento', canchaId: slot.canchaId });
             } else if (slot.tipo === 'amistoso') {
               const localId = slot.equipoLocalId && slot.equipoLocalId !== 'DESCANSO' ? slot.equipoLocalId : undefined;
@@ -827,199 +825,77 @@ export const jornadaService = {
         }
       }
 
-      // If a specific team was chosen to rest, exclude it from RR pool
-      if (descansoEquipoId) {
-        if (!teamIds.has(descansoEquipoId)) throw new ValidationError('El equipo seleccionado para descansar no pertenece a esta división');
-        usedTeamIds.add(descansoEquipoId);
+      // API callers choose the rest explicitly. Internal callers retain deterministic legacy rotation.
+      const regularRoundIndex = existing.filter((jornada) =>
+        jornada.partidos?.some((partido) => partido.tipoPartido === 'REGULAR')
+      ).length;
+      const assignedRegularIds = new Set(plan
+        .filter((partido) => partido.tipo !== 'amistoso' && partido.tipo !== 'complemento')
+        .flatMap((partido) => [partido.localId, partido.visitaId])
+        .filter((id): id is string => Boolean(id)));
+      const automaticRestCandidates = [...teams]
+        .filter((team) => !assignedRegularIds.has(team.id))
+        .sort((a, b) => a.id.localeCompare(b.id));
+      const hasComplemento = plan.some((partido) => partido.tipo === 'complemento');
+      const effectiveRestId = descansoEquipoId ?? (!equipoIds && !hasComplemento && teams.length % 2 !== 0 && automaticRestCandidates.length > 0
+        ? automaticRestCandidates[regularRoundIndex % automaticRestCandidates.length].id
+        : undefined);
+      if (effectiveRestId) {
+        if (!teamIds.has(effectiveRestId)) throw new ValidationError('El equipo seleccionado para descansar no pertenece a esta división');
+        if (assignedRegularIds.has(effectiveRestId)) throw new ValidationError('El equipo seleccionado para descansar ya está asignado a un partido regular');
+        usedTeamIds.add(effectiveRestId);
       }
 
       // Build historical match counts from existing jornadas (regular-only)
       const matchCounts = buildHistoricalMatchCounts(existing, 'REGULAR');
 
-      // Sort teams deterministically for stable round-robin
-      const sortedAllTeams = [...teams].sort((a, b) => a.id.localeCompare(b.id));
+      const incompleteRegularSlots = plan.filter((p) => p.tipo !== 'amistoso' && p.tipo !== 'complemento' && (!p.localId || !p.visitaId));
+      const fixedTeamIds = new Set(incompleteRegularSlots.flatMap((p) => [p.localId, p.visitaId]).filter((id): id is string => Boolean(id)));
+      const matchingTeams = playoffMode
+        ? []
+        : teams.filter((team) => fixedTeamIds.has(team.id) || !usedTeamIds.has(team.id));
 
-      // Precompute canonical round-robin pairings for this round number
-      const regularRoundIndex = existing.filter((jornada) =>
-        jornada.partidos?.some((partido) => partido.tipoPartido === 'REGULAR')
-      ).length;
-      const rrPairing = computeRRPairing(sortedAllTeams, regularRoundIndex);
-
-      // Fill partially-filled slots (one side assigned) using RR pairings + history fallback
-      for (const p of plan) {
-        if (p.localId && p.visitaId) continue
-        if (p.tipo === 'amistoso' || p.tipo === 'complemento') continue
-        if (!p.localId && !p.visitaId) continue
-
-        const teamId = p.localId || p.visitaId!;
-        let opponentId = rrPairing.get(teamId);
-
-        const available = teams.filter((t) => {
-            if (t.id === teamId) return false;
-            if (usedTeamIds.has(t.id)) return false;
-            return true;
-          });
-        const minimumHistory = available.length
-          ? Math.min(...available.map((team) => getMatchCount(matchCounts, teamId, team.id)))
-          : Number.MAX_SAFE_INTEGER;
-        // A manually changed prior round can invalidate the canonical rotation. Prefer any less-used pairing.
-        if (!opponentId || usedTeamIds.has(opponentId) || opponentId === 'DESCANSO' || getMatchCount(matchCounts, teamId, opponentId) > minimumHistory) {
-          if (available.length === 0) {
-            throw new ValidationError('No hay equipos disponibles para completar los horarios');
-          }
-          available.sort((a, b) => {
-            const ca = getMatchCount(matchCounts, teamId, a.id);
-            const cb = getMatchCount(matchCounts, teamId, b.id);
-            if (ca !== cb) return ca - cb;
-            return a.id.localeCompare(b.id);
-          });
-          opponentId = available[0].id;
-        }
-
-        if (p.localId) {
-          p.visitaId = opponentId;
-        } else {
-          p.localId = opponentId;
-        }
-        if (opponentId !== 'DESCANSO') {
-          usedTeamIds.add(opponentId);
-        }
+      if (equipoIds && matchingTeams.length % 2 !== 0) {
+        throw new ValidationError('La combinación de partidos regulares y complementos deja un equipo sin programar');
       }
-
-      // Fill empty slots using canonical RR pairings (same rotation as partial slots)
-      const unassignedTeamList = teams
-        .filter((t) => !usedTeamIds.has(t.id))
-        .sort((a, b) => a.id.localeCompare(b.id));
-      // In playoff mode, all teams are already accounted for in eliminatorias + amistosos
-      if (playoffMode) unassignedTeamList.length = 0;
-
-      for (const p of plan) {
-        if (p.localId && p.visitaId) continue
-        if (p.tipo === 'amistoso' || p.tipo === 'complemento') continue
-        if (unassignedTeamList.length === 0) continue
-
-        const teamId = unassignedTeamList.shift()!.id;
-        let opponentId = rrPairing.get(teamId);
-
-         const minimumHistory = unassignedTeamList.length
-           ? Math.min(...unassignedTeamList.map((team) => getMatchCount(matchCounts, teamId, team.id)))
-           : Number.MAX_SAFE_INTEGER;
-         if (!opponentId || usedTeamIds.has(opponentId) || opponentId === 'DESCANSO' || getMatchCount(matchCounts, teamId, opponentId) > minimumHistory) {
-           const available = unassignedTeamList.filter((t) => t.id !== teamId && t.id !== 'DESCANSO');
-           if (available.length === 0) {
-             opponentId = 'DESCANSO';
-           } else {
-            available.sort((a, b) => {
-              const ca = getMatchCount(matchCounts, teamId, a.id);
-              const cb = getMatchCount(matchCounts, teamId, b.id);
-              if (ca !== cb) return ca - cb;
-              return a.id.localeCompare(b.id);
-            });
-             opponentId = available[0].id;
-             const idx = unassignedTeamList.findIndex((t) => t.id === opponentId);
-             if (idx >= 0) unassignedTeamList.splice(idx, 1);
-           }
-         } else {
-           const idx = unassignedTeamList.findIndex((t) => t.id === opponentId);
-           if (idx >= 0) unassignedTeamList.splice(idx, 1);
-        }
-
-        p.localId = teamId;
-        p.visitaId = opponentId;
-        usedTeamIds.add(teamId);
-        if (opponentId !== 'DESCANSO') {
-          usedTeamIds.add(opponentId);
-        }
-      }
-
-      // Extras: if some teams couldn't fit into plan slots, push new entries
-      if (slots && slots.length > 0 && unassignedTeamList.length >= 2) {
+      if (incompleteRegularSlots.length < Math.floor(matchingTeams.length / 2)) {
         throw new ValidationError('No hay suficientes slots físicos para programar todos los partidos de la jornada');
       }
-      while (unassignedTeamList.length >= 2) {
-        const a = unassignedTeamList.shift()!.id;
-        let bId = rrPairing.get(a);
-        const minimumHistory = unassignedTeamList.length
-          ? Math.min(...unassignedTeamList.map((team) => getMatchCount(matchCounts, a, team.id)))
-          : Number.MAX_SAFE_INTEGER;
-        if (!bId || usedTeamIds.has(bId) || bId === 'DESCANSO' || getMatchCount(matchCounts, a, bId) > minimumHistory) {
-          const next = [...unassignedTeamList]
-            .filter((team) => team.id !== a && team.id !== 'DESCANSO')
-            .sort((x, y) => getMatchCount(matchCounts, a, x.id) - getMatchCount(matchCounts, a, y.id) || x.id.localeCompare(y.id))[0];
-          if (!next) break;
-          bId = next.id;
-        }
-        const bIdx = unassignedTeamList.findIndex((t) => t.id === bId);
-        if (bIdx >= 0) unassignedTeamList.splice(bIdx, 1);
-        const pi = plan.length;
-        let fecha: Date | undefined;
-        if (weekStart && parsedDays.length > 0) {
-          const dayIdx = pi % parsedDays.length;
-          const weekOffset = Math.floor(pi / parsedDays.length);
-          fecha = new Date(weekStart);
-          fecha.setDate(fecha.getDate() + (parsedDays[dayIdx] - weekStart.getDay()) + weekOffset * 7);
-        }
-        if (!fecha && usableSlots.length > 0) {
-          const refSlot = usableSlots[pi % usableSlots.length];
-          const tMatch = refSlot.horaInicio?.match(/^(\d{2}):(\d{2})/);
-          const hh = tMatch ? Number(tMatch[1]) : 0;
-          const mm = tMatch ? Number(tMatch[2]) : 0;
-          if (refSlot.fecha) {
-            const fMatch = refSlot.fecha.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-            if (fMatch) {
-              fecha = new Date(Number(fMatch[1]), Number(fMatch[2]) - 1, Number(fMatch[3]), hh, mm);
-            }
-          }
-        }
-        plan.push({ localId: a, visitaId: bId, fecha });
-        usedTeamIds.add(a);
-        usedTeamIds.add(bId);
+
+      let matching = new Map<string, string>();
+      try {
+        matching = computeMinimumHistoryMatching({
+          teams: matchingTeams,
+          fixedTeamIds,
+          matchCount: (a, b) => getMatchCount(matchCounts, a, b),
+        });
+      } catch {
+        throw new ValidationError('No existe una combinación válida para completar los partidos de la jornada');
       }
 
-      if (unassignedTeamList.length > 0) {
-        const last = unassignedTeamList[0];
-        const pi = plan.length;
-        let fecha: Date | undefined;
-        if (weekStart && parsedDays.length > 0) {
-          const dayIdx = pi % parsedDays.length;
-          const weekOffset = Math.floor(pi / parsedDays.length);
-          fecha = new Date(weekStart);
-          fecha.setDate(fecha.getDate() + (parsedDays[dayIdx] - weekStart.getDay()) + weekOffset * 7);
+      const assignedByMatching = new Set<string>();
+      for (const p of incompleteRegularSlots) {
+        if (p.localId || p.visitaId) {
+          const fixedId = p.localId ?? p.visitaId!;
+          const opponentId = matching.get(fixedId);
+          if (!opponentId) throw new ValidationError('No existe un rival válido para uno de los equipos asignados');
+          if (p.localId) p.visitaId = opponentId;
+          else p.localId = opponentId;
+          assignedByMatching.add(fixedId);
+          assignedByMatching.add(opponentId);
+          continue;
         }
-        plan.push({ localId: last.id, visitaId: 'DESCANSO', fecha });
-        usedTeamIds.add(last.id);
-      }
 
-      // Fill empty side on complemento slots — Sin puntos puede ser cualquier equipo
-      // (incluso uno que ya juega regular), solo se evita el pairing exacto duplicado
-      const existingPairKeys = new Set<string>();
-      for (const p of plan) {
-        if (p.localId && p.visitaId) {
-          existingPairKeys.add([p.localId, p.visitaId].sort().join('-'));
-        }
+        const local = matchingTeams.find((team) => !assignedByMatching.has(team.id) && matching.has(team.id));
+        if (!local) continue;
+        const visitorId = matching.get(local.id);
+        if (!visitorId) throw new ValidationError('No existe una combinación válida para completar los partidos de la jornada');
+        p.localId = local.id;
+        p.visitaId = visitorId;
+        assignedByMatching.add(local.id);
+        assignedByMatching.add(visitorId);
       }
-      for (const p of plan) {
-        if (p.tipo !== 'complemento') continue
-        if (p.localId && p.visitaId) continue
-        if (!p.localId && !p.visitaId) continue
-        if (p.localId && !p.visitaId) {
-          const opponent = teams.find((t) => {
-            if (t.id === p.localId) return false
-            return !existingPairKeys.has([p.localId!, t.id].sort().join('-'))
-          });
-          if (!opponent) continue;
-          p.visitaId = opponent.id;
-          existingPairKeys.add([p.localId!, opponent.id].sort().join('-'));
-        } else if (!p.localId && p.visitaId) {
-          const opponent = teams.find((t) => {
-            if (t.id === p.visitaId) return false
-            return !existingPairKeys.has([t.id, p.visitaId!].sort().join('-'))
-          });
-          if (!opponent) continue;
-          p.localId = opponent.id;
-          existingPairKeys.add([opponent.id, p.visitaId!].sort().join('-'));
-        }
-      }
+      for (const id of assignedByMatching) usedTeamIds.add(id);
 
       // Move DESCANSO to the last non-amistoso real pairing, so regular slots stay filled
       const descansoIdx = plan.findIndex((p) => p.localId === 'DESCANSO' || p.visitaId === 'DESCANSO');
@@ -1089,8 +965,8 @@ export const jornadaService = {
         const timestamps = fechas.map((d) => d.getTime());
         const minDate = new Date(Math.min(...timestamps));
         const maxDate = new Date(Math.max(...timestamps));
-        fechaInicio = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate(), 0, 1, 0);
-        fechaFin = new Date(maxDate.getFullYear(), maxDate.getMonth(), maxDate.getDate(), 23, 59, 0);
+        fechaInicio = civilToInstant(dateKeyInTimeZone(minDate, division.liga.timeZone), '00:01', division.liga.timeZone);
+        fechaFin = civilToInstant(dateKeyInTimeZone(maxDate, division.liga.timeZone), '23:59', division.liga.timeZone);
       }
 
       let jornada: JornadaEntity | undefined;
@@ -1110,7 +986,7 @@ export const jornadaService = {
               ligaId: true,
               duracionPartido: true,
               canchaUnicaId: true,
-              liga: { select: { multiplesCanchas: true } },
+              liga: { select: { multiplesCanchas: true, timeZone: true } },
             },
           });
           if (!lockedDivision || lockedDivision.ligaId !== division.ligaId) {
@@ -1125,6 +1001,7 @@ export const jornadaService = {
             multiplesCanchas: lockedDivision.liga.multiplesCanchas,
             durationMinutes: lockedDivision.duracionPartido,
             fixedCourtId: lockedDivision.canchaUnicaId,
+            timeZone: lockedDivision.liga.timeZone,
             slots: slots ?? [],
             excludedPartidoIds: pendingPlayoffUpdates.map((update) => update.id),
           });

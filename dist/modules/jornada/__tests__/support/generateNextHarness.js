@@ -54,7 +54,10 @@ exports.owner = { id: 'user-1', email: 'owner@test.com', rol: 'LIGA' };
 function generateNext(_divisionId, slots, generationKey = 'test-generation-key') {
     return service_1.jornadaService.generateNext(exports.divisionId, exports.owner, slots, undefined, undefined, generationKey);
 }
-exports.jornadaService = { ...service_1.jornadaService, generateNext };
+function generateNextWithSelection(slots, equipoIds, descansoEquipoId, generationKey = 'test-selection-key') {
+    return service_1.jornadaService.generateNext(exports.divisionId, exports.owner, slots, equipoIds, descansoEquipoId, generationKey);
+}
+exports.jornadaService = { ...service_1.jornadaService, generateNext, generateNextWithSelection };
 exports.TEAMS = [
     { id: 't1', nombre: 'Águilas' },
     { id: 't2', nombre: 'Dragones' },

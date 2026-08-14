@@ -19,7 +19,7 @@ exports.ubicacionRepository = {
     async findOrCreate(data) {
         const existing = await database_1.prisma.ubicacion.findFirst({ where: { nombreCompleto: data.nombreCompleto, estado: data.estado } });
         if (existing)
-            return existing;
+            return existing.timeZone === data.timeZone ? existing : database_1.prisma.ubicacion.update({ where: { id: existing.id }, data: { timeZone: data.timeZone, lat: data.lat, lng: data.lng } });
         return database_1.prisma.ubicacion.create({ data });
     },
     async create(data) {

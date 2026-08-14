@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ubicacionService = void 0;
 const errors_1 = require("../../utils/errors");
 const repository_1 = require("./repository");
+const timeZoneProvider_1 = require("./timeZoneProvider");
 exports.ubicacionService = {
     async list() {
         return repository_1.ubicacionRepository.findAll();
@@ -17,10 +18,12 @@ exports.ubicacionService = {
         return t;
     },
     async findOrCreate(data) {
-        return repository_1.ubicacionRepository.findOrCreate(data);
+        const timeZone = await (0, timeZoneProvider_1.resolveTimeZone)(data.lat, data.lng);
+        return repository_1.ubicacionRepository.findOrCreate({ ...data, timeZone });
     },
     async create(data) {
-        return repository_1.ubicacionRepository.create(data);
+        const timeZone = await (0, timeZoneProvider_1.resolveTimeZone)(data.lat, data.lng);
+        return repository_1.ubicacionRepository.create({ ...data, timeZone });
     },
     async update(id, data) {
         await this.getById(id);

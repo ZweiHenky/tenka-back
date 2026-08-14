@@ -8,6 +8,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../../utils/error
 import { enqueueScheduleChange } from '../notification/scheduleChangeOutbox';
 import { exposePartidoRead, PARTIDO_READ_INCLUDE } from './repository';
 import type { CreateInJornadaInput } from './validator';
+import { addCivilDays, civilToInstant, dateKeyInTimeZone, timeInTimeZone } from '../../utils/timeZone';
 
 type DbClient = Prisma.TransactionClient | typeof prisma;
 
@@ -100,34 +101,42 @@ export function weekBounds(anchor: Date): { start: Date; end: Date } {
 export function configuredCandidates(
   now: Date,
   weekAnchor: Date,
+  timeZone: string,
   days: ReadonlySet<number>,
   ranges: Array<{ start: number; end: number }>,
   durationMinutes: number,
   breakMinutes: number,
 ): Array<{ start: Date; end: Date; fecha: string; horaInicio: string; horaFin: string }> {
-  const bounds = weekBounds(weekAnchor);
-  if (now > bounds.end) return [];
-  const startDay = new Date(Math.max(now.getTime(), bounds.start.getTime()));
-  startDay.setHours(0, 0, 0, 0);
+  const anchorKey = dateKeyInTimeZone(weekAnchor, timeZone);
+  const [anchorYear, anchorMonth, anchorDay] = anchorKey.split('-').map(Number);
+  const anchorCivil = new Date(Date.UTC(anchorYear, anchorMonth - 1, anchorDay));
+  const mondayOffset = anchorCivil.getUTCDay() === 0 ? -6 : 1 - anchorCivil.getUTCDay();
+  const mondayKey = addCivilDays(anchorKey, mondayOffset);
+  const sundayKey = addCivilDays(mondayKey, 6);
+  const weekEnd = civilToInstant(sundayKey, '23:59', timeZone);
+  if (now > weekEnd) return [];
   const candidates: Array<{ start: Date; end: Date; fecha: string; horaInicio: string; horaFin: string }> = [];
   const step = durationMinutes + Math.max(0, breakMinutes);
 
-  for (const date = new Date(startDay); date <= bounds.end; date.setDate(date.getDate() + 1)) {
-    if (!days.has(date.getDay())) continue;
+  for (let offset = 0; offset <= 6; offset += 1) {
+    const civilDate = addCivilDays(mondayKey, offset);
+    const [year, month, day] = civilDate.split('-').map(Number);
+    const dayOfWeek = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    if (!days.has(dayOfWeek)) continue;
     for (const range of ranges) {
       for (let minute = range.start; minute + durationMinutes <= range.end; minute += step) {
-        const start = new Date(date);
-        start.setHours(Math.floor(minute / 60), minute % 60, 0, 0);
-        if (start <= now || start > bounds.end) continue;
+        const pad = (value: number) => String(value).padStart(2, '0');
+        const civilStart = `${pad(Math.floor(minute / 60))}:${pad(minute % 60)}`;
+        const start = civilToInstant(civilDate, civilStart, timeZone);
+        if (start <= now || start > weekEnd) continue;
         const end = new Date(start.getTime() + durationMinutes * 60_000);
-        if (end <= bounds.end) {
-          const pad = (value: number) => String(value).padStart(2, '0');
+        if (end <= weekEnd) {
           candidates.push({
             start,
             end,
-            fecha: `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`,
-            horaInicio: `${pad(start.getHours())}:${pad(start.getMinutes())}`,
-            horaFin: `${pad(end.getHours())}:${pad(end.getMinutes())}`,
+            fecha: civilDate,
+            horaInicio: civilStart,
+            horaFin: timeInTimeZone(end, timeZone),
           });
         }
       }
@@ -168,7 +177,7 @@ async function buildOptions(jornadaId: string, actor: AuthenticatedUser, client:
           descanso: true,
           canchaUnicaId: true,
           estadoLiga: { select: { nombre: true } },
-          liga: { select: { userId: true, multiplesCanchas: true } },
+          liga: { select: { userId: true, multiplesCanchas: true, timeZone: true } },
           equipos: { select: { equipo: { select: { id: true, nombre: true } } } },
         },
       },
@@ -195,7 +204,7 @@ async function buildOptions(jornadaId: string, actor: AuthenticatedUser, client:
   const days = parseConfiguredDays(diasPartido);
   const ranges = parseConfiguredRanges(horarioPartido);
   if (!days.size || !ranges.length) throw new ValidationError('Los días u horarios configurados en la división no son válidos');
-  const candidates = configuredCandidates(now, jornada.fechaInicio, days, ranges, duracionPartido, jornada.division.descanso ?? 0);
+  const candidates = configuredCandidates(now, jornada.fechaInicio, jornada.division.liga.timeZone, days, ranges, duracionPartido, jornada.division.descanso ?? 0);
 
   if (!candidates.length) return { equipos, pendientes, recomendacion, localSugeridoId: pendientes[0]?.id ?? null, visitanteSugeridoId: pendientes[1]?.id ?? null, slots: [] };
   const maxEnd = new Date(Math.max(...candidates.map((slot) => slot.end.getTime())));
@@ -268,7 +277,7 @@ export const jornadaPartidoCreationService = {
 
     try {
       return await prisma.$transaction(async (tx) => {
-        const jornada = await tx.jornada.findUnique({ where: { id: jornadaId }, select: { division: { select: { ligaId: true, id: true } } } });
+        const jornada = await tx.jornada.findUnique({ where: { id: jornadaId }, select: { division: { select: { ligaId: true, id: true, liga: { select: { timeZone: true } } } } } });
         if (!jornada) throw new NotFoundError('Jornada');
         await acquireLeagueScheduleLock(tx, jornada.division.ligaId);
 
@@ -301,16 +310,8 @@ export const jornadaPartidoCreationService = {
             equipoVisitanteId: data.equipoVisitanteId,
             tipoPartido: data.tipoPartido,
             exhibicionVisitante: data.tipoPartido === 'COMPLEMENTO',
-            fecha: (() => {
-              const [year, month, day] = slot.fecha.split('-').map(Number);
-              const [hour, minute] = slot.horaInicio.split(':').map(Number);
-              return new Date(year, month - 1, day, hour, minute);
-            })(),
-            fechaFin: (() => {
-              const [year, month, day] = slot.fecha.split('-').map(Number);
-              const [hour, minute] = slot.horaFin.split(':').map(Number);
-              return new Date(year, month - 1, day, hour, minute);
-            })(),
+            fecha: civilToInstant(slot.fecha, slot.horaInicio, jornada.division.liga.timeZone),
+            fechaFin: civilToInstant(slot.fecha, slot.horaFin, jornada.division.liga.timeZone),
             canchaId: slot.canchaId,
             estado: 'PROGRAMADO',
             manualCreationKey: idempotencyKey,

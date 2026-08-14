@@ -66,6 +66,7 @@ const mocks = vitest_1.vi.hoisted(() => ({
     partidoCount: vitest_1.vi.fn(),
     divisionCount: vitest_1.vi.fn(),
     partidoArbitroCount: vitest_1.vi.fn(),
+    ubicacionFindUnique: vitest_1.vi.fn(),
 }));
 vitest_1.vi.mock('./repository', () => ({
     ligaRepository: {
@@ -110,6 +111,9 @@ vitest_1.vi.mock('../../config/database', () => ({
         partidoArbitro: {
             count: mocks.partidoArbitroCount,
         },
+        ubicacion: {
+            findUnique: mocks.ubicacionFindUnique,
+        },
     },
 }));
 vitest_1.vi.mock('../media/service', () => ({
@@ -136,6 +140,7 @@ exports.existingLiga = {
 };
 function resetServiceMocks() {
     vitest_1.vi.clearAllMocks();
+    mocks.ubicacionFindUnique.mockResolvedValue({ timeZone: 'America/Mexico_City' });
 }
 function getServiceMocks() {
     return mocks;

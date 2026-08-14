@@ -39,7 +39,30 @@ const productionEnv = {
             GLOBAL_RATE_LIMIT: 400,
             PLAYER_PHONE_LOOKUP_RATE_LIMIT: 30,
             REFEREE_READ_RATE_LIMIT: 40,
-            EXPENSIVE_OPERATION_RATE_LIMIT: 20,
+            JORNADA_GENERATION_RATE_LIMIT: 30,
+            JORNADA_GENERATION_RATE_WINDOW_MINUTES: 10,
+            PLAYOFF_GENERATION_RATE_LIMIT: 15,
+            PLAYOFF_GENERATION_RATE_WINDOW_MINUTES: 15,
+            DESTRUCTIVE_OPERATION_RATE_LIMIT: 20,
+            DESTRUCTIVE_OPERATION_RATE_WINDOW_MINUTES: 60,
+        });
+    });
+    (0, vitest_1.it)('parses independent generation and destructive rate limits', () => {
+        (0, vitest_1.expect)((0, env_1.parseBackendEnv)({
+            ...validEnv,
+            JORNADA_GENERATION_RATE_LIMIT: '45',
+            JORNADA_GENERATION_RATE_WINDOW_MINUTES: '12',
+            PLAYOFF_GENERATION_RATE_LIMIT: '18',
+            PLAYOFF_GENERATION_RATE_WINDOW_MINUTES: '20',
+            DESTRUCTIVE_OPERATION_RATE_LIMIT: '25',
+            DESTRUCTIVE_OPERATION_RATE_WINDOW_MINUTES: '90',
+        })).toMatchObject({
+            JORNADA_GENERATION_RATE_LIMIT: 45,
+            JORNADA_GENERATION_RATE_WINDOW_MINUTES: 12,
+            PLAYOFF_GENERATION_RATE_LIMIT: 18,
+            PLAYOFF_GENERATION_RATE_WINDOW_MINUTES: 20,
+            DESTRUCTIVE_OPERATION_RATE_LIMIT: 25,
+            DESTRUCTIVE_OPERATION_RATE_WINDOW_MINUTES: 90,
         });
     });
     vitest_1.it.each([

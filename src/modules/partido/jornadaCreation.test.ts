@@ -36,6 +36,7 @@ describe('jornada partido creation helpers', () => {
     const candidates = configuredCandidates(
       new Date(2026, 7, 12, 14, 30),
       new Date(2026, 7, 10, 0, 1),
+      'America/Mexico_City',
       parseConfiguredDays('L-V'),
       parseConfiguredRanges('18:00 - 20:00'),
       60,
@@ -51,6 +52,7 @@ describe('jornada partido creation helpers', () => {
     const candidates = configuredCandidates(
       new Date(2026, 7, 12, 14, 30),
       new Date(2026, 7, 24, 0, 1),
+      'America/Mexico_City',
       parseConfiguredDays('L-V'),
       parseConfiguredRanges('18:00 - 19:00'),
       60,
@@ -66,6 +68,7 @@ describe('jornada partido creation helpers', () => {
     expect(configuredCandidates(
       new Date(2026, 7, 12, 14, 30),
       new Date(2026, 7, 3, 0, 1),
+      'America/Mexico_City',
       parseConfiguredDays('L-V'),
       parseConfiguredRanges('18:00 - 19:00'),
       60,

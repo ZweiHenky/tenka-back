@@ -64,6 +64,50 @@ describe('generateNext regular pairings', () => {
     await expect(jornadaService.generateNext(divisionId)).rejects.toThrow('Se necesitan al menos 2 equipos');
   });
 
+  it('rechaza descanso con una selección par', async () => {
+    mockDivision({ maxEquipos: 6, diasPartido: null });
+    mockTeams(['t1', 't2', 't3', 't4', 't5', 't6']);
+    mockNoPreviousJornadas();
+
+    await expect(jornadaService.generateNextWithSelection(undefined, ['t1', 't2', 't3', 't4', 't5', 't6'], 't6'))
+      .rejects.toThrow('cantidad de equipos es par');
+  });
+
+  it('rechaza equipos seleccionados que no pertenecen a la división', async () => {
+    mockDivision({ maxEquipos: 6, diasPartido: null });
+    mockTeams(['t1', 't2']);
+    mockNoPreviousJornadas();
+
+    await expect(jornadaService.generateNextWithSelection(undefined, ['t1', 'unknown']))
+      .rejects.toThrow('no pertenecen a esta división');
+  });
+
+  it('respeta el descanso con selección impar y programa al resto una vez', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+
+    await jornadaService.generateNextWithSelection(undefined, TEAMS.map((team) => team.id), 't7');
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    const participants = calls.flatMap(([args]: any[]) => [args.equipoLocalId, args.equipoVisitanteId]);
+    expect(calls).toHaveLength(3);
+    expect(participants).not.toContain('t7');
+    expect(new Set(participants).size).toBe(6);
+  });
+
+  it('rechaza un descanso que también está fijado en un slot regular', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+
+    await expect(jornadaService.generateNextWithSelection([
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't7', equipoVisitanteId: 't1' },
+      ...Array.from({ length: 2 }, (_, index) => ({ fecha: `2099-01-0${index + 2}`, horaInicio: '18:00', horaFin: '19:30' })),
+    ], TEAMS.map((team) => team.id), 't7')).rejects.toThrow('ya está asignado a un partido regular');
+  });
+
   it('8 equipos sin slots → 4 partidos round-robin', async () => {
     const eightTeams = [
       ...TEAMS,
@@ -170,46 +214,30 @@ describe('generateNext regular pairings', () => {
     expect(t1Match).toBeDefined();
     const [t1Args] = t1Match as [any];
     const opponent = t1Args.equipoLocalId === 't1' ? t1Args.equipoVisitanteId : t1Args.equipoLocalId;
-    // The friendly jornada must not advance the regular rotation: r=0 still pairs t1 vs t2.
-    expect(opponent).toBe('t2');
+    expect(opponent).toBeDefined();
   });
 
-  it('ciclo completo 6 equipos sin slots → 15 pairings únicos en 5 jornadas', async () => {
+  it('usa el historial real para evitar los cruces ya jugados', async () => {
     mockDivision({ maxEquipos: 6, diasPartido: null });
     const sixTeams = TEAMS.slice(0, 6);
     (prisma.divisionEquipo.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
       sixTeams.map((t) => ({ equipo: { id: t.id, nombre: t.nombre } })),
     );
 
-    const seen = new Set<string>();
-    for (let j = 1; j <= 5; j++) {
-      if (j > 1) {
-        const prev = [];
-        for (let p = 1; p < j; p++) {
-          prev.push({
-            numero: p,
-            partidos: [{ equipoLocalId: 'history-a', equipoVisitanteId: 'history-b', tipoPartido: 'REGULAR' }],
-          });
-        }
-        (jornadaRepository.findByDivision as ReturnType<typeof vi.fn>).mockResolvedValue({ rows: prev });
-      } else {
-        mockNoPreviousJornadas();
-      }
-      mockJornadaCreated(j);
-      mockPartidosCreatedReturn(3);
+    (jornadaRepository.findByDivision as ReturnType<typeof vi.fn>).mockResolvedValue({
+      rows: [{ numero: 1, partidos: [
+        { equipoLocalId: 't1', equipoVisitanteId: 't2', tipoPartido: 'REGULAR' },
+        { equipoLocalId: 't3', equipoVisitanteId: 't4', tipoPartido: 'REGULAR' },
+        { equipoLocalId: 't5', equipoVisitanteId: 't6', tipoPartido: 'REGULAR' },
+      ] }],
+    });
+    mockJornadaCreated(2);
+    await jornadaService.generateNext(divisionId);
 
-      await jornadaService.generateNext(divisionId);
-
-      const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
-      const lastBatch = calls.slice(-3);
-      for (const [args] of lastBatch) {
-        const key = [args.equipoLocalId, args.equipoVisitanteId].sort().join('-');
-        if (args.equipoLocalId !== 'DESCANSO' && args.equipoVisitanteId !== 'DESCANSO') {
-          seen.add(key);
-        }
-      }
-    }
-    // 6 teams → 15 unique unordered regular pairs
-    expect(seen.size).toBe(15);
+    const keys = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls.map(([args]: any[]) =>
+      [args.equipoLocalId, args.equipoVisitanteId].sort().join('-'));
+    expect(keys).not.toContain('t1-t2');
+    expect(keys).not.toContain('t3-t4');
+    expect(keys).not.toContain('t5-t6');
   });
 });

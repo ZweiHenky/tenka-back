@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ligaRepository = void 0;
 const database_1 = require("../../config/database");
 const UBICACION_SELECT = {
-    select: { id: true, nombreCompleto: true, estado: true, municipio: true, lat: true, lng: true },
+    select: { id: true, nombreCompleto: true, estado: true, municipio: true, lat: true, lng: true, timeZone: true },
 };
 const CANCHAS_SELECT = {
     select: { id: true, nombre: true, nombreNormalizado: true, activa: true, createdAt: true, updatedAt: true, ligaId: true },
