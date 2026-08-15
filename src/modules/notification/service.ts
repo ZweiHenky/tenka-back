@@ -4,6 +4,7 @@ import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { Sentry } from '../../instrument';
 import { OneSignalProviderError, sendNotification } from '../notification-subscription/onesignal-client';
+import type { BatchResult } from '../../workers/dueProcessor';
 
 interface ClaimedNotificationJob {
   id: string;
@@ -176,10 +177,24 @@ async function processJob(job: ClaimedNotificationJob, workerId: string): Promis
   }
 }
 
-async function processOutboxJobs(take = 20): Promise<void> {
+async function nextOutboxDueAt(): Promise<Date | null> {
+  const [row] = await prisma.$queryRaw<Array<{ nextDueAt: Date | null }>>`
+    SELECT MIN(due_at) AS "nextDueAt" FROM (
+      SELECT "nextAttemptAt" AS due_at FROM notification_outbox
+      WHERE status = 'PENDING' AND attempts < "maxAttempts"
+      UNION ALL
+      SELECT "leaseUntil" AS due_at FROM notification_outbox
+      WHERE status = 'PROCESSING'
+    ) due
+  `;
+  return row?.nextDueAt ? new Date(row.nextDueAt) : null;
+}
+
+async function processOutboxJobs(take = 20): Promise<BatchResult> {
   const workerId = randomUUID();
   const jobs = await claimJobs(workerId, take);
   await Promise.all(jobs.map((job) => processJob(job, workerId)));
+  return { processedCount: jobs.length, nextDueAt: await nextOutboxDueAt() };
 }
 
-export const notificationService = { claimJobs, processJob, processOutboxJobs, retryDate };
+export const notificationService = { claimJobs, processJob, nextOutboxDueAt, processOutboxJobs, retryDate };

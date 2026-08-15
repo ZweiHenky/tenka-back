@@ -3,10 +3,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const vitest_1 = require("vitest");
 const mocks = vitest_1.vi.hoisted(() => ({
     ligaFindFirst: vitest_1.vi.fn(),
+    ligaFindMany: vitest_1.vi.fn(),
+    ligaCount: vitest_1.vi.fn(),
 }));
 vitest_1.vi.mock('../../config/database', () => ({
     prisma: {
-        liga: { findFirst: mocks.ligaFindFirst },
+        liga: { findFirst: mocks.ligaFindFirst, findMany: mocks.ligaFindMany, count: mocks.ligaCount },
     },
 }));
 const repository_1 = require("./repository");
@@ -196,6 +198,27 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
         (0, vitest_1.expect)(mocks.ligaFindFirst).toHaveBeenCalledWith({
             where: { nombreNormalizado: 'liga centro', id: { not: 'liga-1' } },
             select: { id: true },
+        });
+    });
+    (0, vitest_1.it)('usa una proyeccion publica ligera para la lista paginada', async () => {
+        mocks.ligaFindMany.mockResolvedValue([]);
+        mocks.ligaCount.mockResolvedValue(0);
+        await repository_1.ligaRepository.findAllPaginated({ page: 1, limit: 5 });
+        const select = mocks.ligaFindMany.mock.calls[0][0].select;
+        (0, vitest_1.expect)(select).toEqual(vitest_1.expect.objectContaining({ id: true, nombre: true, descripcion: true, logo: true, cancha: true, ubicacionId: true }));
+        (0, vitest_1.expect)(select).not.toHaveProperty('user');
+        (0, vitest_1.expect)(select).not.toHaveProperty('canchas');
+        (0, vitest_1.expect)(select).not.toHaveProperty('arbitros');
+        (0, vitest_1.expect)(select.divisiones.select).toEqual(vitest_1.expect.objectContaining({ id: true, nombre: true, maxEquipos: true, arbitraje: true }));
+        (0, vitest_1.expect)(select.divisiones.select).not.toHaveProperty('tipoCompetencia');
+    });
+    (0, vitest_1.it)('usa la proyeccion minima de tarjetas para las ligas del propietario', async () => {
+        mocks.ligaFindMany.mockResolvedValue([]);
+        await repository_1.ligaRepository.findByUser(owner.id);
+        (0, vitest_1.expect)(mocks.ligaFindMany).toHaveBeenCalledWith({
+            where: { userId: owner.id },
+            orderBy: { createdAt: 'desc' },
+            select: { id: true, nombre: true, logo: true },
         });
     });
 });

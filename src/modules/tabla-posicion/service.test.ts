@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ findByDivision: vi.fn(), findOne: vi.fn() }));
+const mocks = vi.hoisted(() => ({ findByDivision: vi.fn(), findTeamsByDivision: vi.fn(), findOne: vi.fn() }));
 
 vi.mock('./repository', () => ({
   tablaPosicionRepository: {
     findByDivision: mocks.findByDivision,
+    findTeamsByDivision: mocks.findTeamsByDivision,
     findOne: mocks.findOne,
   },
 }));
@@ -24,15 +25,16 @@ describe('tablaPosicionService public reads', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('returns persisted standings with one operation', async () => {
-    mocks.findByDivision.mockResolvedValue({ tablaPosiciones: [row], equipos: [] });
+    mocks.findByDivision.mockResolvedValue({ tablaPosiciones: [row] });
 
     await expect(tablaPosicionService.findByDivision('division-1')).resolves.toEqual([row]);
     expect(mocks.findByDivision).toHaveBeenCalledTimes(1);
+    expect(mocks.findTeamsByDivision).not.toHaveBeenCalled();
   });
 
   it('preserves placeholders when a visible division has teams but no standings', async () => {
-    mocks.findByDivision.mockResolvedValue({
-      tablaPosiciones: [],
+    mocks.findByDivision.mockResolvedValue({ tablaPosiciones: [] });
+    mocks.findTeamsByDivision.mockResolvedValue({
       equipos: [{ equipoId: 'team-1', equipo: team }],
     });
 
@@ -45,7 +47,8 @@ describe('tablaPosicionService public reads', () => {
   });
 
   it('returns empty for a visible division without standings or teams', async () => {
-    mocks.findByDivision.mockResolvedValue({ tablaPosiciones: [], equipos: [] });
+    mocks.findByDivision.mockResolvedValue({ tablaPosiciones: [] });
+    mocks.findTeamsByDivision.mockResolvedValue({ equipos: [] });
     await expect(tablaPosicionService.findByDivision('division-1')).resolves.toEqual([]);
   });
 

@@ -3,6 +3,7 @@ import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { Sentry } from '../../instrument';
 import { OneSignalProviderError, syncTag } from '../notification-subscription/onesignal-client';
+import type { BatchResult } from '../../workers/dueProcessor';
 
 interface ClaimedTagJob {
   id: string;
@@ -72,10 +73,24 @@ async function processTagJob(job: ClaimedTagJob, workerId: string): Promise<void
   }
 }
 
-async function processTagCleanupJobs(take = 20): Promise<void> {
+async function nextTagCleanupDueAt(): Promise<Date | null> {
+  const [row] = await prisma.$queryRaw<Array<{ nextDueAt: Date | null }>>`
+    SELECT MIN(due_at) AS "nextDueAt" FROM (
+      SELECT "nextTryAt" AS due_at FROM onesignal_tag_cleanup_jobs
+      WHERE status = 'PENDING' AND attempts < "maxAttempts"
+      UNION ALL
+      SELECT "leaseUntil" AS due_at FROM onesignal_tag_cleanup_jobs
+      WHERE status = 'PROCESSING'
+    ) due
+  `;
+  return row?.nextDueAt ? new Date(row.nextDueAt) : null;
+}
+
+async function processTagCleanupJobs(take = 20): Promise<BatchResult> {
   const workerId = randomUUID();
   const jobs = await claimTagJobs(workerId, take);
   await Promise.all(jobs.map((job) => processTagJob(job, workerId)));
+  return { processedCount: jobs.length, nextDueAt: await nextTagCleanupDueAt() };
 }
 
-export const cleanupService = { claimTagJobs, processTagJob, processTagCleanupJobs };
+export const cleanupService = { claimTagJobs, processTagJob, nextTagCleanupDueAt, processTagCleanupJobs };

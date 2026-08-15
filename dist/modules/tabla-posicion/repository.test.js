@@ -19,8 +19,8 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
                     { liga: { userId: owner.id } },
                 ] }],
         [admin, {}],
-    ])('selects standings and team summaries from one visible parent for actor %#', async (actor, visibility) => {
-        mocks.divisionFindFirst.mockResolvedValue({ tablaPosiciones: [], equipos: [] });
+    ])('selects only standings from the visible parent for actor %#', async (actor, visibility) => {
+        mocks.divisionFindFirst.mockResolvedValue({ tablaPosiciones: [] });
         await repository_1.tablaPosicionRepository.findByDivision('division-1', actor);
         (0, vitest_1.expect)(mocks.divisionFindFirst).toHaveBeenCalledTimes(1);
         (0, vitest_1.expect)(mocks.divisionFindFirst).toHaveBeenCalledWith({
@@ -30,6 +30,12 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
                     include: { equipo: { select: { id: true, nombre: true, logo: true } } },
                     orderBy: { puntos: 'desc' },
                 },
+            },
+        });
+        await repository_1.tablaPosicionRepository.findTeamsByDivision('division-1', actor);
+        (0, vitest_1.expect)(mocks.divisionFindFirst).toHaveBeenLastCalledWith({
+            where: { id: 'division-1', ...visibility },
+            select: {
                 equipos: {
                     select: {
                         equipoId: true,

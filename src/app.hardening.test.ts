@@ -61,5 +61,7 @@ describe('API hardening', () => {
       error: 'Demasiadas solicitudes. Intenta de nuevo mas tarde.',
       requestId: 'request-429',
     });
+    expect(response.headers).toHaveProperty('ratelimit');
+    expect(response.headers['retry-after']).toBeTypeOf('string');
   });
 });

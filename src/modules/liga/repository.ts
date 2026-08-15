@@ -1,5 +1,5 @@
 import { prisma } from '../../config/database';
-import type { LigaEntity, ProgramacionRecienteLigaDto } from './entity';
+import type { LigaEntity, ProgramacionRecienteLigaDto, PublicLeagueListDto, UserLeagueListDto } from './entity';
 import type { LigaRepository, LigaFilterParams, LigaCreateData, LigaCanchaWrite, LigaWriteData } from './repository.interface';
 import type { AuthenticatedUser } from '../../types/auth';
 import type { Prisma } from '../../generated/prisma/client';
@@ -30,6 +30,33 @@ function toLigaEntityList<T>(rows: PromiseLike<T[]> | T[]): Promise<LigaEntity[]
 }
 
 const PUBLIC_DIVISION_WHERE = { estadoLiga: { nombre: { not: 'Borrador' } } } as const;
+
+const USER_LEAGUE_LIST_SELECT = {
+  id: true,
+  nombre: true,
+  logo: true,
+} as const;
+
+const PUBLIC_LEAGUE_LIST_SELECT = {
+  ...USER_LEAGUE_LIST_SELECT,
+  descripcion: true,
+  cancha: true,
+  ubicacionId: true,
+  divisiones: {
+    where: PUBLIC_DIVISION_WHERE,
+    select: {
+      id: true,
+      nombre: true,
+      maxEquipos: true,
+      arbitraje: true,
+      diasPartido: true,
+      horarioPartido: true,
+      categoria: { select: { id: true, nombre: true } },
+      tipo: { select: { id: true, nombre: true } },
+      estadoLiga: { select: { id: true, nombre: true } },
+    },
+  },
+} as const;
 
 const DIVISION_RELATIONS = {
   categoria: { select: { id: true, nombre: true } },
@@ -88,14 +115,12 @@ const BASE_INCLUDE = {
 } as const;
 
 export const ligaRepository: LigaRepository = {
-  async findAll(): Promise<LigaEntity[]> {
-    return toLigaEntityList(
-      prisma.liga.findMany({
+  async findAll(): Promise<PublicLeagueListDto[]> {
+    return prisma.liga.findMany({
         where: { divisiones: { some: { estadoLiga: { nombre: { not: "Borrador" } } } } },
         orderBy: { createdAt: 'desc' },
-        include: DIVISIONES_INCLUDE_PUBLIC,
-      }),
-    );
+        select: PUBLIC_LEAGUE_LIST_SELECT,
+      });
   },
 
   async findById(id: string): Promise<LigaEntity | null> {
@@ -246,18 +271,16 @@ export const ligaRepository: LigaRepository = {
     });
   },
 
-  async findByUser(userId: string): Promise<LigaEntity[]> {
-    return toLigaEntityList(prisma.liga.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, include: DIVISIONES_INCLUDE }));
+  async findByUser(userId: string): Promise<UserLeagueListDto[]> {
+    return prisma.liga.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, select: USER_LEAGUE_LIST_SELECT });
   },
 
-  async findPublicByUser(userId: string): Promise<LigaEntity[]> {
-    return toLigaEntityList(
-      prisma.liga.findMany({
+  async findPublicByUser(userId: string): Promise<PublicLeagueListDto[]> {
+    return prisma.liga.findMany({
         where: { userId, divisiones: { some: { estadoLiga: { nombre: { not: 'Borrador' } } } } },
         orderBy: { createdAt: 'desc' },
-        include: DIVISIONES_INCLUDE_PUBLIC,
-      }),
-    );
+        select: PUBLIC_LEAGUE_LIST_SELECT,
+      });
   },
 
   async findAllPaginated({ page, limit, search, categoriaId, tipoId, estadoLigaId }: LigaFilterParams) {
@@ -285,11 +308,11 @@ export const ligaRepository: LigaRepository = {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
-        include: DIVISIONES_INCLUDE_PUBLIC,
+        select: PUBLIC_LEAGUE_LIST_SELECT,
       }),
       prisma.liga.count({ where }),
     ]);
-    return { rows: await toLigaEntityList(rows), total };
+    return { rows, total };
   },
 
   async create(data: LigaCreateData, canchas?: LigaCanchaWrite[], arbitros?: { nombre: string }[], tx?: Prisma.TransactionClient): Promise<LigaEntity> {

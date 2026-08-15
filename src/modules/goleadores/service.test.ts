@@ -1,21 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ divisionFindFirst: vi.fn(), allocationFindMany: vi.fn() }))
+const mocks = vi.hoisted(() => ({ divisionFindFirst: vi.fn(), queryRaw: vi.fn() }))
 vi.mock('../../config/database', () => ({
   prisma: {
     division: { findFirst: mocks.divisionFindFirst },
-    anotacionPartido: { findMany: mocks.allocationFindMany },
+    $queryRaw: mocks.queryRaw,
   },
 }))
 
 import { goleadoresService } from './service'
-
-const row = (overrides: Record<string, unknown>) => ({
-  jugadorId: 'player-1', equipoId: 'team-1', ladoMarcador: 'LOCAL', cantidad: 1,
-  jugadorNombre: 'Snapshot', equipoNombre: 'Snapshot Team',
-  jugador: { nombre: 'Actual', foto: 'photo.jpg' }, equipo: { nombre: 'Current Team' },
-  partido: { tipoPartido: 'REGULAR' }, ...overrides,
-})
 
 describe('goleadoresService', () => {
   beforeEach(() => {
@@ -23,29 +16,42 @@ describe('goleadoresService', () => {
     mocks.divisionFindFirst.mockResolvedValue({ id: 'division-1' })
   })
 
-  it('applies competition side scope, aggregates teams, and returns deterministic sequential ranks', async () => {
-    mocks.allocationFindMany.mockResolvedValue([
-      row({ cantidad: 2 }),
-      row({ equipoId: 'team-2', equipoNombre: 'Second', equipo: null, cantidad: 1, partido: { tipoPartido: 'ELIMINATORIA' } }),
-      row({ jugadorId: 'player-2', jugador: null, jugadorNombre: 'Beto', cantidad: 3 }),
-      row({ jugadorId: 'ignored', cantidad: 10, partido: { tipoPartido: 'AMISTOSO' } }),
-      row({ jugadorId: 'ignored-away', ladoMarcador: 'VISITANTE', cantidad: 10, partido: { tipoPartido: 'COMPLEMENTO' } }),
-      row({ jugadorId: null, jugadorNombre: null, jugador: null, cantidad: 4, partido: { tipoPartido: 'COMPLEMENTO' } }),
+  it('uses one parameterized aggregate query and preserves deterministic sequential ranking', async () => {
+    mocks.queryRaw.mockResolvedValue([
+      { jugadorId: 'player-1', playerKey: 'player-1', nombre: 'Actual', foto: 'photo.jpg', equipoId: 'team-1', teamKey: 'team-1', equipoNombre: 'Current Team', golesEquipo: 2n, golesJugador: 3n, unattributedGoals: 4n },
+      { jugadorId: 'player-1', playerKey: 'player-1', nombre: 'Actual', foto: 'photo.jpg', equipoId: 'team-2', teamKey: 'team-2', equipoNombre: 'Second', golesEquipo: 1n, golesJugador: 3n, unattributedGoals: 4n },
+      { jugadorId: 'player-2', playerKey: 'player-2', nombre: 'Beto', foto: null, equipoId: 'team-1', teamKey: 'team-1', equipoNombre: 'Current Team', golesEquipo: 3n, golesJugador: 3n, unattributedGoals: 4n },
     ])
 
-    await expect(goleadoresService.findByDivision('division-1')).resolves.toEqual(expect.objectContaining({
+    const result = await goleadoresService.findByDivision('division-1')
+
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(1)
+    const query = mocks.queryRaw.mock.calls[0][0]
+    expect(query.values).toEqual(['division-1', 'division-1'])
+    expect(query.strings.join('')).toContain('SUM(cantidad)')
+    expect(result).toEqual(expect.objectContaining({
       ranking: 'SEQUENTIAL',
       unattributedGoals: 4,
       rows: [
-        expect.objectContaining({ rank: 1, jugadorId: 'player-1', nombre: 'Actual', goles: 3, equipos: expect.any(Array) }),
+        expect.objectContaining({ rank: 1, jugadorId: 'player-1', nombre: 'Actual', goles: 3, equipos: [
+          expect.objectContaining({ equipoId: 'team-1', goles: 2 }),
+          expect.objectContaining({ equipoId: 'team-2', goles: 1 }),
+        ] }),
         expect.objectContaining({ rank: 2, jugadorId: 'player-2', nombre: 'Beto', goles: 3 }),
       ],
     }))
   })
 
+  it('returns unattributed goals when no player has attributed goals', async () => {
+    mocks.queryRaw.mockResolvedValue([{ jugadorId: null, playerKey: null, nombre: null, foto: null, equipoId: null, teamKey: null, equipoNombre: null, golesEquipo: null, golesJugador: null, unattributedGoals: 5n }])
+    await expect(goleadoresService.findByDivision('division-1')).resolves.toEqual({
+      divisionId: 'division-1', ranking: 'SEQUENTIAL', rows: [], unattributedGoals: 5,
+    })
+  })
+
   it('hides draft divisions from public callers', async () => {
     mocks.divisionFindFirst.mockResolvedValue(null)
     await expect(goleadoresService.findByDivision('draft')).rejects.toMatchObject({ statusCode: 404 })
-    expect(mocks.allocationFindMany).not.toHaveBeenCalled()
+    expect(mocks.queryRaw).not.toHaveBeenCalled()
   })
 })

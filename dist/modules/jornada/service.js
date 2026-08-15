@@ -12,6 +12,8 @@ const logger_1 = require("../../config/logger");
 const leagueScheduleLock_1 = require("../../utils/leagueScheduleLock");
 const timeZone_1 = require("../../utils/timeZone");
 const regularMatching_1 = require("./regularMatching");
+const jobSignals_1 = require("../../workers/jobSignals");
+const timeRanges_1 = require("../../utils/timeRanges");
 const DAY_MAP = {
     dom: 0, domingo: 0,
     lun: 1, lunes: 1,
@@ -145,6 +147,10 @@ function isCourtExclusionError(error) {
         || (candidate?.code === 'P2004' && /23P01|exclusion constraint/i.test(details));
 }
 async function validateLeagueCourtCapacity(client, input) {
+    const configuredRanges = (0, timeRanges_1.parseConfiguredRanges)(input.horarioPartido ?? '');
+    if (input.slots.length > 0 && configuredRanges.length === 0) {
+        throw new errors_1.ValidationError('La división debe tener un rango de horario válido para programar partidos');
+    }
     const canchas = await client.ligaCancha.findMany({
         where: { ligaId: input.ligaId, activa: true },
         select: { id: true, nombre: true, activa: true },
@@ -173,6 +179,9 @@ async function validateLeagueCourtCapacity(client, input) {
             throw new errors_1.ValidationError(`El slot #${index} debe usar una cancha activa de esta liga`);
         }
         const interval = getAuthoritativeSlotInterval(slot, input.durationMinutes, input.timeZone);
+        if (!(0, timeRanges_1.isTimeSlotWithinConfiguredRanges)(configuredRanges, slot.horaInicio, slot.horaFin)) {
+            throw new errors_1.ValidationError(`El horario ${slot.horaInicio}-${slot.horaFin} está fuera del rango configurado de la división`);
+        }
         return { id: `slot-${index}`, canchaId: input.multiplesCanchas ? slot.canchaId : null, ...interval, slot };
     });
     if (drafts.length === 0)
@@ -370,6 +379,7 @@ exports.jornadaService = {
             where: { id: divisionId },
             select: {
                 diasPartido: true,
+                horarioPartido: true,
                 duracionPartido: true,
                 ligaId: true,
                 canchaUnicaId: true,
@@ -547,6 +557,7 @@ exports.jornadaService = {
                 ligaId: division.ligaId,
                 multiplesCanchas: division.liga.multiplesCanchas,
                 durationMinutes: division.duracionPartido,
+                horarioPartido: division.horarioPartido,
                 fixedCourtId: division.canchaUnicaId,
                 timeZone: division.liga.timeZone,
                 slots: slots ?? [],
@@ -941,6 +952,7 @@ exports.jornadaService = {
                         where: { id: divisionId },
                         select: {
                             ligaId: true,
+                            horarioPartido: true,
                             duracionPartido: true,
                             canchaUnicaId: true,
                             liga: { select: { multiplesCanchas: true, timeZone: true } },
@@ -957,6 +969,7 @@ exports.jornadaService = {
                         ligaId: lockedDivision.ligaId,
                         multiplesCanchas: lockedDivision.liga.multiplesCanchas,
                         durationMinutes: lockedDivision.duracionPartido,
+                        horarioPartido: lockedDivision.horarioPartido,
                         fixedCourtId: lockedDivision.canchaUnicaId,
                         timeZone: lockedDivision.liga.timeZone,
                         slots: slots ?? [],
@@ -1018,6 +1031,8 @@ exports.jornadaService = {
                 throw error;
             }
         }
+        if (!idempotencyReplayed)
+            (0, jobSignals_1.signalBackgroundJob)('notification-outbox');
         const committedJornada = jornada;
         const updatedPlayoffIds = new Set(pendingPlayoffUpdates.map((update) => update.id));
         const createdPartidoCount = partidoData.length;

@@ -7,6 +7,7 @@ import { assignJugadorSchema, createJugadorSchema, createMeSchema, divisionJugad
 import { mediaService } from '../media/service';
 import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 import { parsePagination } from '../../utils/pagination';
+import { signalBackgroundJob } from '../../workers/jobSignals';
 
 function sanitizePublic(jugador: any) {
   return {
@@ -99,6 +100,7 @@ export const jugadorController = {
           include: jugadorInclude,
         });
       });
+      signalBackgroundJob('media-deletion');
       created(res, jugador, 'Jugador creado exitosamente');
     } catch (e: any) {
       if (e?.code === 'P2002') next(new ConflictError('Ese jugador ya está en este equipo o el dorsal ya está usado'));
@@ -136,6 +138,7 @@ export const jugadorController = {
           ? tx.jugador.update({ where: { id: req.params.id }, data: { ...jugadorData, ...(media && { foto: media.url, fotoPublicId: media.publicId }) }, include: jugadorInclude })
           : tx.jugador.findUniqueOrThrow({ where: { id: req.params.id }, include: jugadorInclude });
       });
+      signalBackgroundJob('media-deletion');
       ok(res, jugador, 'Jugador actualizado exitosamente');
     } catch (e: any) {
       if (e?.code === 'P2002') next(new ConflictError('Ese dorsal ya está usado en este equipo'));
@@ -152,6 +155,7 @@ export const jugadorController = {
         await mediaService.scheduleImageCleanup(jugador.foto, jugador.fotoPublicId, tx);
         await tx.jugador.delete({ where: { id: req.params.id } });
       });
+      signalBackgroundJob('media-deletion');
       noContent(res);
     } catch (e) { next(e); }
   },
@@ -354,6 +358,7 @@ export const jugadorController = {
             include: jugadorInclude,
           });
         });
+        signalBackgroundJob('media-deletion');
         return ok(res, linked, 'Perfil de jugador vinculado');
       }
 
@@ -365,6 +370,7 @@ export const jugadorController = {
           include: jugadorInclude,
         });
       });
+      signalBackgroundJob('media-deletion');
       created(res, jugador, 'Perfil de jugador creado');
     } catch (e: any) {
       if (e?.code === 'P2002') next(new ConflictError('Ya existe un perfil de jugador para esta cuenta'));
@@ -391,6 +397,7 @@ export const jugadorController = {
           include: jugadorInclude,
         });
       });
+      signalBackgroundJob('media-deletion');
       ok(res, updated, 'Perfil actualizado');
     } catch (e) { next(e); }
   },

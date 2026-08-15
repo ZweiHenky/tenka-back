@@ -1,9 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const vitest_1 = require("vitest");
-const mocks = vitest_1.vi.hoisted(() => ({ updateSaldoPendiente: vitest_1.vi.fn() }));
+const mocks = vitest_1.vi.hoisted(() => ({ findByDivision: vitest_1.vi.fn(), updateSaldoPendiente: vitest_1.vi.fn() }));
 vitest_1.vi.mock('./service', () => ({
     divisionEquipoService: {
+        findByDivision: mocks.findByDivision,
         updateSaldoPendiente: mocks.updateSaldoPendiente,
     },
 }));
@@ -48,6 +49,30 @@ function response() {
         const next = vitest_1.vi.fn();
         await controller_1.divisionEquipoController.updateSaldoPendiente(request({ saldoPendiente: '7.50' }), response(), next);
         (0, vitest_1.expect)(next).toHaveBeenCalledWith(error);
+    });
+});
+(0, vitest_1.describe)('divisionEquipoController.findByDivision', () => {
+    (0, vitest_1.beforeEach)(() => vitest_1.vi.clearAllMocks());
+    (0, vitest_1.it)('returns a public team summary without exposing its owner id', async () => {
+        mocks.findByDivision.mockResolvedValue([{
+                divisionId: 'division-1',
+                equipoId: 'cm-team-ab12',
+                saldoPendiente: '0.00',
+                equipo: { id: 'cm-team-ab12', nombre: 'Leones', logo: null, userId: owner.id },
+            }]);
+        const res = response();
+        const next = vitest_1.vi.fn();
+        await controller_1.divisionEquipoController.findByDivision(request(undefined), res, next);
+        (0, vitest_1.expect)(res.json).toHaveBeenCalledWith({
+            success: true,
+            data: [{
+                    divisionId: 'division-1',
+                    equipoId: 'cm-team-ab12',
+                    saldoPendiente: '0.00',
+                    equipo: { id: 'cm-team-ab12', nombre: 'Leones', logo: null, codigo: 'AB12', esPropio: true },
+                }],
+        });
+        (0, vitest_1.expect)(next).not.toHaveBeenCalled();
     });
 });
 //# sourceMappingURL=controller.test.js.map

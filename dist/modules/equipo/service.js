@@ -6,6 +6,7 @@ const repository_1 = require("./repository");
 const service_1 = require("../media/service");
 const authorization_1 = require("../../utils/authorization");
 const transaction_1 = require("../../utils/transaction");
+const jobSignals_1 = require("../../workers/jobSignals");
 const DUPLICATE_NAME_MESSAGE = 'Ya tienes un equipo con ese nombre';
 function isUniqueConstraintError(error) {
     return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
@@ -74,6 +75,7 @@ exports.equipoService = {
                 const media = logoAssetId !== undefined ? await service_1.mediaService.prepareAttachment(tx, logoAssetId, actor.id, 'TEAM_LOGO', current.logo, current.logoPublicId) : undefined;
                 return repository_1.equipoRepository.update(id, { ...updateData, ...(media && { logo: media.url, logoPublicId: media.publicId }) }, tx);
             });
+            (0, jobSignals_1.signalBackgroundJob)('media-deletion');
         }
         catch (error) {
             if (isUniqueConstraintError(error))
@@ -93,6 +95,7 @@ exports.equipoService = {
             await service_1.mediaService.scheduleImageCleanup(old.logo, old.logoPublicId, tx);
             await repository_1.equipoRepository.delete(id, tx);
         });
+        (0, jobSignals_1.signalBackgroundJob)('media-deletion');
     },
 };
 //# sourceMappingURL=service.js.map

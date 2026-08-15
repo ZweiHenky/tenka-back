@@ -2,10 +2,11 @@ import { ConflictError, NotFoundError, ValidationError } from '../../utils/error
 import { ligaRepository } from './repository';
 import { mediaService } from '../media/service';
 import { prisma } from '../../config/database';
-import type { LigaEntity, LigaCanchaEntity, LigaArbitroEntity, ProgramacionRecienteLigaDto, LigaReglaItem } from './entity';
+import type { LigaEntity, LigaCanchaEntity, LigaArbitroEntity, ProgramacionRecienteLigaDto, LigaReglaItem, PublicLeagueListDto, UserLeagueListDto } from './entity';
 import type { LigaCanchaWrite, LigaFilterParams, LigaWriteData } from './repository.interface';
 import type { AuthenticatedUser } from '../../types/auth';
 import { runInTransaction } from '../../utils/transaction';
+import { signalBackgroundJob } from '../../workers/jobSignals';
 
 const DUPLICATE_NAME_MESSAGE = 'Ya existe una liga con ese nombre';
 const DUPLICATE_COURT_MESSAGE = 'Ya existe una cancha con ese nombre en esta liga';
@@ -96,7 +97,7 @@ function validateArbitros(usaArbitros: boolean, arbitros: { nombre: string }[]) 
 }
 
 export const ligaService = {
-  async list(): Promise<LigaEntity[]> {
+  async list(): Promise<PublicLeagueListDto[]> {
     return ligaRepository.findAll();
   },
 
@@ -106,7 +107,7 @@ export const ligaService = {
     return liga;
   },
 
-  async listByUser(userId: string, actor?: AuthenticatedUser): Promise<LigaEntity[]> {
+  async listByUser(userId: string, actor?: AuthenticatedUser): Promise<Array<PublicLeagueListDto | UserLeagueListDto>> {
     if (actor?.rol === 'ADMINISTRADOR' || actor?.id === userId) {
       return ligaRepository.findByUser(userId);
     }
@@ -230,6 +231,7 @@ export const ligaService = {
         };
         return ligaRepository.update(id, writeData, courtWrites, arbitros, disablingMultipleCourts, tx);
       });
+      signalBackgroundJob('media-deletion');
     } catch (error) {
       if (isCourtUniqueConstraintError(error)) throw new ConflictError(DUPLICATE_COURT_MESSAGE);
       if (isUniqueConstraintError(error)) throw new ConflictError(DUPLICATE_NAME_MESSAGE);
@@ -250,6 +252,7 @@ export const ligaService = {
       await mediaService.scheduleImageCleanup(old.cancha, old.canchaPublicId, tx);
       await ligaRepository.delete(id, 'liga' in tx ? tx : undefined);
     });
+    signalBackgroundJob('media-deletion');
   },
 
   async getCanchas(ligaId: string, actor: AuthenticatedUser): Promise<LigaCanchaEntity[]> {

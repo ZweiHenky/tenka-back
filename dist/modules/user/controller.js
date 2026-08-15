@@ -7,6 +7,7 @@ const response_1 = require("../../utils/response");
 const errors_1 = require("../../utils/errors");
 const service_1 = require("../media/service");
 const service_2 = require("./service");
+const jobSignals_1 = require("../../workers/jobSignals");
 const phoneVisibilitySchema = zod_1.z.object({
     showPhoneInPublicLeague: zod_1.z.boolean(),
 });
@@ -55,6 +56,7 @@ exports.userController = {
                     select: { id: true, name: true, image: true },
                 });
             });
+            (0, jobSignals_1.signalBackgroundJob)('media-deletion');
             (0, response_1.ok)(res, user, 'Perfil actualizado');
         }
         catch (err) {

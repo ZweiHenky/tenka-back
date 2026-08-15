@@ -167,10 +167,23 @@ async function processJob(job, workerId) {
         logger_1.logger.warn({ event: 'notification.job_failed', attempts, dead, errorCode: providerError?.code ?? 'internal_error' }, 'Notification job failed');
     }
 }
+async function nextOutboxDueAt() {
+    const [row] = await database_1.prisma.$queryRaw `
+    SELECT MIN(due_at) AS "nextDueAt" FROM (
+      SELECT "nextAttemptAt" AS due_at FROM notification_outbox
+      WHERE status = 'PENDING' AND attempts < "maxAttempts"
+      UNION ALL
+      SELECT "leaseUntil" AS due_at FROM notification_outbox
+      WHERE status = 'PROCESSING'
+    ) due
+  `;
+    return row?.nextDueAt ? new Date(row.nextDueAt) : null;
+}
 async function processOutboxJobs(take = 20) {
     const workerId = (0, node_crypto_1.randomUUID)();
     const jobs = await claimJobs(workerId, take);
     await Promise.all(jobs.map((job) => processJob(job, workerId)));
+    return { processedCount: jobs.length, nextDueAt: await nextOutboxDueAt() };
 }
-exports.notificationService = { claimJobs, processJob, processOutboxJobs, retryDate };
+exports.notificationService = { claimJobs, processJob, nextOutboxDueAt, processOutboxJobs, retryDate };
 //# sourceMappingURL=service.js.map

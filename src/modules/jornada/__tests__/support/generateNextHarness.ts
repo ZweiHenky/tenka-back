@@ -71,12 +71,13 @@ export const TEAMS = [
   { id: 't7', nombre: 'Panteras' },
 ];
 
-export function mockDivision(opts?: { maxEquipos?: number; diasPartido?: string | null; duracionPartido?: number | null; multiplesCanchas?: boolean; canchaUnicaId?: string | null }) {
+export function mockDivision(opts?: { maxEquipos?: number; diasPartido?: string | null; horarioPartido?: string | null; duracionPartido?: number | null; multiplesCanchas?: boolean; canchaUnicaId?: string | null }) {
   (prisma.division.findUnique as ReturnType<typeof vi.fn>).mockImplementation(async (query) => {
     if (query.select?.liga && !query.select?.diasPartido && !query.select?.ligaId) return { liga: { userId: owner.id } };
     return {
       maxEquipos: opts?.maxEquipos ?? 7,
       diasPartido: opts?.diasPartido ?? null,
+      horarioPartido: opts && 'horarioPartido' in opts ? opts.horarioPartido! : '00:00 - 23:59',
       duracionPartido: opts && 'duracionPartido' in opts ? opts.duracionPartido! : 90,
       ligaId: 'liga-1',
       canchaUnicaId: opts?.canchaUnicaId ?? null,

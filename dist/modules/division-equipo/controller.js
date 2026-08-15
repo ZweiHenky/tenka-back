@@ -5,10 +5,23 @@ const service_1 = require("./service");
 const validator_1 = require("./validator");
 const response_1 = require("../../utils/response");
 const errors_1 = require("../../utils/errors");
+const teamCode_1 = require("../../utils/teamCode");
 exports.divisionEquipoController = {
     async findByDivision(req, res, next) {
         try {
-            (0, response_1.ok)(res, await service_1.divisionEquipoService.findByDivision(req.params.divisionId, req.user));
+            const links = await service_1.divisionEquipoService.findByDivision(req.params.divisionId, req.user);
+            (0, response_1.ok)(res, links.map(({ equipo, ...link }) => ({
+                ...link,
+                ...(equipo ? {
+                    equipo: {
+                        id: equipo.id,
+                        nombre: equipo.nombre,
+                        logo: equipo.logo,
+                        codigo: (0, teamCode_1.getTeamCode)(equipo.id),
+                        esPropio: req.user?.id === equipo.userId,
+                    },
+                } : {}),
+            })));
         }
         catch (e) {
             next(e);

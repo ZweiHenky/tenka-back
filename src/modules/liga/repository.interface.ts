@@ -1,4 +1,4 @@
-import type { LigaEntity, ProgramacionRecienteLigaDto } from './entity';
+import type { LigaEntity, ProgramacionRecienteLigaDto, PublicLeagueListDto, UserLeagueListDto } from './entity';
 import type { LigaArbitroEntity, LigaCanchaEntity } from './entity';
 import type { AuthenticatedUser } from '../../types/auth';
 import type { Prisma } from '../../generated/prisma/client';
@@ -73,7 +73,7 @@ export interface LigaCanchaWrite {
 }
 
 export interface LigaRepository {
-  findAll(): Promise<LigaEntity[]>;
+  findAll(): Promise<PublicLeagueListDto[]>;
   findById(id: string): Promise<LigaEntity | null>;
   findVisibleById(id: string, actor?: AuthenticatedUser): Promise<LigaEntity | null>;
   findPublicById(id: string): Promise<LigaEntity | null>;
@@ -84,9 +84,9 @@ export interface LigaRepository {
   findManageableArbitros(ligaId: string, actor: AuthenticatedUser): Promise<LigaArbitroEntity[] | null>;
   findRecentSchedule(ligaId: string, actor: AuthenticatedUser): Promise<ProgramacionRecienteLigaDto | null>;
   findByNormalizedName(nombreNormalizado: string, excludeId?: string): Promise<{ id: string } | null>;
-  findByUser(userId: string): Promise<LigaEntity[]>;
-  findPublicByUser(userId: string): Promise<LigaEntity[]>;
-  findAllPaginated(params: LigaFilterParams): Promise<PaginatedResult<LigaEntity>>;
+  findByUser(userId: string): Promise<UserLeagueListDto[]>;
+  findPublicByUser(userId: string): Promise<PublicLeagueListDto[]>;
+  findAllPaginated(params: LigaFilterParams): Promise<PaginatedResult<PublicLeagueListDto>>;
   create(data: LigaCreateData, canchas?: LigaCanchaWrite[], arbitros?: { nombre: string }[], tx?: Prisma.TransactionClient): Promise<LigaEntity>;
   update(id: string, data: LigaWriteData, canchas?: LigaCanchaWrite[], arbitros?: { nombre: string }[], clearDivisionCourts?: boolean, tx?: Prisma.TransactionClient): Promise<LigaEntity>;
   delete(id: string, tx?: Prisma.TransactionClient): Promise<void>;

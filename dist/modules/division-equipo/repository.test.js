@@ -32,21 +32,24 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
                 ] }, true, true],
         [admin, {}, true, false],
     ])('retrieves pivots with the visibility filter for %#', async (actor, visibility, includeSaldo, includeOwner) => {
-        const equipos = [{ divisionId: 'division-1', equipoId: 'equipo-1', saldoPendiente: { toFixed: () => '12.30' } }];
+        const equipo = { id: 'equipo-1', nombre: 'Leones', logo: null, userId: owner.id };
+        const equipos = [{ divisionId: 'division-1', equipoId: 'equipo-1', saldoPendiente: { toFixed: () => '12.30' }, equipo }];
         mocks.divisionFindFirst.mockResolvedValue({ equipos, ...(includeOwner ? { liga: { userId: owner.id } } : {}) });
         await (0, vitest_1.expect)(repository_1.divisionEquipoRepository.findByDivision('division-1', actor)).resolves.toEqual([{
                 divisionId: 'division-1',
                 equipoId: 'equipo-1',
+                equipo,
                 ...(includeSaldo ? { saldoPendiente: '12.30' } : {}),
             }]);
         (0, vitest_1.expect)(mocks.divisionFindFirst).toHaveBeenCalledTimes(1);
         (0, vitest_1.expect)(mocks.divisionFindFirst).toHaveBeenCalledWith({
             where: { id: 'division-1', ...visibility },
             select: {
-                equipos: { select: {
+                equipos: { orderBy: { equipo: { nombre: 'asc' } }, select: {
                         divisionId: true,
                         equipoId: true,
                         ...(includeSaldo ? { saldoPendiente: true } : {}),
+                        equipo: { select: { id: true, nombre: true, logo: true, userId: true } },
                     } },
                 ...(includeOwner ? { liga: { select: { userId: true } } } : {}),
             },
@@ -60,10 +63,10 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
     (0, vitest_1.it)('omits saldo for an authenticated nonowner without a second query', async () => {
         mocks.divisionFindFirst.mockResolvedValue({
             liga: { userId: 'another-owner' },
-            equipos: [{ divisionId: 'division-1', equipoId: 'equipo-1', saldoPendiente: { toFixed: () => '8.00' } }],
+            equipos: [{ divisionId: 'division-1', equipoId: 'equipo-1', saldoPendiente: { toFixed: () => '8.00' }, equipo: { id: 'equipo-1', nombre: 'Leones', logo: null, userId: owner.id } }],
         });
         await (0, vitest_1.expect)(repository_1.divisionEquipoRepository.findByDivision('division-1', owner)).resolves.toEqual([
-            { divisionId: 'division-1', equipoId: 'equipo-1' },
+            { divisionId: 'division-1', equipoId: 'equipo-1', equipo: { id: 'equipo-1', nombre: 'Leones', logo: null, userId: owner.id } },
         ]);
         (0, vitest_1.expect)(mocks.divisionFindFirst).toHaveBeenCalledOnce();
     });

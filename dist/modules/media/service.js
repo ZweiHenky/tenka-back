@@ -8,6 +8,7 @@ const env_1 = require("../../config/env");
 const logger_1 = require("../../config/logger");
 const instrument_1 = require("../../instrument");
 const errors_1 = require("../../utils/errors");
+const jobSignals_1 = require("../../workers/jobSignals");
 const MAX_BYTES = 5 * 1024 * 1024;
 const ALLOWED_FORMATS = ['jpg', 'jpeg', 'png', 'webp', 'heic'];
 const INTENT_TTL_MS = 15 * 60 * 1000;
@@ -72,10 +73,12 @@ async function createUploadIntent(ownerId, kind) {
         transformation: `c_fill,${gravity},w_${policy.width},h_${policy.height}`,
     };
     const signature = cloudinary_1.v2.utils.api_sign_request(uploadParams, env_1.env.CLOUDINARY_API_SECRET);
+    const expiresAt = new Date(Date.now() + INTENT_TTL_MS);
     const intent = await database_1.prisma.mediaAsset.create({
-        data: { ownerId, kind, publicId, expiresAt: new Date(Date.now() + INTENT_TTL_MS) },
+        data: { ownerId, kind, publicId, expiresAt },
         select: { id: true },
     });
+    (0, jobSignals_1.signalBackgroundJob)('media-intents', expiresAt);
     return {
         intentId: intent.id,
         publicId,
@@ -123,16 +126,19 @@ async function completeUpload(ownerId, intentId, input) {
     return { mediaAssetId: intent.id, url: resource.secure_url };
 }
 async function abandonUpload(ownerId, intentId) {
-    await database_1.prisma.$transaction(async (tx) => {
+    const dueAt = await database_1.prisma.$transaction(async (tx) => {
         const asset = await tx.mediaAsset.findFirst({ where: { id: intentId, ownerId, status: { in: ['PENDING', 'UPLOADED'] } } });
         if (!asset)
-            return;
+            return null;
         await tx.mediaAsset.update({ where: { id: asset.id }, data: { status: 'ABANDONED' } });
         const nextTryAt = asset.status === 'PENDING'
             ? new Date(asset.createdAt.getTime() + SIGNATURE_CLEANUP_DELAY_MS)
             : new Date();
         await scheduleDeletion(asset.publicId, tx, nextTryAt);
+        return nextTryAt;
     });
+    if (dueAt)
+        (0, jobSignals_1.signalBackgroundJob)('media-deletion', dueAt);
 }
 async function resolveAttachment(tx, assetId, ownerId, kind) {
     const asset = await tx.mediaAsset.findFirst({
@@ -171,6 +177,8 @@ async function scheduleDeletion(publicId, db = database_1.prisma, nextTryAt = ne
         create: { publicId, nextTryAt },
         update: { publicId },
     });
+    if (db === database_1.prisma)
+        (0, jobSignals_1.signalBackgroundJob)('media-deletion', nextTryAt);
 }
 async function scheduleImageCleanup(url, storedPublicId, db = database_1.prisma) {
     if (!url)
@@ -227,9 +235,21 @@ async function claimDeletionJobs(workerId, take = 20) {
     RETURNING j.id, j."publicId", j.attempts, j."maxAttempts"
   `;
 }
-async function processDeletionJobs() {
+async function nextDeletionDueAt() {
+    const [row] = await database_1.prisma.$queryRaw `
+    SELECT MIN(due_at) AS "nextDueAt" FROM (
+      SELECT "nextTryAt" AS due_at FROM media_deletion_jobs
+      WHERE status = 'PENDING' AND attempts < "maxAttempts"
+      UNION ALL
+      SELECT "leaseUntil" AS due_at FROM media_deletion_jobs
+      WHERE status = 'LEASED'
+    ) due
+  `;
+    return row?.nextDueAt ? new Date(row.nextDueAt) : null;
+}
+async function processDeletionJobs(take = 20) {
     const workerId = (0, crypto_1.randomUUID)();
-    const jobs = await claimDeletionJobs(workerId);
+    const jobs = await claimDeletionJobs(workerId, take);
     await Promise.all(jobs.map(async (job) => {
         try {
             if (await isPublicIdReferenced(job.publicId))
@@ -261,9 +281,17 @@ async function processDeletionJobs() {
             logger_1.logger.warn({ err: error, publicId: job.publicId, attempts, dead }, 'Cloudinary deletion job failed');
         }
     }));
+    return { processedCount: jobs.length, nextDueAt: await nextDeletionDueAt() };
+}
+async function nextIntentDueAt() {
+    const [row] = await database_1.prisma.$queryRaw `
+    SELECT MIN("expiresAt") AS "nextDueAt" FROM media_assets
+    WHERE status IN ('PENDING', 'UPLOADED') AND "attachedAt" IS NULL
+  `;
+    return row?.nextDueAt ? new Date(row.nextDueAt) : null;
 }
 async function cleanupExpiredIntents(take = 100) {
-    const rows = await database_1.prisma.$queryRaw `
+    const [result] = await database_1.prisma.$queryRaw `
     WITH expired AS (
       SELECT id FROM media_assets
       WHERE status IN ('PENDING', 'UPLOADED') AND "attachedAt" IS NULL AND "expiresAt" <= NOW()
@@ -276,9 +304,14 @@ async function cleanupExpiredIntents(take = 100) {
       SELECT md5(random()::text || clock_timestamp()::text || "publicId"), "publicId", 'PENDING', 0, 8,
              GREATEST(NOW(), "createdAt" + INTERVAL '70 minutes'), NOW(), NOW() FROM abandoned
       ON CONFLICT ("publicId") DO NOTHING
-    ) SELECT "publicId" FROM abandoned
+      RETURNING "nextTryAt"
+    ) SELECT
+      (SELECT COUNT(*)::int FROM abandoned) AS "processedCount",
+      (SELECT MIN("nextTryAt") FROM queued) AS "deletionDueAt"
   `;
-    return rows.length;
+    if (result?.deletionDueAt)
+        (0, jobSignals_1.signalBackgroundJob)('media-deletion', new Date(result.deletionDueAt));
+    return { processedCount: result?.processedCount ?? 0, nextDueAt: await nextIntentDueAt() };
 }
 exports.mediaService = {
     MAX_BYTES,
@@ -297,7 +330,9 @@ exports.mediaService = {
     deleteImage,
     isPublicIdReferenced,
     claimDeletionJobs,
+    nextDeletionDueAt,
     processDeletionJobs,
+    nextIntentDueAt,
     cleanupExpiredIntents,
 };
 //# sourceMappingURL=service.js.map

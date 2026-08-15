@@ -24,8 +24,8 @@ describe('tablaPosicionRepository public reads', () => {
       { liga: { userId: owner.id } },
     ] }],
     [admin, {}],
-  ])('selects standings and team summaries from one visible parent for actor %#', async (actor, visibility) => {
-    mocks.divisionFindFirst.mockResolvedValue({ tablaPosiciones: [], equipos: [] });
+  ])('selects only standings from the visible parent for actor %#', async (actor, visibility) => {
+    mocks.divisionFindFirst.mockResolvedValue({ tablaPosiciones: [] });
 
     await tablaPosicionRepository.findByDivision('division-1', actor);
 
@@ -37,6 +37,13 @@ describe('tablaPosicionRepository public reads', () => {
           include: { equipo: { select: { id: true, nombre: true, logo: true } } },
           orderBy: { puntos: 'desc' },
         },
+      },
+    });
+
+    await tablaPosicionRepository.findTeamsByDivision('division-1', actor);
+    expect(mocks.divisionFindFirst).toHaveBeenLastCalledWith({
+      where: { id: 'division-1', ...visibility },
+      select: {
         equipos: {
           select: {
             equipoId: true,

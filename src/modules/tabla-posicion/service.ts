@@ -21,7 +21,9 @@ export const tablaPosicionService = {
     if (!division) throw new NotFoundError('División');
     if (division.tablaPosiciones.length > 0) return division.tablaPosiciones;
 
-    return division.equipos.map((t) => ({
+    const teams = await tablaPosicionRepository.findTeamsByDivision(divisionId, actor);
+    if (!teams) throw new NotFoundError('División');
+    return teams.equipos.map((t) => ({
       id: `placeholder-${t.equipoId}`,
       partidosJugados: 0,
       ganados: 0,

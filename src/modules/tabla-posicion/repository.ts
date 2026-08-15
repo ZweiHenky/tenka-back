@@ -13,6 +13,14 @@ export const tablaPosicionRepository: TablaPosicionRepository = {
           include: { equipo: { select: { id: true, nombre: true, logo: true } } },
           orderBy: { puntos: 'desc' },
         },
+      },
+    });
+  },
+
+  async findTeamsByDivision(divisionId: string, actor?: AuthenticatedUser) {
+    return prisma.division.findFirst({
+      where: { id: divisionId, ...visibleDivisionWhere(actor) },
+      select: {
         equipos: {
           select: {
             equipoId: true,

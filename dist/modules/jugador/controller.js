@@ -9,6 +9,7 @@ const validator_1 = require("./validator");
 const service_1 = require("../media/service");
 const divisionVisibility_1 = require("../../utils/divisionVisibility");
 const pagination_1 = require("../../utils/pagination");
+const jobSignals_1 = require("../../workers/jobSignals");
 function sanitizePublic(jugador) {
     return {
         ...jugador,
@@ -104,6 +105,7 @@ exports.jugadorController = {
                     include: jugadorInclude,
                 });
             });
+            (0, jobSignals_1.signalBackgroundJob)('media-deletion');
             (0, response_1.created)(res, jugador, 'Jugador creado exitosamente');
         }
         catch (e) {
@@ -143,6 +145,7 @@ exports.jugadorController = {
                     ? tx.jugador.update({ where: { id: req.params.id }, data: { ...jugadorData, ...(media && { foto: media.url, fotoPublicId: media.publicId }) }, include: jugadorInclude })
                     : tx.jugador.findUniqueOrThrow({ where: { id: req.params.id }, include: jugadorInclude });
             });
+            (0, jobSignals_1.signalBackgroundJob)('media-deletion');
             (0, response_1.ok)(res, jugador, 'Jugador actualizado exitosamente');
         }
         catch (e) {
@@ -163,6 +166,7 @@ exports.jugadorController = {
                 await service_1.mediaService.scheduleImageCleanup(jugador.foto, jugador.fotoPublicId, tx);
                 await tx.jugador.delete({ where: { id: req.params.id } });
             });
+            (0, jobSignals_1.signalBackgroundJob)('media-deletion');
             (0, response_1.noContent)(res);
         }
         catch (e) {
@@ -394,6 +398,7 @@ exports.jugadorController = {
                         include: jugadorInclude,
                     });
                 });
+                (0, jobSignals_1.signalBackgroundJob)('media-deletion');
                 return (0, response_1.ok)(res, linked, 'Perfil de jugador vinculado');
             }
             const { photoAssetId, ...profileData } = p.data;
@@ -404,6 +409,7 @@ exports.jugadorController = {
                     include: jugadorInclude,
                 });
             });
+            (0, jobSignals_1.signalBackgroundJob)('media-deletion');
             (0, response_1.created)(res, jugador, 'Perfil de jugador creado');
         }
         catch (e) {
@@ -432,6 +438,7 @@ exports.jugadorController = {
                     include: jugadorInclude,
                 });
             });
+            (0, jobSignals_1.signalBackgroundJob)('media-deletion');
             (0, response_1.ok)(res, updated, 'Perfil actualizado');
         }
         catch (e) {

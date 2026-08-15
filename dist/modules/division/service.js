@@ -7,6 +7,7 @@ const database_1 = require("../../config/database");
 const authorization_1 = require("../../utils/authorization");
 const divisionVisibility_1 = require("../../utils/divisionVisibility");
 const leagueScheduleLock_1 = require("../../utils/leagueScheduleLock");
+const jobSignals_1 = require("../../workers/jobSignals");
 async function assertLigaOwner(ligaId, actor) {
     const liga = await database_1.prisma.liga.findFirst({
         where: (0, authorization_1.isAdmin)(actor) ? { id: ligaId } : { id: ligaId, userId: actor.id },
@@ -163,6 +164,7 @@ exports.divisionService = {
             }
             await repository_1.divisionRepository.delete(id, tx);
         });
+        (0, jobSignals_1.signalBackgroundJob)('tag-cleanup');
     },
     async resetDivision(divisionId, actor) {
         await assertDivisionOwner(divisionId, actor);

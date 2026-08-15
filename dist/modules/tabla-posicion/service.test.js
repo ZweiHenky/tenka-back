@@ -1,10 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const vitest_1 = require("vitest");
-const mocks = vitest_1.vi.hoisted(() => ({ findByDivision: vitest_1.vi.fn(), findOne: vitest_1.vi.fn() }));
+const mocks = vitest_1.vi.hoisted(() => ({ findByDivision: vitest_1.vi.fn(), findTeamsByDivision: vitest_1.vi.fn(), findOne: vitest_1.vi.fn() }));
 vitest_1.vi.mock('./repository', () => ({
     tablaPosicionRepository: {
         findByDivision: mocks.findByDivision,
+        findTeamsByDivision: mocks.findTeamsByDivision,
         findOne: mocks.findOne,
     },
 }));
@@ -19,13 +20,14 @@ const row = {
 (0, vitest_1.describe)('tablaPosicionService public reads', () => {
     (0, vitest_1.beforeEach)(() => vitest_1.vi.clearAllMocks());
     (0, vitest_1.it)('returns persisted standings with one operation', async () => {
-        mocks.findByDivision.mockResolvedValue({ tablaPosiciones: [row], equipos: [] });
+        mocks.findByDivision.mockResolvedValue({ tablaPosiciones: [row] });
         await (0, vitest_1.expect)(service_1.tablaPosicionService.findByDivision('division-1')).resolves.toEqual([row]);
         (0, vitest_1.expect)(mocks.findByDivision).toHaveBeenCalledTimes(1);
+        (0, vitest_1.expect)(mocks.findTeamsByDivision).not.toHaveBeenCalled();
     });
     (0, vitest_1.it)('preserves placeholders when a visible division has teams but no standings', async () => {
-        mocks.findByDivision.mockResolvedValue({
-            tablaPosiciones: [],
+        mocks.findByDivision.mockResolvedValue({ tablaPosiciones: [] });
+        mocks.findTeamsByDivision.mockResolvedValue({
             equipos: [{ equipoId: 'team-1', equipo: team }],
         });
         await (0, vitest_1.expect)(service_1.tablaPosicionService.findByDivision('division-1')).resolves.toEqual([{
@@ -36,7 +38,8 @@ const row = {
         (0, vitest_1.expect)(mocks.findByDivision).toHaveBeenCalledTimes(1);
     });
     (0, vitest_1.it)('returns empty for a visible division without standings or teams', async () => {
-        mocks.findByDivision.mockResolvedValue({ tablaPosiciones: [], equipos: [] });
+        mocks.findByDivision.mockResolvedValue({ tablaPosiciones: [] });
+        mocks.findTeamsByDivision.mockResolvedValue({ equipos: [] });
         await (0, vitest_1.expect)(service_1.tablaPosicionService.findByDivision('division-1')).resolves.toEqual([]);
     });
     (0, vitest_1.it)('returns division 404 for a hidden or missing division', async () => {

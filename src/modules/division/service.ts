@@ -7,6 +7,7 @@ import { isAdmin } from '../../utils/authorization';
 import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
 import type { Pagination } from '../../utils/pagination';
+import { signalBackgroundJob } from '../../workers/jobSignals';
 
 async function assertLigaOwner(ligaId: string, actor: AuthenticatedUser): Promise<void> {
   const liga = await prisma.liga.findFirst({
@@ -191,6 +192,7 @@ export const divisionService = {
 
       await divisionRepository.delete(id, tx);
     });
+    signalBackgroundJob('tag-cleanup');
   },
 
   async resetDivision(divisionId: string, actor: AuthenticatedUser): Promise<void> {

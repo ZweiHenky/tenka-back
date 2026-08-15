@@ -9,6 +9,7 @@ const db = vitest_1.vi.hoisted(() => ({
     linksFindMany: vitest_1.vi.fn(),
     linksCreateMany: vitest_1.vi.fn(),
     divisionFindMany: vitest_1.vi.fn(),
+    divisionCount: vitest_1.vi.fn(),
     refereeFindMany: vitest_1.vi.fn(),
     assignmentsFindMany: vitest_1.vi.fn(),
     assignmentsDeleteMany: vitest_1.vi.fn(),
@@ -20,7 +21,7 @@ vitest_1.vi.mock('../../config/database', () => ({
         liga: { findUnique: db.ligaFindUnique },
         tandaArbitral: { findFirst: db.tandaFindFirst, delete: db.tandaDelete },
         tandaArbitralPartido: { findMany: db.linksFindMany },
-        division: { findMany: db.divisionFindMany },
+        division: { findMany: db.divisionFindMany, count: db.divisionCount },
         ligaArbitro: { findMany: db.refereeFindMany },
         partidoArbitro: { findMany: db.assignmentsFindMany, deleteMany: db.assignmentsDeleteMany },
         $transaction: db.transaction,
@@ -154,18 +155,17 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
         (0, vitest_1.expect)(result).not.toHaveProperty('liga');
         (0, vitest_1.expect)(result.partidos[0].arbitros).toEqual([{ id: 'a', nombre: 'Ana' }]);
     });
-    (0, vitest_1.it)('loads candidates in one narrow query and restores existing parent response fields', async () => {
-        db.ligaFindUnique.mockResolvedValue({
-            userId: 'user-1',
-            divisiones: [{
-                    id: 'd1', nombre: 'Primera',
-                    jornadas: [{ id: 'j1', numero: 1, partidos: [match] }],
-                    rondasPlayoff: [{ id: 'r1', nombre: 'Final', orden: 1, partidos: [{ ...match, id: 'm2' }] }],
-                }],
-        });
+    (0, vitest_1.it)('keeps the legacy array response and explicitly selects only candidate fields', async () => {
+        db.ligaFindUnique.mockResolvedValue({ userId: 'user-1' });
+        db.divisionFindMany.mockResolvedValue([{
+                id: 'd1', nombre: 'Primera',
+                jornadas: [{ id: 'j1', numero: 1, partidos: [match] }],
+                rondasPlayoff: [{ id: 'r1', nombre: 'Final', orden: 1, partidos: [{ ...match, id: 'm2' }] }],
+            }]);
         const result = await service_1.arbitrajeService.candidates('league-1', owner);
         (0, vitest_1.expect)(db.ligaFindUnique).toHaveBeenCalledTimes(1);
-        (0, vitest_1.expect)(db.divisionFindMany).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(db.divisionFindMany).toHaveBeenCalledTimes(1);
+        (0, vitest_1.expect)(db.divisionCount).not.toHaveBeenCalled();
         (0, vitest_1.expect)(result[0].jornadas[0].partidos[0]).toMatchObject({
             jornada: { id: 'j1', numero: 1, division: { id: 'd1', nombre: 'Primera' } }, rondaPlayoff: null,
             arbitros: [{ id: 'a', nombre: 'Ana' }],
@@ -173,10 +173,21 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
         (0, vitest_1.expect)(result[0].rondasPlayoff[0].partidos[0]).toMatchObject({
             jornada: null, rondaPlayoff: { id: 'r1', nombre: 'Final', division: { id: 'd1', nombre: 'Primera' } },
         });
-        const query = db.ligaFindUnique.mock.calls[0][0];
-        const jornadaMatch = query.select.divisiones.select.jornadas.select.partidos;
-        (0, vitest_1.expect)(jornadaMatch.include).not.toHaveProperty('jornada');
-        (0, vitest_1.expect)(jornadaMatch.include).not.toHaveProperty('rondaPlayoff');
+        const query = db.divisionFindMany.mock.calls[0][0];
+        const jornadaMatch = query.select.jornadas.select.partidos;
+        (0, vitest_1.expect)(jornadaMatch.select).toEqual(vitest_1.expect.objectContaining({ id: true, fecha: true, fechaFin: true }));
+        (0, vitest_1.expect)(jornadaMatch.select).not.toHaveProperty('golesLocal');
+        (0, vitest_1.expect)(jornadaMatch).not.toHaveProperty('include');
+    });
+    (0, vitest_1.it)('paginates divisions and returns metadata when requested', async () => {
+        db.ligaFindUnique.mockResolvedValue({ userId: 'user-1' });
+        db.divisionFindMany.mockResolvedValue([]);
+        db.divisionCount.mockResolvedValue(7);
+        await (0, vitest_1.expect)(service_1.arbitrajeService.candidates('league-1', owner, { page: 2, limit: 3, skip: 3, take: 3 })).resolves.toEqual({
+            rows: [], total: 7, page: 2, limit: 3,
+        });
+        (0, vitest_1.expect)(db.divisionFindMany).toHaveBeenCalledWith(vitest_1.expect.objectContaining({ skip: 3, take: 3 }));
+        (0, vitest_1.expect)(db.divisionCount).toHaveBeenCalledWith({ where: { ligaId: 'league-1' } });
     });
 });
 //# sourceMappingURL=service.test.js.map

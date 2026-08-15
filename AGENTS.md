@@ -97,7 +97,8 @@ Las divisiones pasan por un ciclo de vida con 4 estados (`EstadoLiga`):
 
 ## Entrypoint
 
-- `src/index.ts` — boots Express en `env.PORT`, configura timeouts del server (`requestTimeout`, `headersTimeout`, `keepAliveTimeout`), arranca los cleanup workers (`startCleanupWorkers`) y maneja shutdown graceful (freno workers → cierra server → `prisma.$disconnect()` → `Sentry.close()`).
+- `src/index.ts` — boots Express en `env.PORT`, configura timeouts del server (`requestTimeout`, `headersTimeout`, `keepAliveTimeout`), arranca los procesadores de jobs (`startCleanupWorkers`) y maneja shutdown graceful (deja de aceptar HTTP → drena workers → `prisma.$disconnect()` → `Sentry.close()`).
+- `src/maintenance.ts` — ejecuta una pasada one-shot de los jobs durables; se compila a `dist/maintenance.js` y se usa con `pnpm maintenance` desde Railway Cron.
 - `src/app.ts` — exporta `createApp()` (supertest-friendly). Monta middleware global, rate limiters, auth handler y los routers de cada módulo. Aplica Cors con allowlist de `CORS_ALLOWED_ORIGINS` y error handler con Sentry.
 - `src/instrument.ts` — inicializa Sentry (solo con `SENTRY_DSN`).
 - `src/config/logger.ts` — pino (nivel por `LOG_LEVEL`).
@@ -222,10 +223,13 @@ interface ApiResponse<T> { success: boolean; data?: T; message?: string; error?:
 
 ## Workers
 
-`src/workers/cleanupWorkers.ts`:
-- `startWorker(name, run, intervalMs)` — bucle de intervalo con try/catch por ejecución
-- `startCleanupWorkers(intervalMs = 60_000)` — arranca los workers de limpieza (módulo `cleanup`) al bootear el server; `stopWorkers()` los detiene en el shutdown
-- Test: `src/workers/cleanupWorkers.test.ts`
+`src/workers/cleanupWorkers.ts` y `src/workers/dueProcessor.ts`:
+- Cuatro procesadores single-flight reemplazan los pollers de 60 segundos.
+- Cada enqueue emite una señal después del commit; cada batch consulta `nextDueAt` para programar el timer exacto.
+- El arranque consulta todas las colas para recuperar trabajo durable después de deploys o crashes.
+- `stopWorkers()` cancela timers y espera el batch activo durante shutdown.
+- Railway Cron ejecuta `pnpm maintenance` cada 30 minutos como red de recuperación; detalles en `BACKGROUND-JOBS.md`.
+- Test: `src/workers/dueProcessor.test.ts`
 
 ## Testing
 

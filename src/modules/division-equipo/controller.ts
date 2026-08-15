@@ -3,10 +3,25 @@ import { divisionEquipoService } from './service';
 import { createSchema, updateSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
+import { getTeamCode } from '../../utils/teamCode';
 
 export const divisionEquipoController = {
   async findByDivision(req: Request, res: Response, next: NextFunction) {
-    try { ok(res, await divisionEquipoService.findByDivision(req.params.divisionId, req.user)); } catch (e) { next(e); }
+    try {
+      const links = await divisionEquipoService.findByDivision(req.params.divisionId, req.user);
+      ok(res, links.map(({ equipo, ...link }) => ({
+        ...link,
+        ...(equipo ? {
+          equipo: {
+            id: equipo.id,
+            nombre: equipo.nombre,
+            logo: equipo.logo,
+            codigo: getTeamCode(equipo.id),
+            esPropio: req.user?.id === equipo.userId,
+          },
+        } : {}),
+      })));
+    } catch (e) { next(e); }
   },
 
   async findByEquipo(req: Request, res: Response, next: NextFunction) {

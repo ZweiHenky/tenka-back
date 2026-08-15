@@ -5,6 +5,7 @@ import { ok } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import { mediaService } from '../media/service';
 import { userService } from './service';
+import { signalBackgroundJob } from '../../workers/jobSignals';
 
 const phoneVisibilitySchema = z.object({
   showPhoneInPublicLeague: z.boolean(),
@@ -57,6 +58,7 @@ export const userController = {
           select: { id: true, name: true, image: true },
         });
       });
+      signalBackgroundJob('media-deletion');
 
       ok(res, user, 'Perfil actualizado');
     } catch (err) {

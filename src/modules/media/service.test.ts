@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   jugadorCount: vi.fn(),
   queryRaw: vi.fn(),
   sentry: vi.fn(),
+  signalJob: vi.fn(),
 }));
 
 vi.mock('cloudinary', () => ({
@@ -37,6 +38,7 @@ vi.mock('../../config/database', () => ({
   },
 }));
 vi.mock('../../instrument', () => ({ Sentry: { captureException: mocks.sentry } }));
+vi.mock('../../workers/jobSignals', () => ({ signalBackgroundJob: mocks.signalJob }));
 
 import { mediaService } from './service';
 
@@ -65,6 +67,7 @@ describe('mediaService upload lifecycle', () => {
     });
     expect(mocks.sign).toHaveBeenCalledWith(result.uploadParams, 'test-cloudinary-api-secret');
     expect(mocks.assetCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ ownerId: 'user-1', kind: 'TEAM_LOGO', publicId: result.publicId }) }));
+    expect(mocks.signalJob).toHaveBeenCalledWith('media-intents', expect.any(Date));
   });
 
   it('rejects another owner and a mismatched public ID before provider verification', async () => {

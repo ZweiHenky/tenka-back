@@ -13,10 +13,12 @@ export const divisionEquipoRepository: DivisionEquipoRepository = {
       where: { id: divisionId, ...visibleDivisionWhere(actor) },
       select: {
         equipos: {
+          orderBy: { equipo: { nombre: 'asc' } },
           select: {
             divisionId: true,
             equipoId: true,
             ...(includeSaldo ? { saldoPendiente: true } : {}),
+            equipo: { select: { id: true, nombre: true, logo: true, userId: true } },
           },
         },
         ...(includeOwner ? { liga: { select: { userId: true } } } : {}),
@@ -29,6 +31,7 @@ export const divisionEquipoRepository: DivisionEquipoRepository = {
     return division.equipos.map((pivot) => ({
       divisionId: pivot.divisionId,
       equipoId: pivot.equipoId,
+      equipo: pivot.equipo,
       ...(canViewSaldo && 'saldoPendiente' in pivot
         ? { saldoPendiente: pivot.saldoPendiente.toFixed(2) }
         : {}),

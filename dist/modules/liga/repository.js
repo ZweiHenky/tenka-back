@@ -22,6 +22,31 @@ function toLigaEntityList(rows) {
     return Promise.resolve(rows).then((r) => r);
 }
 const PUBLIC_DIVISION_WHERE = { estadoLiga: { nombre: { not: 'Borrador' } } };
+const USER_LEAGUE_LIST_SELECT = {
+    id: true,
+    nombre: true,
+    logo: true,
+};
+const PUBLIC_LEAGUE_LIST_SELECT = {
+    ...USER_LEAGUE_LIST_SELECT,
+    descripcion: true,
+    cancha: true,
+    ubicacionId: true,
+    divisiones: {
+        where: PUBLIC_DIVISION_WHERE,
+        select: {
+            id: true,
+            nombre: true,
+            maxEquipos: true,
+            arbitraje: true,
+            diasPartido: true,
+            horarioPartido: true,
+            categoria: { select: { id: true, nombre: true } },
+            tipo: { select: { id: true, nombre: true } },
+            estadoLiga: { select: { id: true, nombre: true } },
+        },
+    },
+};
 const DIVISION_RELATIONS = {
     categoria: { select: { id: true, nombre: true } },
     tipo: { select: { id: true, nombre: true } },
@@ -76,11 +101,11 @@ const BASE_INCLUDE = {
 };
 exports.ligaRepository = {
     async findAll() {
-        return toLigaEntityList(database_1.prisma.liga.findMany({
+        return database_1.prisma.liga.findMany({
             where: { divisiones: { some: { estadoLiga: { nombre: { not: "Borrador" } } } } },
             orderBy: { createdAt: 'desc' },
-            include: DIVISIONES_INCLUDE_PUBLIC,
-        }));
+            select: PUBLIC_LEAGUE_LIST_SELECT,
+        });
     },
     async findById(id) {
         return toLigaEntity(database_1.prisma.liga.findUnique({
@@ -216,14 +241,14 @@ exports.ligaRepository = {
         });
     },
     async findByUser(userId) {
-        return toLigaEntityList(database_1.prisma.liga.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, include: DIVISIONES_INCLUDE }));
+        return database_1.prisma.liga.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, select: USER_LEAGUE_LIST_SELECT });
     },
     async findPublicByUser(userId) {
-        return toLigaEntityList(database_1.prisma.liga.findMany({
+        return database_1.prisma.liga.findMany({
             where: { userId, divisiones: { some: { estadoLiga: { nombre: { not: 'Borrador' } } } } },
             orderBy: { createdAt: 'desc' },
-            include: DIVISIONES_INCLUDE_PUBLIC,
-        }));
+            select: PUBLIC_LEAGUE_LIST_SELECT,
+        });
     },
     async findAllPaginated({ page, limit, search, categoriaId, tipoId, estadoLigaId }) {
         const divisionFilters = [];
@@ -252,11 +277,11 @@ exports.ligaRepository = {
                 orderBy: { createdAt: 'desc' },
                 skip: (page - 1) * limit,
                 take: limit,
-                include: DIVISIONES_INCLUDE_PUBLIC,
+                select: PUBLIC_LEAGUE_LIST_SELECT,
             }),
             database_1.prisma.liga.count({ where }),
         ]);
-        return { rows: await toLigaEntityList(rows), total };
+        return { rows, total };
     },
     async create(data, canchas, arbitros, tx) {
         return toLigaEntity((tx ?? database_1.prisma).liga.create({

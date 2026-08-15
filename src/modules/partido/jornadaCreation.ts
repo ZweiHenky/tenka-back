@@ -9,6 +9,10 @@ import { enqueueScheduleChange } from '../notification/scheduleChangeOutbox';
 import { exposePartidoRead, PARTIDO_READ_INCLUDE } from './repository';
 import type { CreateInJornadaInput } from './validator';
 import { addCivilDays, civilToInstant, dateKeyInTimeZone, timeInTimeZone } from '../../utils/timeZone';
+import { signalBackgroundJob } from '../../workers/jobSignals';
+import { parseConfiguredRanges } from '../../utils/timeRanges';
+
+export { parseConfiguredRanges } from '../../utils/timeRanges';
 
 type DbClient = Prisma.TransactionClient | typeof prisma;
 
@@ -74,16 +78,6 @@ export function parseConfiguredDays(value: string): Set<number> {
     if (day !== undefined) days.add(day);
   }
   return days;
-}
-
-export function parseConfiguredRanges(value: string): Array<{ start: number; end: number }> {
-  return value.split('/').flatMap((raw) => {
-    const match = raw.trim().match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
-    if (!match) return [];
-    const start = Number(match[1]) * 60 + Number(match[2]);
-    const end = Number(match[3]) * 60 + Number(match[4]);
-    return start < end ? [{ start, end }] : [];
-  });
 }
 
 export function weekBounds(anchor: Date): { start: Date; end: Date } {
@@ -276,7 +270,7 @@ export const jornadaPartidoCreationService = {
     }
 
     try {
-      return await prisma.$transaction(async (tx) => {
+      const partido = await prisma.$transaction(async (tx) => {
         const jornada = await tx.jornada.findUnique({ where: { id: jornadaId }, select: { division: { select: { ligaId: true, id: true, liga: { select: { timeZone: true } } } } } });
         if (!jornada) throw new NotFoundError('Jornada');
         await acquireLeagueScheduleLock(tx, jornada.division.ligaId);
@@ -326,6 +320,8 @@ export const jornadaPartidoCreationService = {
         });
         return exposePartidoRead(partido);
       }, { isolationLevel: 'Serializable' });
+      signalBackgroundJob('notification-outbox');
+      return partido;
     } catch (error: any) {
       if (error?.code === 'P2002' || error?.code === '23P01' || /partidos_cancha_no_overlap/.test(error?.message ?? '')) {
         throw new ConflictError('El horario seleccionado ya no está disponible');

@@ -1,37 +1,35 @@
-import { logger } from '../config/logger';
-import { mediaService } from '../modules/media/service';
 import { cleanupService } from '../modules/cleanup/service';
+import { mediaService } from '../modules/media/service';
 import { notificationService } from '../modules/notification/service';
-import { Sentry } from '../instrument';
+import { createDueProcessor, type BatchResult } from './dueProcessor';
+import { registerJobSignal, type BackgroundJob } from './jobSignals';
 
-export function startWorker(name: string, run: () => Promise<unknown>, intervalMs: number) {
-  let stopped = false;
-  let timer: NodeJS.Timeout | undefined;
-  let active: Promise<void> | undefined;
-  const schedule = () => { if (!stopped) timer = setTimeout(execute, intervalMs); };
-  const execute = () => {
-    if (stopped) return;
-    const startedAt = Date.now();
-    active = run()
-      .then(() => logger.debug({ event: 'worker.completed', worker: name, durationMs: Date.now() - startedAt }))
-      .catch((error) => {
-        Sentry.captureException(error, { tags: { worker: name, operation: 'batch' } });
-        logger.error({ event: 'worker.failed', worker: name, durationMs: Date.now() - startedAt, err: error });
-      })
-      .finally(() => { active = undefined; schedule(); });
-  };
-  execute();
-  return async () => {
-    stopped = true;
-    if (timer) clearTimeout(timer);
-    await active;
-  };
+interface JobDefinition {
+  name: BackgroundJob;
+  run: () => Promise<BatchResult>;
 }
 
-export function startCleanupWorkers(intervalMs = 60_000) {
-  const stopMedia = startWorker('media-cleanup', () => mediaService.processDeletionJobs(), intervalMs);
-  const stopIntents = startWorker('media-intent-cleanup', () => mediaService.cleanupExpiredIntents(), intervalMs);
-  const stopTags = startWorker('onesignal-tag-cleanup', () => cleanupService.processTagCleanupJobs(), intervalMs);
-  const stopNotifications = startWorker('notification-outbox', () => notificationService.processOutboxJobs(), intervalMs);
-  return async () => { await Promise.all([stopMedia(), stopIntents(), stopTags(), stopNotifications()]); };
+export function backgroundJobDefinitions(): JobDefinition[] {
+  return [
+    { name: 'media-deletion', run: () => mediaService.processDeletionJobs() },
+    { name: 'media-intents', run: () => mediaService.cleanupExpiredIntents() },
+    { name: 'tag-cleanup', run: () => cleanupService.processTagCleanupJobs() },
+    { name: 'notification-outbox', run: () => notificationService.processOutboxJobs() },
+  ];
+}
+
+export function startCleanupWorkers() {
+  const processors = backgroundJobDefinitions().map((job) => ({
+    job,
+    processor: createDueProcessor(job.name, job.run),
+  }));
+  const unregister = processors.map(({ job, processor }) => registerJobSignal(job.name, processor.signal));
+
+  // Recover durable work after deploys, crashes, or missed process-local signals.
+  for (const { processor } of processors) processor.signal();
+
+  return async () => {
+    for (const remove of unregister) remove();
+    await Promise.all(processors.map(({ processor }) => processor.stop()));
+  };
 }

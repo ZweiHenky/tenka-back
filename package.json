@@ -9,6 +9,7 @@
   "scripts": {
     "build": "pnpm db:generate && node node_modules/typescript/bin/tsc",
     "start": "node dist/index.js",
+    "maintenance": "node dist/maintenance.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "seed": "node scripts/development-script.mjs seed",
     "seed:catalogs": "node scripts/development-script.mjs seed-catalogs",

@@ -47,6 +47,27 @@ const partidoRelations = {
     equipoLocal: { select: { id: true, nombre: true, logo: true } }, equipoVisitante: { select: { id: true, nombre: true, logo: true } },
     cancha: { select: { id: true, nombre: true } }, arbitros: { include: { arbitro: { select: { id: true, nombre: true } } } },
 };
+const candidateMatchSelect = {
+    id: true,
+    fecha: true,
+    fechaFin: true,
+    equipoLocal: { select: { id: true, nombre: true } },
+    equipoVisitante: { select: { id: true, nombre: true } },
+    cancha: { select: { id: true, nombre: true } },
+    arbitros: { select: { arbitro: { select: { id: true, nombre: true } } } },
+};
+const candidateDivisionSelect = {
+    id: true,
+    nombre: true,
+    jornadas: {
+        orderBy: { numero: 'asc' },
+        select: { id: true, numero: true, partidos: { where: { tandas: { none: {} } }, orderBy: { fecha: 'asc' }, select: candidateMatchSelect } },
+    },
+    rondasPlayoff: {
+        orderBy: { orden: 'asc' },
+        select: { id: true, nombre: true, orden: true, partidos: { where: { tandas: { none: {} } }, orderBy: { fecha: 'asc' }, select: candidateMatchSelect } },
+    },
+};
 const partidoInclude = {
     jornada: { select: { id: true, numero: true, division: { select: { id: true, nombre: true } } } },
     rondaPlayoff: { select: { id: true, nombre: true, division: { select: { id: true, nombre: true } } } },
@@ -96,15 +117,25 @@ exports.arbitrajeService = {
         const { liga: _liga, ...batch } = row;
         return { ...batch, partidos: row.partidos.map((p) => ({ ...p.partido, arbitros: p.partido.arbitros.map((a) => a.arbitro) })) };
     },
-    async candidates(ligaId, actor) {
+    async candidates(ligaId, actor, pagination) {
         const league = await database_1.prisma.liga.findUnique({
             where: { id: ligaId },
-            select: { userId: true, divisiones: { select: { id: true, nombre: true, jornadas: { orderBy: { numero: 'asc' }, select: { id: true, numero: true, partidos: { where: { tandas: { none: {} } }, orderBy: { fecha: 'asc' }, include: partidoRelations } } }, rondasPlayoff: { orderBy: { orden: 'asc' }, select: { id: true, nombre: true, orden: true, partidos: { where: { tandas: { none: {} } }, orderBy: { fecha: 'asc' }, include: partidoRelations } } } } } },
+            select: { userId: true },
         });
         if (!league)
             throw new errors_1.NotFoundError('Liga');
         (0, authorization_1.assertOwnerOrAdmin)(actor, league.userId, 'Liga');
-        return league.divisiones.map((division) => ({
+        const where = { ligaId };
+        const [divisions, total] = await Promise.all([
+            database_1.prisma.division.findMany({
+                where,
+                orderBy: [{ nombre: 'asc' }, { id: 'asc' }],
+                ...(pagination ? { skip: pagination.skip, take: pagination.take } : {}),
+                select: candidateDivisionSelect,
+            }),
+            pagination ? database_1.prisma.division.count({ where }) : Promise.resolve(0),
+        ]);
+        const rows = divisions.map((division) => ({
             ...division,
             jornadas: division.jornadas.map((jornada) => ({
                 ...jornada,
@@ -115,6 +146,7 @@ exports.arbitrajeService = {
                 partidos: ronda.partidos.map((partido) => ({ ...partido, jornada: null, rondaPlayoff: { id: ronda.id, nombre: ronda.nombre, division: { id: division.id, nombre: division.nombre } }, arbitros: partido.arbitros.map((row) => row.arbitro) })),
             })),
         }));
+        return pagination ? { rows, total, page: pagination.page, limit: pagination.limit } : rows;
     },
     async removeAssignment(ligaId, assignmentId, actor) {
         await ownBatch(ligaId, assignmentId, actor);

@@ -23,6 +23,24 @@ function arrange(multiplesCanchas = false) {
     }
 }
 (0, vitest_1.describe)('generateNext court invariants', () => {
+    (0, vitest_1.it)('allows a slot ending exactly at the configured range limit', async () => {
+        (0, generateNextHarness_1.mockDivision)({ duracionPartido: 60, horarioPartido: '13:00 - 15:00' });
+        (0, generateNextHarness_1.mockTeams)(['t1', 't2']);
+        (0, generateNextHarness_1.mockNoPreviousJornadas)();
+        (0, generateNextHarness_1.mockJornadaCreated)();
+        await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [{ ...slot, horaInicio: '14:00', horaFin: '15:00' }]))
+            .resolves.toBeDefined();
+    });
+    vitest_1.it.each([
+        ['15:00', '16:00'],
+        ['14:01', '15:01'],
+    ])('rejects %s-%s outside the configured range', async (horaInicio, horaFin) => {
+        (0, generateNextHarness_1.mockDivision)({ duracionPartido: 60, horarioPartido: '13:00 - 15:00' });
+        (0, generateNextHarness_1.mockTeams)(['t1', 't2']);
+        (0, generateNextHarness_1.mockNoPreviousJornadas)();
+        await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [{ ...slot, horaInicio, horaFin }]))
+            .rejects.toThrow('fuera del rango configurado');
+    });
     (0, vitest_1.it)('requires horaFin to match the authoritative division duration', async () => {
         arrange();
         await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [{ ...slot, horaFin: '19:30' }]))

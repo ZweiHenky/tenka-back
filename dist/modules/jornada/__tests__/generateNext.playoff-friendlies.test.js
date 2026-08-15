@@ -74,7 +74,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             ...ELIM_SLOTS,
             { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'amistoso' },
-            { fecha: '2099-01-01', horaInicio: '22:30', horaFin: '00:00', tipo: 'amistoso' },
+            { fecha: '2099-01-01', horaInicio: '01:30', horaFin: '03:00', tipo: 'amistoso' },
             { fecha: '2099-01-01', horaInicio: '00:00', horaFin: '01:30', tipo: 'amistoso' },
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
@@ -112,9 +112,9 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             ...ELIM_SLOTS,
             { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'amistoso' },
-            { fecha: '2099-01-01', horaInicio: '22:30', horaFin: '00:00', tipo: 'amistoso' },
-            { fecha: '2099-01-01', horaInicio: '00:00', horaFin: '01:30', tipo: 'amistoso' },
             { fecha: '2099-01-01', horaInicio: '01:30', horaFin: '03:00', tipo: 'amistoso' },
+            { fecha: '2099-01-01', horaInicio: '00:00', horaFin: '01:30', tipo: 'amistoso' },
+            { fecha: '2099-01-01', horaInicio: '03:00', horaFin: '04:30', tipo: 'amistoso' },
         ]);
         const calls = generateNextHarness_1.partidoRepository.create.mock.calls;
         // 4 amistosos (eliminatorias usan update, no create)
@@ -205,7 +205,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             ...ELIM_SLOTS,
             { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'amistoso', equipoLocalId: 't5', equipoVisitanteId: 't6' },
-            { fecha: '2099-01-01', horaInicio: '22:30', horaFin: '00:00', tipo: 'amistoso', equipoLocalId: 't7', equipoVisitanteId: 't8' },
+            { fecha: '2099-01-01', horaInicio: '01:30', horaFin: '03:00', tipo: 'amistoso', equipoLocalId: 't7', equipoVisitanteId: 't8' },
             { fecha: '2099-01-01', horaInicio: '00:00', horaFin: '01:30', tipo: 'amistoso', equipoLocalId: 't5' },
         ]);
         const amistosos = generateNextHarness_1.partidoRepository.create.mock.calls
@@ -226,7 +226,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         await generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             ...ELIM_SLOTS,
             { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'amistoso', equipoLocalId: 't5', equipoVisitanteId: 't6' },
-            { fecha: '2099-01-01', horaInicio: '22:30', horaFin: '00:00', tipo: 'amistoso', equipoLocalId: 't5', equipoVisitanteId: 't7' },
+            { fecha: '2099-01-01', horaInicio: '01:30', horaFin: '03:00', tipo: 'amistoso', equipoLocalId: 't5', equipoVisitanteId: 't7' },
         ]);
         const amistosos = generateNextHarness_1.partidoRepository.create.mock.calls
             .filter(([args]) => args.tipoPartido === 'AMISTOSO');
@@ -242,7 +242,7 @@ const generateNextHarness_1 = require("./support/generateNextHarness");
         await (0, vitest_1.expect)(generateNextHarness_1.jornadaService.generateNext(generateNextHarness_1.divisionId, [
             ...ELIM_SLOTS,
             { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'amistoso', equipoLocalId: 't5', equipoVisitanteId: 't6' },
-            { fecha: '2099-01-01', horaInicio: '22:30', horaFin: '00:00', tipo: 'amistoso', equipoLocalId: 't6', equipoVisitanteId: 't5' },
+            { fecha: '2099-01-01', horaInicio: '01:30', horaFin: '03:00', tipo: 'amistoso', equipoLocalId: 't6', equipoVisitanteId: 't5' },
         ])).rejects.toThrow('misma pareja');
         (0, vitest_1.expect)(generateNextHarness_1.partidoRepository.update).not.toHaveBeenCalled();
     });

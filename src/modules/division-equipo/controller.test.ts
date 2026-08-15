@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextFunction, Request, Response } from 'express';
 import type { AuthenticatedUser } from '../../types/auth';
 
-const mocks = vi.hoisted(() => ({ updateSaldoPendiente: vi.fn() }));
+const mocks = vi.hoisted(() => ({ findByDivision: vi.fn(), updateSaldoPendiente: vi.fn() }));
 
 vi.mock('./service', () => ({
   divisionEquipoService: {
+    findByDivision: mocks.findByDivision,
     updateSaldoPendiente: mocks.updateSaldoPendiente,
   },
 }));
@@ -68,5 +69,33 @@ describe('divisionEquipoController.updateSaldoPendiente', () => {
     await divisionEquipoController.updateSaldoPendiente(request({ saldoPendiente: '7.50' }), response(), next);
 
     expect(next).toHaveBeenCalledWith(error);
+  });
+});
+
+describe('divisionEquipoController.findByDivision', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns a public team summary without exposing its owner id', async () => {
+    mocks.findByDivision.mockResolvedValue([{
+      divisionId: 'division-1',
+      equipoId: 'cm-team-ab12',
+      saldoPendiente: '0.00',
+      equipo: { id: 'cm-team-ab12', nombre: 'Leones', logo: null, userId: owner.id },
+    }]);
+    const res = response();
+    const next = vi.fn() as NextFunction;
+
+    await divisionEquipoController.findByDivision(request(undefined), res, next);
+
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: [{
+        divisionId: 'division-1',
+        equipoId: 'cm-team-ab12',
+        saldoPendiente: '0.00',
+        equipo: { id: 'cm-team-ab12', nombre: 'Leones', logo: null, codigo: 'AB12', esPropio: true },
+      }],
+    });
+    expect(next).not.toHaveBeenCalled();
   });
 });

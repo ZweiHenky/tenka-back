@@ -7,6 +7,7 @@ import { assertOwnerOrAdmin } from '../../utils/authorization';
 import { prisma } from '../../config/database';
 import { runInTransaction } from '../../utils/transaction';
 import type { Pagination } from '../../utils/pagination';
+import { signalBackgroundJob } from '../../workers/jobSignals';
 
 const DUPLICATE_NAME_MESSAGE = 'Ya tienes un equipo con ese nombre';
 
@@ -78,6 +79,7 @@ export const equipoService = {
         const media = logoAssetId !== undefined ? await mediaService.prepareAttachment(tx, logoAssetId, actor.id, 'TEAM_LOGO', current.logo, current.logoPublicId) : undefined;
         return equipoRepository.update(id, { ...updateData, ...(media && { logo: media.url, logoPublicId: media.publicId }) }, tx);
       });
+      signalBackgroundJob('media-deletion');
     } catch (error) {
       if (isUniqueConstraintError(error)) throw new ConflictError(DUPLICATE_NAME_MESSAGE);
       throw error;
@@ -96,5 +98,6 @@ export const equipoService = {
       await mediaService.scheduleImageCleanup(old.logo, old.logoPublicId, tx);
       await equipoRepository.delete(id, tx);
     });
+    signalBackgroundJob('media-deletion');
   },
 };

@@ -74,6 +74,7 @@ function mockDivision(opts) {
         return {
             maxEquipos: opts?.maxEquipos ?? 7,
             diasPartido: opts?.diasPartido ?? null,
+            horarioPartido: opts && 'horarioPartido' in opts ? opts.horarioPartido : '00:00 - 23:59',
             duracionPartido: opts && 'duracionPartido' in opts ? opts.duracionPartido : 90,
             ligaId: 'liga-1',
             canchaUnicaId: opts?.canchaUnicaId ?? null,

@@ -5,4 +5,10 @@ export interface DivisionEquipoEntity {
   equipoId: string;
   saldoPendiente?: string;
   division?: DivisionEntity;
+  equipo?: {
+    id: string;
+    nombre: string;
+    logo: string | null;
+    userId: string;
+  };
 }

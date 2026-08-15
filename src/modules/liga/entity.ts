@@ -101,3 +101,26 @@ export interface LigaEntity {
   canchas?: LigaCanchaEntity[];
   arbitros?: LigaArbitroEntity[];
 }
+
+export interface UserLeagueListDto {
+  id: string;
+  nombre: string;
+  logo: string | null;
+}
+
+export interface PublicLeagueListDto extends UserLeagueListDto {
+  descripcion: string;
+  cancha: string | null;
+  ubicacionId: string;
+  divisiones: Array<{
+    id: string;
+    nombre: string;
+    maxEquipos: number;
+    arbitraje: number;
+    diasPartido: string | null;
+    horarioPartido: string | null;
+    categoria: { id: string; nombre: string };
+    tipo: { id: string; nombre: string };
+    estadoLiga: { id: string; nombre: string };
+  }>;
+}

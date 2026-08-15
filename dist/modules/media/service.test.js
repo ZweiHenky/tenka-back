@@ -16,6 +16,7 @@ const mocks = vitest_1.vi.hoisted(() => ({
     jugadorCount: vitest_1.vi.fn(),
     queryRaw: vitest_1.vi.fn(),
     sentry: vitest_1.vi.fn(),
+    signalJob: vitest_1.vi.fn(),
 }));
 vitest_1.vi.mock('cloudinary', () => ({
     v2: {
@@ -37,6 +38,7 @@ vitest_1.vi.mock('../../config/database', () => ({
     },
 }));
 vitest_1.vi.mock('../../instrument', () => ({ Sentry: { captureException: mocks.sentry } }));
+vitest_1.vi.mock('../../workers/jobSignals', () => ({ signalBackgroundJob: mocks.signalJob }));
 const service_1 = require("./service");
 const publicId = 'myleague/local/user-1/team_logo/asset';
 const secureUrl = `https://res.cloudinary.com/test-cloud/image/upload/v1/${publicId}.webp`;
@@ -61,6 +63,7 @@ const secureUrl = `https://res.cloudinary.com/test-cloud/image/upload/v1/${publi
         });
         (0, vitest_1.expect)(mocks.sign).toHaveBeenCalledWith(result.uploadParams, 'test-cloudinary-api-secret');
         (0, vitest_1.expect)(mocks.assetCreate).toHaveBeenCalledWith(vitest_1.expect.objectContaining({ data: vitest_1.expect.objectContaining({ ownerId: 'user-1', kind: 'TEAM_LOGO', publicId: result.publicId }) }));
+        (0, vitest_1.expect)(mocks.signalJob).toHaveBeenCalledWith('media-intents', vitest_1.expect.any(Date));
     });
     (0, vitest_1.it)('rejects another owner and a mismatched public ID before provider verification', async () => {
         mocks.assetFindFirst.mockResolvedValueOnce(null);

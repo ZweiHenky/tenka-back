@@ -12,6 +12,7 @@ import { writeResultInTransaction } from './resultWriter';
 import type { ResultInput } from './validator';
 import type { Pagination } from '../../utils/pagination';
 import { collectScheduleChanges, enqueueScheduleChange } from '../notification/scheduleChangeOutbox';
+import { signalBackgroundJob } from '../../workers/jobSignals';
 
 const pairKey = (a: string, b: string) => a < b ? `${a}|${b}` : `${b}|${a}`
 
@@ -163,7 +164,7 @@ export const partidoService = {
 
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          return await prisma.$transaction(async (tx) => {
+          const updated = await prisma.$transaction(async (tx) => {
             await acquireLeagueScheduleLock(tx, ctx.ligaId)
 
             const lockedCtx = await partidoRepository.findAuthorizationContext(id, tx)
@@ -352,6 +353,8 @@ export const partidoService = {
             if (!updated) throw new StaleReplacementPlanError()
             return { ...exposePartidoRead(updated), jornadasRecalculadas: recalculated.length }
           }, { isolationLevel: 'Serializable' })
+          signalBackgroundJob('notification-outbox')
+          return updated
         } catch (error: any) {
           const retryable = error instanceof StaleReplacementPlanError || error?.code === 'P2034'
           if (retryable && attempt < 2) continue

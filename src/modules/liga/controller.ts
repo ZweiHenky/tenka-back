@@ -5,8 +5,8 @@ import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import { parsePagination } from '../../utils/pagination';
 
-function publicLiga<T extends { logoPublicId?: unknown; canchaPublicId?: unknown }>(liga: T) {
-  const { logoPublicId: _logo, canchaPublicId: _cover, ...safe } = liga;
+function publicLiga<T extends object>(liga: T): Omit<T, 'logoPublicId' | 'canchaPublicId'> {
+  const { logoPublicId: _logo, canchaPublicId: _cover, ...safe } = liga as T & { logoPublicId?: unknown; canchaPublicId?: unknown };
   return safe;
 }
 

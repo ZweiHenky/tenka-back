@@ -57,6 +57,8 @@ const requestContext_1 = require("./middlewares/requestContext");
             error: 'Demasiadas solicitudes. Intenta de nuevo mas tarde.',
             requestId: 'request-429',
         });
+        (0, vitest_1.expect)(response.headers).toHaveProperty('ratelimit');
+        (0, vitest_1.expect)(response.headers['retry-after']).toBeTypeOf('string');
     });
 });
 //# sourceMappingURL=app.hardening.test.js.map

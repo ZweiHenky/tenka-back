@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   ligaFindFirst: vi.fn(),
+  ligaFindMany: vi.fn(),
+  ligaCount: vi.fn(),
 }));
 
 vi.mock('../../config/database', () => ({
   prisma: {
-    liga: { findFirst: mocks.ligaFindFirst },
+    liga: { findFirst: mocks.ligaFindFirst, findMany: mocks.ligaFindMany, count: mocks.ligaCount },
   },
 }));
 
@@ -229,6 +231,33 @@ describe('consultas de lectura de liga', () => {
     expect(mocks.ligaFindFirst).toHaveBeenCalledWith({
       where: { nombreNormalizado: 'liga centro', id: { not: 'liga-1' } },
       select: { id: true },
+    });
+  });
+
+  it('usa una proyeccion publica ligera para la lista paginada', async () => {
+    mocks.ligaFindMany.mockResolvedValue([]);
+    mocks.ligaCount.mockResolvedValue(0);
+
+    await ligaRepository.findAllPaginated({ page: 1, limit: 5 });
+
+    const select = mocks.ligaFindMany.mock.calls[0][0].select;
+    expect(select).toEqual(expect.objectContaining({ id: true, nombre: true, descripcion: true, logo: true, cancha: true, ubicacionId: true }));
+    expect(select).not.toHaveProperty('user');
+    expect(select).not.toHaveProperty('canchas');
+    expect(select).not.toHaveProperty('arbitros');
+    expect(select.divisiones.select).toEqual(expect.objectContaining({ id: true, nombre: true, maxEquipos: true, arbitraje: true }));
+    expect(select.divisiones.select).not.toHaveProperty('tipoCompetencia');
+  });
+
+  it('usa la proyeccion minima de tarjetas para las ligas del propietario', async () => {
+    mocks.ligaFindMany.mockResolvedValue([]);
+
+    await ligaRepository.findByUser(owner.id);
+
+    expect(mocks.ligaFindMany).toHaveBeenCalledWith({
+      where: { userId: owner.id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, nombre: true, logo: true },
     });
   });
 });

@@ -66,10 +66,23 @@ async function processTagJob(job, workerId) {
         logger_1.logger.warn({ provider: 'onesignal', operation: 'sync_tag', attempts, dead, errorCode: providerError?.code ?? 'internal_error' }, 'Tag sync job failed');
     }
 }
+async function nextTagCleanupDueAt() {
+    const [row] = await database_1.prisma.$queryRaw `
+    SELECT MIN(due_at) AS "nextDueAt" FROM (
+      SELECT "nextTryAt" AS due_at FROM onesignal_tag_cleanup_jobs
+      WHERE status = 'PENDING' AND attempts < "maxAttempts"
+      UNION ALL
+      SELECT "leaseUntil" AS due_at FROM onesignal_tag_cleanup_jobs
+      WHERE status = 'PROCESSING'
+    ) due
+  `;
+    return row?.nextDueAt ? new Date(row.nextDueAt) : null;
+}
 async function processTagCleanupJobs(take = 20) {
     const workerId = (0, node_crypto_1.randomUUID)();
     const jobs = await claimTagJobs(workerId, take);
     await Promise.all(jobs.map((job) => processTagJob(job, workerId)));
+    return { processedCount: jobs.length, nextDueAt: await nextTagCleanupDueAt() };
 }
-exports.cleanupService = { claimTagJobs, processTagJob, processTagCleanupJobs };
+exports.cleanupService = { claimTagJobs, processTagJob, nextTagCleanupDueAt, processTagCleanupJobs };
 //# sourceMappingURL=service.js.map

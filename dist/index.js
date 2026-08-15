@@ -57,8 +57,8 @@ async function start() {
         (0, readiness_1.markNotReady)();
         logger_1.logger.info({ event: 'server.shutdown.started', signal });
         const graceful = (async () => {
-            await stopWorkers();
             await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+            await stopWorkers();
             await (0, redis_1.disconnectRedis)();
             await database_1.prisma.$disconnect();
             await instrument_1.Sentry.close(2000);

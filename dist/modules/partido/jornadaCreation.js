@@ -1,8 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.jornadaPartidoCreationService = void 0;
+exports.jornadaPartidoCreationService = exports.parseConfiguredRanges = void 0;
 exports.parseConfiguredDays = parseConfiguredDays;
-exports.parseConfiguredRanges = parseConfiguredRanges;
 exports.weekBounds = weekBounds;
 exports.configuredCandidates = configuredCandidates;
 exports.coveredTeamIds = coveredTeamIds;
@@ -14,6 +13,10 @@ const errors_1 = require("../../utils/errors");
 const scheduleChangeOutbox_1 = require("../notification/scheduleChangeOutbox");
 const repository_1 = require("./repository");
 const timeZone_1 = require("../../utils/timeZone");
+const jobSignals_1 = require("../../workers/jobSignals");
+const timeRanges_1 = require("../../utils/timeRanges");
+var timeRanges_2 = require("../../utils/timeRanges");
+Object.defineProperty(exports, "parseConfiguredRanges", { enumerable: true, get: function () { return timeRanges_2.parseConfiguredRanges; } });
 const DAY_MAP = {
     dom: 0, domingo: 0, domingos: 0, do: 0, d: 0,
     lun: 1, lunes: 1, lu: 1, l: 1,
@@ -50,16 +53,6 @@ function parseConfiguredDays(value) {
             days.add(day);
     }
     return days;
-}
-function parseConfiguredRanges(value) {
-    return value.split('/').flatMap((raw) => {
-        const match = raw.trim().match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
-        if (!match)
-            return [];
-        const start = Number(match[1]) * 60 + Number(match[2]);
-        const end = Number(match[3]) * 60 + Number(match[4]);
-        return start < end ? [{ start, end }] : [];
-    });
 }
 function weekBounds(anchor) {
     const start = new Date(anchor);
@@ -168,7 +161,7 @@ async function buildOptions(jornadaId, actor, client, now = new Date()) {
     const pendientes = equipos.filter((team) => team.pendiente);
     const recomendacion = pendientes.length === 2 ? 'REGULAR' : pendientes.length === 1 ? 'COMPLEMENTO' : 'MANUAL';
     const days = parseConfiguredDays(diasPartido);
-    const ranges = parseConfiguredRanges(horarioPartido);
+    const ranges = (0, timeRanges_1.parseConfiguredRanges)(horarioPartido);
     if (!days.size || !ranges.length)
         throw new errors_1.ValidationError('Los días u horarios configurados en la división no son válidos');
     const candidates = configuredCandidates(now, jornada.fechaInicio, jornada.division.liga.timeZone, days, ranges, duracionPartido, jornada.division.descanso ?? 0);
@@ -241,7 +234,7 @@ exports.jornadaPartidoCreationService = {
             return (0, repository_1.exposePartidoRead)(replay);
         }
         try {
-            return await database_1.prisma.$transaction(async (tx) => {
+            const partido = await database_1.prisma.$transaction(async (tx) => {
                 const jornada = await tx.jornada.findUnique({ where: { id: jornadaId }, select: { division: { select: { ligaId: true, id: true, liga: { select: { timeZone: true } } } } } });
                 if (!jornada)
                     throw new errors_1.NotFoundError('Jornada');
@@ -296,6 +289,8 @@ exports.jornadaPartidoCreationService = {
                 });
                 return (0, repository_1.exposePartidoRead)(partido);
             }, { isolationLevel: 'Serializable' });
+            (0, jobSignals_1.signalBackgroundJob)('notification-outbox');
+            return partido;
         }
         catch (error) {
             if (error?.code === 'P2002' || error?.code === '23P01' || /partidos_cancha_no_overlap/.test(error?.message ?? '')) {

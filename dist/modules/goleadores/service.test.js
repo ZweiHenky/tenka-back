@@ -1,47 +1,52 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const vitest_1 = require("vitest");
-const mocks = vitest_1.vi.hoisted(() => ({ divisionFindFirst: vitest_1.vi.fn(), allocationFindMany: vitest_1.vi.fn() }));
+const mocks = vitest_1.vi.hoisted(() => ({ divisionFindFirst: vitest_1.vi.fn(), queryRaw: vitest_1.vi.fn() }));
 vitest_1.vi.mock('../../config/database', () => ({
     prisma: {
         division: { findFirst: mocks.divisionFindFirst },
-        anotacionPartido: { findMany: mocks.allocationFindMany },
+        $queryRaw: mocks.queryRaw,
     },
 }));
 const service_1 = require("./service");
-const row = (overrides) => ({
-    jugadorId: 'player-1', equipoId: 'team-1', ladoMarcador: 'LOCAL', cantidad: 1,
-    jugadorNombre: 'Snapshot', equipoNombre: 'Snapshot Team',
-    jugador: { nombre: 'Actual', foto: 'photo.jpg' }, equipo: { nombre: 'Current Team' },
-    partido: { tipoPartido: 'REGULAR' }, ...overrides,
-});
 (0, vitest_1.describe)('goleadoresService', () => {
     (0, vitest_1.beforeEach)(() => {
         vitest_1.vi.clearAllMocks();
         mocks.divisionFindFirst.mockResolvedValue({ id: 'division-1' });
     });
-    (0, vitest_1.it)('applies competition side scope, aggregates teams, and returns deterministic sequential ranks', async () => {
-        mocks.allocationFindMany.mockResolvedValue([
-            row({ cantidad: 2 }),
-            row({ equipoId: 'team-2', equipoNombre: 'Second', equipo: null, cantidad: 1, partido: { tipoPartido: 'ELIMINATORIA' } }),
-            row({ jugadorId: 'player-2', jugador: null, jugadorNombre: 'Beto', cantidad: 3 }),
-            row({ jugadorId: 'ignored', cantidad: 10, partido: { tipoPartido: 'AMISTOSO' } }),
-            row({ jugadorId: 'ignored-away', ladoMarcador: 'VISITANTE', cantidad: 10, partido: { tipoPartido: 'COMPLEMENTO' } }),
-            row({ jugadorId: null, jugadorNombre: null, jugador: null, cantidad: 4, partido: { tipoPartido: 'COMPLEMENTO' } }),
+    (0, vitest_1.it)('uses one parameterized aggregate query and preserves deterministic sequential ranking', async () => {
+        mocks.queryRaw.mockResolvedValue([
+            { jugadorId: 'player-1', playerKey: 'player-1', nombre: 'Actual', foto: 'photo.jpg', equipoId: 'team-1', teamKey: 'team-1', equipoNombre: 'Current Team', golesEquipo: 2n, golesJugador: 3n, unattributedGoals: 4n },
+            { jugadorId: 'player-1', playerKey: 'player-1', nombre: 'Actual', foto: 'photo.jpg', equipoId: 'team-2', teamKey: 'team-2', equipoNombre: 'Second', golesEquipo: 1n, golesJugador: 3n, unattributedGoals: 4n },
+            { jugadorId: 'player-2', playerKey: 'player-2', nombre: 'Beto', foto: null, equipoId: 'team-1', teamKey: 'team-1', equipoNombre: 'Current Team', golesEquipo: 3n, golesJugador: 3n, unattributedGoals: 4n },
         ]);
-        await (0, vitest_1.expect)(service_1.goleadoresService.findByDivision('division-1')).resolves.toEqual(vitest_1.expect.objectContaining({
+        const result = await service_1.goleadoresService.findByDivision('division-1');
+        (0, vitest_1.expect)(mocks.queryRaw).toHaveBeenCalledTimes(1);
+        const query = mocks.queryRaw.mock.calls[0][0];
+        (0, vitest_1.expect)(query.values).toEqual(['division-1', 'division-1']);
+        (0, vitest_1.expect)(query.strings.join('')).toContain('SUM(cantidad)');
+        (0, vitest_1.expect)(result).toEqual(vitest_1.expect.objectContaining({
             ranking: 'SEQUENTIAL',
             unattributedGoals: 4,
             rows: [
-                vitest_1.expect.objectContaining({ rank: 1, jugadorId: 'player-1', nombre: 'Actual', goles: 3, equipos: vitest_1.expect.any(Array) }),
+                vitest_1.expect.objectContaining({ rank: 1, jugadorId: 'player-1', nombre: 'Actual', goles: 3, equipos: [
+                        vitest_1.expect.objectContaining({ equipoId: 'team-1', goles: 2 }),
+                        vitest_1.expect.objectContaining({ equipoId: 'team-2', goles: 1 }),
+                    ] }),
                 vitest_1.expect.objectContaining({ rank: 2, jugadorId: 'player-2', nombre: 'Beto', goles: 3 }),
             ],
         }));
     });
+    (0, vitest_1.it)('returns unattributed goals when no player has attributed goals', async () => {
+        mocks.queryRaw.mockResolvedValue([{ jugadorId: null, playerKey: null, nombre: null, foto: null, equipoId: null, teamKey: null, equipoNombre: null, golesEquipo: null, golesJugador: null, unattributedGoals: 5n }]);
+        await (0, vitest_1.expect)(service_1.goleadoresService.findByDivision('division-1')).resolves.toEqual({
+            divisionId: 'division-1', ranking: 'SEQUENTIAL', rows: [], unattributedGoals: 5,
+        });
+    });
     (0, vitest_1.it)('hides draft divisions from public callers', async () => {
         mocks.divisionFindFirst.mockResolvedValue(null);
         await (0, vitest_1.expect)(service_1.goleadoresService.findByDivision('draft')).rejects.toMatchObject({ statusCode: 404 });
-        (0, vitest_1.expect)(mocks.allocationFindMany).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(mocks.queryRaw).not.toHaveBeenCalled();
     });
 });
 //# sourceMappingURL=service.test.js.map

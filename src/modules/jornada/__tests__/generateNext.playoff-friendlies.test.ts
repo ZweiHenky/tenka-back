@@ -90,7 +90,7 @@ describe('generateNext playoff mode — amistosos auto-fill', () => {
     await jornadaService.generateNext(divisionId, [
       ...ELIM_SLOTS,
       { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'amistoso' },
-      { fecha: '2099-01-01', horaInicio: '22:30', horaFin: '00:00', tipo: 'amistoso' },
+      { fecha: '2099-01-01', horaInicio: '01:30', horaFin: '03:00', tipo: 'amistoso' },
       { fecha: '2099-01-01', horaInicio: '00:00', horaFin: '01:30', tipo: 'amistoso' },
     ]);
 
@@ -135,9 +135,9 @@ describe('generateNext playoff mode — amistosos auto-fill', () => {
     await jornadaService.generateNext(divisionId, [
       ...ELIM_SLOTS,
       { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'amistoso' },
-      { fecha: '2099-01-01', horaInicio: '22:30', horaFin: '00:00', tipo: 'amistoso' },
-      { fecha: '2099-01-01', horaInicio: '00:00', horaFin: '01:30', tipo: 'amistoso' },
       { fecha: '2099-01-01', horaInicio: '01:30', horaFin: '03:00', tipo: 'amistoso' },
+      { fecha: '2099-01-01', horaInicio: '00:00', horaFin: '01:30', tipo: 'amistoso' },
+      { fecha: '2099-01-01', horaInicio: '03:00', horaFin: '04:30', tipo: 'amistoso' },
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
@@ -243,7 +243,7 @@ describe('generateNext playoff mode — amistosos auto-fill', () => {
     await jornadaService.generateNext(divisionId, [
       ...ELIM_SLOTS,
       { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'amistoso', equipoLocalId: 't5', equipoVisitanteId: 't6' },
-      { fecha: '2099-01-01', horaInicio: '22:30', horaFin: '00:00', tipo: 'amistoso', equipoLocalId: 't7', equipoVisitanteId: 't8' },
+      { fecha: '2099-01-01', horaInicio: '01:30', horaFin: '03:00', tipo: 'amistoso', equipoLocalId: 't7', equipoVisitanteId: 't8' },
       { fecha: '2099-01-01', horaInicio: '00:00', horaFin: '01:30', tipo: 'amistoso', equipoLocalId: 't5' },
     ]);
 
@@ -267,7 +267,7 @@ describe('generateNext playoff mode — amistosos auto-fill', () => {
     await jornadaService.generateNext(divisionId, [
       ...ELIM_SLOTS,
       { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'amistoso', equipoLocalId: 't5', equipoVisitanteId: 't6' },
-      { fecha: '2099-01-01', horaInicio: '22:30', horaFin: '00:00', tipo: 'amistoso', equipoLocalId: 't5', equipoVisitanteId: 't7' },
+      { fecha: '2099-01-01', horaInicio: '01:30', horaFin: '03:00', tipo: 'amistoso', equipoLocalId: 't5', equipoVisitanteId: 't7' },
     ]);
     const amistosos = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls
       .filter(([args]: any[]) => args.tipoPartido === 'AMISTOSO');
@@ -285,7 +285,7 @@ describe('generateNext playoff mode — amistosos auto-fill', () => {
     await expect(jornadaService.generateNext(divisionId, [
       ...ELIM_SLOTS,
       { fecha: '2099-01-01', horaInicio: '21:00', horaFin: '22:30', tipo: 'amistoso', equipoLocalId: 't5', equipoVisitanteId: 't6' },
-      { fecha: '2099-01-01', horaInicio: '22:30', horaFin: '00:00', tipo: 'amistoso', equipoLocalId: 't6', equipoVisitanteId: 't5' },
+      { fecha: '2099-01-01', horaInicio: '01:30', horaFin: '03:00', tipo: 'amistoso', equipoLocalId: 't6', equipoVisitanteId: 't5' },
     ])).rejects.toThrow('misma pareja');
     expect(partidoRepository.update).not.toHaveBeenCalled();
   });

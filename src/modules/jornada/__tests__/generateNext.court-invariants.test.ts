@@ -29,6 +29,28 @@ function arrange(multiplesCanchas = false) {
 }
 
 describe('generateNext court invariants', () => {
+  it('allows a slot ending exactly at the configured range limit', async () => {
+    mockDivision({ duracionPartido: 60, horarioPartido: '13:00 - 15:00' });
+    mockTeams(['t1', 't2']);
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+
+    await expect(jornadaService.generateNext(divisionId, [{ ...slot, horaInicio: '14:00', horaFin: '15:00' }]))
+      .resolves.toBeDefined();
+  });
+
+  it.each([
+    ['15:00', '16:00'],
+    ['14:01', '15:01'],
+  ])('rejects %s-%s outside the configured range', async (horaInicio, horaFin) => {
+    mockDivision({ duracionPartido: 60, horarioPartido: '13:00 - 15:00' });
+    mockTeams(['t1', 't2']);
+    mockNoPreviousJornadas();
+
+    await expect(jornadaService.generateNext(divisionId, [{ ...slot, horaInicio, horaFin }]))
+      .rejects.toThrow('fuera del rango configurado');
+  });
+
   it('requires horaFin to match the authoritative division duration', async () => {
     arrange();
     await expect(jornadaService.generateNext(divisionId, [{ ...slot, horaFin: '19:30' }]))

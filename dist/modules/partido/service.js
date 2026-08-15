@@ -12,6 +12,7 @@ const leagueScheduleLock_1 = require("../../utils/leagueScheduleLock");
 const playoffFinalization_1 = require("./playoffFinalization");
 const resultWriter_1 = require("./resultWriter");
 const scheduleChangeOutbox_1 = require("../notification/scheduleChangeOutbox");
+const jobSignals_1 = require("../../workers/jobSignals");
 const pairKey = (a, b) => a < b ? `${a}|${b}` : `${b}|${a}`;
 class StaleReplacementPlanError extends Error {
 }
@@ -144,7 +145,7 @@ exports.partidoService = {
                 throw new errors_1.ValidationError('Los equipos del intercambio son obligatorios');
             for (let attempt = 0; attempt < 3; attempt += 1) {
                 try {
-                    return await database_1.prisma.$transaction(async (tx) => {
+                    const updated = await database_1.prisma.$transaction(async (tx) => {
                         await (0, leagueScheduleLock_1.acquireLeagueScheduleLock)(tx, ctx.ligaId);
                         const lockedCtx = await repository_1.partidoRepository.findAuthorizationContext(id, tx);
                         if (!lockedCtx)
@@ -329,6 +330,8 @@ exports.partidoService = {
                             throw new StaleReplacementPlanError();
                         return { ...(0, repository_1.exposePartidoRead)(updated), jornadasRecalculadas: recalculated.length };
                     }, { isolationLevel: 'Serializable' });
+                    (0, jobSignals_1.signalBackgroundJob)('notification-outbox');
+                    return updated;
                 }
                 catch (error) {
                     const retryable = error instanceof StaleReplacementPlanError || error?.code === 'P2034';

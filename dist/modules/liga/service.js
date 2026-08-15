@@ -6,6 +6,7 @@ const repository_1 = require("./repository");
 const service_1 = require("../media/service");
 const database_1 = require("../../config/database");
 const transaction_1 = require("../../utils/transaction");
+const jobSignals_1 = require("../../workers/jobSignals");
 const DUPLICATE_NAME_MESSAGE = 'Ya existe una liga con ese nombre';
 const DUPLICATE_COURT_MESSAGE = 'Ya existe una cancha con ese nombre en esta liga';
 const MINIMUM_COURTS_MESSAGE = 'Una liga con múltiples canchas debe conservar al menos 2 canchas activas';
@@ -199,6 +200,7 @@ exports.ligaService = {
                     };
                     return repository_1.ligaRepository.update(id, writeData, courtWrites, arbitros, disablingMultipleCourts, tx);
                 });
+            (0, jobSignals_1.signalBackgroundJob)('media-deletion');
         }
         catch (error) {
             if (isCourtUniqueConstraintError(error))
@@ -222,6 +224,7 @@ exports.ligaService = {
             await service_1.mediaService.scheduleImageCleanup(old.cancha, old.canchaPublicId, tx);
             await repository_1.ligaRepository.delete(id, 'liga' in tx ? tx : undefined);
         });
+        (0, jobSignals_1.signalBackgroundJob)('media-deletion');
     },
     async getCanchas(ligaId, actor) {
         const canchas = await repository_1.ligaRepository.findManageableCanchas(ligaId, actor);

@@ -12,6 +12,13 @@ exports.tablaPosicionRepository = {
                     include: { equipo: { select: { id: true, nombre: true, logo: true } } },
                     orderBy: { puntos: 'desc' },
                 },
+            },
+        });
+    },
+    async findTeamsByDivision(divisionId, actor) {
+        return database_1.prisma.division.findFirst({
+            where: { id: divisionId, ...(0, divisionVisibility_1.visibleDivisionWhere)(actor) },
+            select: {
                 equipos: {
                     select: {
                         equipoId: true,

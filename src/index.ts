@@ -25,8 +25,8 @@ async function start() {
     logger.info({ event: 'server.shutdown.started', signal });
 
     const graceful = (async () => {
-      await stopWorkers();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      await stopWorkers();
       await disconnectRedis();
       await prisma.$disconnect();
       await Sentry.close(2_000);
