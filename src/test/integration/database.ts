@@ -1,7 +1,7 @@
 import { config } from 'dotenv';
 import { resolve } from 'node:path';
 
-export const INTEGRATION_SCHEMA = 'myleague_integration';
+export const INTEGRATION_SCHEMA = 'tenka_integration';
 
 let cachedUrl: string | undefined;
 

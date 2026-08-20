@@ -5,7 +5,7 @@ exports.getIntegrationDatabaseUrl = getIntegrationDatabaseUrl;
 exports.getIntegrationPgConnectionString = getIntegrationPgConnectionString;
 const dotenv_1 = require("dotenv");
 const node_path_1 = require("node:path");
-exports.INTEGRATION_SCHEMA = 'myleague_integration';
+exports.INTEGRATION_SCHEMA = 'tenka_integration';
 let cachedUrl;
 function databaseIdentity(url) {
     const hostname = url.hostname.toLowerCase().replace('-pooler.', '.');

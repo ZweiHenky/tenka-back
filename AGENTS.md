@@ -32,7 +32,8 @@ Uses **pnpm** (see `pnpm-lock.yaml`). Do not use npm/yarn. All scripts and comma
 - Uses `prisma-client` generator (not `@prisma/client`). Generated output: `src/generated/prisma/` (gitignored, must be generated before first build).
 - `prisma.config.ts` loads env via `dotenv/config` so the Prisma CLI picks up `DATABASE_URL`. Also defines `migrations.seed` for the seed script.
 - Driver adapter: `@prisma/adapter-pg` + `pg` (instanciado en `src/config/database.ts`, compartido con Better Auth).
-- Models: `User`, `Account`, `Session`, `Verification` — modelos de Better Auth con `phoneNumber` + `phoneNumberVerified` en User. Más los modelos de dominio del sistema de ligas (incluye `Jugador`, `EquipoJugador`, `DivisionJugador`, `Goleador`, `Arbitraje`, `DisponibilidadCancha`, etc.).
+- Models: `User`, `Account`, `Session`, `Verification` — modelos de Better Auth con `phoneNumber` + `phoneNumberVerified` en User. Más los modelos de dominio del sistema de ligas (incluye `Jugador`, `EquipoJugador`, `DivisionJugador`, `LigaCancha`, `DivisionCanchaHorario`, `LigaArbitro`, `PartidoArbitro`, `TandaArbitral`, etc.).
+- Ojo: los módulos `disponibilidad-cancha` y `goleadores` **no tienen modelo Prisma propio** — son vistas derivadas de `Partido`. La ocupación de canchas se calcula consultando los partidos de la liga (`Partido → Jornada/RondaPlayoff → Division → ligaId`), no de una tabla de reservas.
 - Migration already applied (`prisma/migrations/`).
 - Seeds and ad hoc database scripts must run through `scripts/development-script.mjs`; direct execution is blocked.
 - Direct Prisma CLI commands are prohibited. Use the `pnpm db:*` scripts documented in `../DATABASE-SAFETY.md`.
@@ -55,6 +56,45 @@ TipoCompetencia ────────┘
 - Cada **Liga** contiene una o más **Divisiones**.
 - Las **Divisiones** referencian `Categoria`, `Tipo`, `EstadoLiga`, `TipoCompetencia` como catálogos.
 - **Jugador** es una entidad ligada a un `User` vía `phoneNumber` (perfil "mi perfil"). Se relaciona con `Equipo` (`EquipoJugador`, con `dorsal`) y con `Division` (`DivisionJugador`) a través de pivotes.
+
+## Horario por cancha (`DivisionCanchaHorario`)
+
+Una división define **días y horario por cada cancha** en la que juega. `duracionPartido` y `descanso` siguen siendo de la división.
+
+**Regla de resolución** — única implementación en [`src/utils/divisionSchedule.ts`](src/utils/divisionSchedule.ts) (`resolveDivisionSchedule`), que devuelve un `Map<canchaId | null, { days, ranges }>`:
+
+| Caso | Resultado |
+|------|-----------|
+| `multiplesCanchas = false` | Clave `null` con los escalares de `Division`. Las filas se ignoran. |
+| Multi-cancha **con** filas | Una entrada por cancha configurada **y activa**. Sin entrada = la división no juega ahí. |
+| Multi-cancha **sin** filas | Fallback legacy: todas las canchas activas heredan los escalares, restringido por `canchaUnicaId`. Mantiene vivas a las divisiones anteriores a la migración. |
+
+**Reglas al tocar esto:**
+- `Division.diasPartido`/`horarioPartido` son un **resumen denormalizado** (unión de las filas) que se escribe con `summarizeDivisionSchedule` para la vista pública y los clientes viejos. Es un **superconjunto**: nunca validar contra ellos, siempre pasar por `resolveDivisionSchedule`.
+- Escribir horarios (`horariosPorCancha` en create/update) va **dentro de `acquireLeagueScheduleLock` y una transacción**: escalares, filas y resumen deben aterrizar juntos, y la generación relee bajo el mismo lock.
+- Cuando llegan filas se fuerza `canchaUnicaId: null` — las filas lo sustituyen. Un arreglo vacío borra las filas y revierte a los escalares.
+- Cero canchas con días **y** rangos usables es un **error de configuración**, no un resultado vacío: `buildOptions` lanza `'La división no tiene canchas con horario configurado'`.
+- `parseConfiguredDays` vive en el mismo módulo y es el **único** parser de días del backend (`jornadaCreation` lo re-exporta por compatibilidad; `parseDaysPartido` delega en él).
+- Borrar una cancha con horarios la **desactiva** en vez de borrarla; apagar `multiplesCanchas` borra todas las filas de la liga.
+
+## Canchas: no chocar entre divisiones
+
+Las canchas (`LigaCancha`) son de la **liga**, y todas sus divisiones las comparten. No hay tabla de reservas: la ocupación se deriva de los `Partido` ya guardados, consultando por `ligaId`, así que es cross-división por construcción. Cuatro capas lo garantizan:
+
+| Capa | Dónde | Alcance |
+|------|-------|---------|
+| Pre-chequeo (UX) | `jornada/service.ts` → `validateLeagueCourtCapacity` fuera de la transacción | Liga completa |
+| Validación autoritativa | La misma función, **dentro** del lock y de la transacción Serializable | Liga completa |
+| Lock por liga | `utils/leagueScheduleLock.ts` → `pg_advisory_xact_lock(hashtext(ligaId))` | Todas las divisiones de una liga comparten la clave |
+| Constraint de Postgres | `partidos_cancha_no_overlap` (`EXCLUDE USING gist`) | Global, ciego a divisiones |
+
+**Reglas al tocar este código:**
+- Todo camino que escriba `Partido.fecha`/`canchaId`, o que mute canchas (`liga/service.ts`: `updateCancha`, `deleteCancha`, apagar `multiplesCanchas`), **debe** tomar `acquireLeagueScheduleLock` y releer sus contadores dentro del lock. Sin eso, `onDelete: SetNull` puede dejar partidos sin cancha, fuera del constraint, y bloquear la generación de toda la liga.
+- Orden de locks: **advisory primero, row lock (`lockAttachmentTarget`) después**.
+- El constraint solo aplica con `canchaId IS NOT NULL`, así que las ligas de cancha única dependen únicamente del lock.
+- `validateLeagueCourtCapacity` acota la consulta de ocupación con un piso (`earliestDraftStart - max(duracionMáxDeLaLiga, 1440min)`) para no releer el historial completo.
+- **El servidor no asigna canchas, solo valida.** La `canchaId` de cada slot la manda el cliente; aquí no hay planificador. (Existió un `disponibilidad-cancha/planner.ts` sin llamadores y se eliminó.)
+- Una división con `duracionPartido` nulo hace su partido inmensurable. **No inventes una duración por defecto** — enmascararía choques reales. El chequeo se difiere hasta saber si ese partido comparte cancha y ventana con lo que se está programando, y el error nombra la **división** culpable, para que una división mal configurada no bloquee a las otras 9 de la liga.
 
 ## Division States (Draft / Publish)
 
@@ -122,7 +162,7 @@ src/
     arbitraje/           # asignación de árbitros + PDF
     categoria/           # catálogo de categorías
     cleanup/             # lógica de limpieza de datos obsoletos
-    disponibilidad-cancha/  # disponibilidad de canchas por liga
+    disponibilidad-cancha/  # lectura de ocupación de canchas por liga (derivada de Partido)
     division/            # divisiones + estados + reset
     division-equipo/     # pivot division↔equipo
     equipo/              # equipos + código de invitación
@@ -240,6 +280,16 @@ interface ApiResponse<T> { success: boolean; data?: T; message?: string; error?:
   - Prisma: se mockea `src/config/database` con funciones vi.fn() para cada modelo
   - Repositorios: se mockean directo con `vi.fn()` en las funciones expuestas
 - **Referencias**: `src/modules/jornada/__tests__/generateNext.test.ts`, `src/modules/user/controller.test.ts`, `src/middlewares/errorHandler.test.ts`, `src/plugins/otpUniqueness.test.ts`
+
+### Tests de integración (base real)
+
+- **Script**: `pnpm test:integration` (config `vitest.integration.config.ts`). Requiere `TEST_DATABASE_URL` con `schema=tenka_integration` y la extensión `btree_gist`.
+- **Aislamiento**: el global setup hace `DROP SCHEMA … CASCADE` y recrea `tenka_integration`; `getIntegrationDatabaseUrl()` rechaza cualquier URL que no apunte a ese esquema, así que nunca puede tocar desarrollo ni producción.
+- **Migración baselineada**: `vitest.integration.global-setup.ts` marca `20260813233356_league_timezone_and_instant` como aplicada (`migrate resolve --applied`) antes del `deploy`. Esa migración consulta `table_schema = 'public'` hardcodeado mientras su `ALTER TABLE` resuelve por `search_path`, así que falla contra un esquema que no sea `public`. **No editar ese archivo** — ya está aplicado en producción y cambiarlo rompería su checksum. Es un no-op sobre un esquema recién creado.
+- **Para qué sirven**: cubren lo que los mocks no pueden observar — concurrencia, locks y constraints reales. Ver `src/test/integration/data-integrity.integration.test.ts`.
+- **Cómo probar un lock**: nunca sincronices con un `setTimeout` fijo; contra una base remota no distingue "bloqueado" de "lento" y el test pasa aunque quites el lock. Usa el patrón de `waitForBlockedAdvisoryLock()`, que espera a ver una sesión parada en un advisory lock **no otorgado** en `pg_locks`. Al escribir un test de concurrencia, **verifica que falle al quitar el lock**.
+- **Un solo reloj por comparación temporal.** El reloj del proceso y el de Neon derivan unos cientos de milisegundos en ambos sentidos. Si escribes un timestamp con el reloj de la app (Prisma `@default(now())`, `new Date()`) y luego lo comparas contra `NOW()` del servidor, el test pasa o falla según la deriva del momento. El código de producción ya usa `NOW()` en ambos lados (ver `notification/scheduleChangeOutbox.ts` y `notification/service.ts`); **los tests deben hacer lo mismo** — ancla las filas con `NOW() - INTERVAL '1 minute'` en vez de confiar en el default de Prisma.
+- **Acota las consultas a los datos del propio test.** Las colas se consultan por estado (`status = 'PENDING'`), así que un test sin filtro recoge las filas que dejaron los otros del mismo archivo y su resultado depende del orden de ejecución.
 
 ## Seed Data (`prisma/seed.ts`)
 

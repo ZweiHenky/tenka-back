@@ -1,5 +1,7 @@
 import { prisma } from '../../config/database';
-import { NotFoundError } from '../../utils/errors';
+import { NotFoundError, ValidationError } from '../../utils/errors';
+import { mediaService } from '../media/service';
+import { signalBackgroundJob } from '../../workers/jobSignals';
 
 const sanitizedUserSelect = {
   id: true,
@@ -29,5 +31,75 @@ export const userService = {
     if (!user) throw new NotFoundError('Usuario');
 
     return user;
+  },
+
+  async deleteAccount(userId: string, email: string): Promise<void> {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, image: true, imagePublicId: true },
+    });
+    if (!user) throw new NotFoundError('Usuario');
+    if (user.email.trim().toLowerCase() !== email.trim().toLowerCase()) {
+      throw new ValidationError('El correo no coincide. Escribe el correo de tu cuenta para confirmar.');
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const ligas = await tx.liga.findMany({
+        where: { userId },
+        select: { logo: true, logoPublicId: true, cancha: true, canchaPublicId: true },
+      });
+      for (const liga of ligas) {
+        await mediaService.scheduleImageCleanup(liga.logo, liga.logoPublicId, tx);
+        await mediaService.scheduleImageCleanup(liga.cancha, liga.canchaPublicId, tx);
+      }
+      await tx.liga.deleteMany({ where: { userId } });
+
+      const equipos = await tx.equipo.findMany({
+        where: { userId },
+        select: { logo: true, logoPublicId: true },
+      });
+      for (const equipo of equipos) {
+        await mediaService.scheduleImageCleanup(equipo.logo, equipo.logoPublicId, tx);
+      }
+      await tx.equipo.deleteMany({ where: { userId } });
+
+      const jugador = await tx.jugador.findFirst({
+        where: { userId },
+        select: { id: true, foto: true, fotoPublicId: true },
+      });
+      if (jugador) {
+        await mediaService.scheduleImageCleanup(jugador.foto, jugador.fotoPublicId, tx);
+        await tx.jugador.delete({ where: { id: jugador.id } });
+      }
+
+      await tx.partidoRefereeAccess.deleteMany({ where: { createdById: userId } });
+
+      const subscriptions = await tx.divisionNotificationSubscription.findMany({
+        where: { userId },
+        select: { oneSignalId: true, divisionId: true },
+      });
+      for (const subscription of subscriptions) {
+        const tag = `division_${subscription.divisionId}`;
+        await tx.oneSignalTagCleanupJob.upsert({
+          where: { oneSignalId_tag: { oneSignalId: subscription.oneSignalId, tag } },
+          create: { oneSignalId: subscription.oneSignalId, tag, desired: false },
+          update: { desired: false, status: 'PENDING', attempts: 0, lastError: null, deadAt: null, leaseUntil: null, lockedBy: null, nextTryAt: new Date() },
+        });
+      }
+      await tx.divisionNotificationSubscription.deleteMany({ where: { userId } });
+
+      const mediaAssets = await tx.mediaAsset.findMany({
+        where: { ownerId: userId, status: { in: ['PENDING', 'UPLOADED', 'ATTACHED'] } },
+        select: { publicId: true },
+      });
+      for (const asset of mediaAssets) {
+        await mediaService.scheduleDeletion(asset.publicId, tx);
+      }
+
+      await mediaService.scheduleImageCleanup(user.image, user.imagePublicId, tx);
+      await tx.user.delete({ where: { id: userId } });
+    });
+    signalBackgroundJob('media-deletion');
+    signalBackgroundJob('tag-cleanup');
   },
 };

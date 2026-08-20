@@ -42,7 +42,7 @@ vi.mock('../../workers/jobSignals', () => ({ signalBackgroundJob: mocks.signalJo
 
 import { mediaService } from './service';
 
-const publicId = 'myleague/local/user-1/team_logo/asset';
+const publicId = 'tenka/local/user-1/team_logo/asset';
 const secureUrl = `https://res.cloudinary.com/test-cloud/image/upload/v1/${publicId}.webp`;
 
 describe('mediaService upload lifecycle', () => {
@@ -58,7 +58,7 @@ describe('mediaService upload lifecycle', () => {
 
   it('creates a server-owned namespace and signs the exact policy', async () => {
     const result = await mediaService.createUploadIntent('user-1', 'TEAM_LOGO');
-    expect(result.publicId).toMatch(/^myleague\/local\/user-1\/team_logo\/[0-9a-f-]{36}$/);
+    expect(result.publicId).toMatch(/^tenka\/local\/user-1\/team_logo\/[0-9a-f-]{36}$/);
     expect(result.uploadParams).toMatchObject({
       public_id: result.publicId,
       allowed_formats: 'jpg,jpeg,png,webp,heic',

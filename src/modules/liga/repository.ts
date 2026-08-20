@@ -194,7 +194,7 @@ export const ligaRepository: LigaRepository = {
   async findDeleteContext(id: string, actor: AuthenticatedUser) {
     return prisma.liga.findFirst({
       where: actor.rol === 'ADMINISTRADOR' ? { id } : { id, userId: actor.id },
-      select: { logo: true, logoPublicId: true, cancha: true, canchaPublicId: true },
+      select: { nombre: true, logo: true, logoPublicId: true, cancha: true, canchaPublicId: true },
     });
   },
 
@@ -334,6 +334,8 @@ export const ligaRepository: LigaRepository = {
     const execute = async (tx: Prisma.TransactionClient) => {
       if (clearDivisionCourts) {
         await tx.division.updateMany({ where: { ligaId: id }, data: { canchaUnicaId: null } });
+        // Per-court schedules are meaningless once the league runs a single court.
+        await tx.divisionCanchaHorario.deleteMany({ where: { division: { ligaId: id } } });
       }
       if (canchas) {
         const renamed = canchas.filter((cancha) =>

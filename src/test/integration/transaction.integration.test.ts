@@ -100,23 +100,37 @@ test('two workers claim each outbox row exactly once with skip locked', async ()
     providerIdempotencyKey: randomUUID(),
   })) });
 
+  // Prisma stamps nextAttemptAt with the application clock (@default(now())) while the claim
+  // compares against the server's NOW(). A few hundred ms of drift between the two is enough to
+  // leave every row "not yet due", so anchor them to the database clock instead.
+  await observer.query(
+    `UPDATE "${INTEGRATION_SCHEMA}".notification_outbox
+        SET "nextAttemptAt" = NOW() - INTERVAL '1 minute'
+      WHERE "divisionId" = $1`,
+    [divisionId],
+  );
+
+  // Scoped to this test's division: an unfiltered claim would also pick up rows left by
+  // other tests in this file.
   const claim = async (workerId: string) => observer.query<{ id: string }>(`
     WITH due AS (
       SELECT id FROM "${INTEGRATION_SCHEMA}".notification_outbox
-      WHERE status = 'PENDING' AND "nextAttemptAt" <= NOW()
+      WHERE status = 'PENDING' AND "nextAttemptAt" <= NOW() AND "divisionId" = $2
       ORDER BY "nextAttemptAt" FOR UPDATE SKIP LOCKED LIMIT 3
     )
     UPDATE "${INTEGRATION_SCHEMA}".notification_outbox job
     SET status = 'PROCESSING', "lockedBy" = $1, "leaseUntil" = NOW() + INTERVAL '60 seconds', "updatedAt" = NOW()
     FROM due WHERE job.id = due.id RETURNING job.id
-  `, [workerId]);
+  `, [workerId, divisionId]);
 
   const [first, second] = await Promise.all([claim('worker-a'), claim('worker-b')]);
   const ids = [...first.rows, ...second.rows].map((row) => row.id);
+  // What matters is that every row is claimed exactly once. The split depends on how the two
+  // connections interleave, so only the per-worker LIMIT is guaranteed.
   expect(ids).toHaveLength(6);
   expect(new Set(ids).size).toBe(6);
-  expect(first.rows).toHaveLength(3);
-  expect(second.rows).toHaveLength(3);
+  expect(first.rows.length).toBeLessThanOrEqual(3);
+  expect(second.rows.length).toBeLessThanOrEqual(3);
 });
 
 test('schedule changes merge atomically and retain one provider idempotency key', async () => {

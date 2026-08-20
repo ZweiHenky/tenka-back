@@ -2,7 +2,7 @@ import { defineConfig } from "prisma/config";
 import { z } from "zod";
 
 const commandAuth = process.env["PRISMA_COMMAND_AUTH"];
-if (commandAuth !== "myleague-prisma-wrapper-v1") {
+if (commandAuth !== "tenka-prisma-wrapper-v1") {
   throw new Error("Direct Prisma CLI access is disabled. Use a pnpm db:* command.");
 }
 

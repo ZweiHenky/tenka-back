@@ -73,7 +73,8 @@ exports.ligaController = {
     },
     async delete(req, res, next) {
         try {
-            await service_1.ligaService.delete(req.params.id, req.user);
+            const confirmName = typeof req.body?.confirmName === 'string' && req.body.confirmName.trim() ? req.body.confirmName : undefined;
+            await service_1.ligaService.delete(req.params.id, req.user, confirmName);
             (0, response_1.noContent)(res);
         }
         catch (err) {

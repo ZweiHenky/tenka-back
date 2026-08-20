@@ -4,7 +4,7 @@ exports.createDevelopmentPrismaClient = createDevelopmentPrismaClient;
 const adapter_pg_1 = require("@prisma/adapter-pg");
 const env_1 = require("../config/env");
 const client_1 = require("../generated/prisma/client");
-const DEVELOPMENT_SCRIPT_AUTH = 'myleague-development-script-v1';
+const DEVELOPMENT_SCRIPT_AUTH = 'tenka-development-script-v1';
 function createDevelopmentPrismaClient() {
     if (process.env.DEVELOPMENT_SCRIPT_AUTH !== DEVELOPMENT_SCRIPT_AUTH) {
         throw new Error('Direct database script execution is disabled. Use a pnpm db:script:* command.');

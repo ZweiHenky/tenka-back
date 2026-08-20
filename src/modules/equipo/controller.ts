@@ -42,6 +42,10 @@ export const equipoController = {
   },
 
   async delete(req: Request, res: Response, next: NextFunction) {
-    try { await equipoService.delete(req.params.id, req.user!); noContent(res); } catch (e) { next(e); }
+    try {
+      const confirmName = typeof req.body?.confirmName === 'string' && req.body.confirmName.trim() ? req.body.confirmName : undefined;
+      await equipoService.delete(req.params.id, req.user!, confirmName);
+      noContent(res);
+    } catch (e) { next(e); }
   },
 };

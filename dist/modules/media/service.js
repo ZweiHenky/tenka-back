@@ -62,7 +62,7 @@ function assertDeliveryUrl(url, publicId) {
 }
 async function createUploadIntent(ownerId, kind) {
     const policy = POLICIES[kind];
-    const publicId = `myleague/${env_1.env.APP_ENV}/${ownerId}/${kind.toLowerCase()}/${(0, crypto_1.randomUUID)()}`;
+    const publicId = `tenka/${env_1.env.APP_ENV}/${ownerId}/${kind.toLowerCase()}/${(0, crypto_1.randomUUID)()}`;
     const timestamp = Math.floor(Date.now() / 1000);
     const gravity = kind === 'LEAGUE_LOGO' || kind === 'TEAM_LOGO' ? 'g_center' : 'g_auto';
     const uploadParams = {

@@ -128,6 +128,11 @@ export const jugadorController = {
         const old = await tx.jugador.findUniqueOrThrow({ where: { id: req.params.id }, select: { foto: true, fotoPublicId: true } });
         const media = await mediaService.prepareAttachment(tx, photoAssetId, req.user!.id, 'PLAYER_PHOTO', old.foto, old.fotoPublicId);
         if (dorsal != null && equipoId) {
+          const membership = await tx.equipoJugador.findUnique({
+            where: { equipoId_jugadorId: { equipoId, jugadorId: req.params.id } },
+            select: { jugadorId: true },
+          });
+          if (!membership) throw new NotFoundError('Jugador en este equipo');
           await tx.equipoJugador.update({
             where: { equipoId_jugadorId: { equipoId, jugadorId: req.params.id } },
             data: { dorsal },
@@ -142,6 +147,7 @@ export const jugadorController = {
       ok(res, jugador, 'Jugador actualizado exitosamente');
     } catch (e: any) {
       if (e?.code === 'P2002') next(new ConflictError('Ese dorsal ya está usado en este equipo'));
+      else if (e?.code === 'P2025') next(new NotFoundError('Jugador'));
       else next(e);
     }
   },

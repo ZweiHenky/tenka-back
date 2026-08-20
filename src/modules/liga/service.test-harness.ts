@@ -30,6 +30,9 @@ const mocks = vi.hoisted(() => ({
   divisionCount: vi.fn(),
   partidoArbitroCount: vi.fn(),
   ubicacionFindUnique: vi.fn(),
+  executeRawUnsafe: vi.fn(),
+  divisionCanchaHorarioCount: vi.fn(),
+  divisionCanchaHorarioDeleteMany: vi.fn(),
 }));
 
 vi.mock('./repository', () => ({
@@ -51,6 +54,9 @@ vi.mock('./repository', () => ({
 
 vi.mock('../../config/database', () => ({
   prisma: {
+    // acquireLeagueScheduleLock runs against whatever client runInTransaction hands it; with no
+    // $transaction on the mock that is this object, so it needs the raw-exec entry point.
+    $executeRawUnsafe: mocks.executeRawUnsafe,
     ligaArbitro: {
       findFirst: mocks.arbitroFindFirst,
       findUnique: mocks.arbitroFindUnique,
@@ -72,6 +78,10 @@ vi.mock('../../config/database', () => ({
     },
     division: {
       count: mocks.divisionCount,
+    },
+    divisionCanchaHorario: {
+      count: mocks.divisionCanchaHorarioCount,
+      deleteMany: mocks.divisionCanchaHorarioDeleteMany,
     },
     partidoArbitro: {
       count: mocks.partidoArbitroCount,
@@ -110,6 +120,8 @@ export const existingLiga = {
 export function resetServiceMocks() {
   vi.clearAllMocks();
   mocks.ubicacionFindUnique.mockResolvedValue({ timeZone: 'America/Mexico_City' });
+  mocks.divisionCanchaHorarioCount.mockResolvedValue(0);
+  mocks.divisionCanchaHorarioDeleteMany.mockResolvedValue({ count: 0 });
 }
 
 export function getServiceMocks() {

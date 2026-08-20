@@ -169,7 +169,7 @@ exports.ligaRepository = {
     async findDeleteContext(id, actor) {
         return database_1.prisma.liga.findFirst({
             where: actor.rol === 'ADMINISTRADOR' ? { id } : { id, userId: actor.id },
-            select: { logo: true, logoPublicId: true, cancha: true, canchaPublicId: true },
+            select: { nombre: true, logo: true, logoPublicId: true, cancha: true, canchaPublicId: true },
         });
     },
     async findManagementContext(id, actor) {

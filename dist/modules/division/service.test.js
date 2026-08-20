@@ -267,4 +267,24 @@ const tx = {
         (0, vitest_1.expect)(mocks.delete).not.toHaveBeenCalled();
     });
 });
+(0, vitest_1.describe)('segunda condicion de eliminacion de division', () => {
+    (0, vitest_1.beforeEach)(() => {
+        vitest_1.vi.clearAllMocks();
+        mocks.divisionFindFirst.mockResolvedValue({ id: 'division-1', nombre: 'Primera' });
+        mocks.transaction.mockImplementation(async (callback) => callback(tx));
+        mocks.subscriptionsFindMany.mockResolvedValue([]);
+    });
+    (0, vitest_1.it)('permite eliminar cuando el nombre escrito coincide (ignorando mayusculas)', async () => {
+        await (0, vitest_1.expect)(service_1.divisionService.delete('division-1', owner, 'primera')).resolves.toBeUndefined();
+        (0, vitest_1.expect)(mocks.delete).toHaveBeenCalledWith('division-1', tx);
+    });
+    (0, vitest_1.it)('rechaza la eliminacion cuando el nombre no coincide', async () => {
+        await (0, vitest_1.expect)(service_1.divisionService.delete('division-1', owner, 'otra division')).rejects.toMatchObject({
+            statusCode: 422,
+            message: 'El nombre no coincide. Escribe el nombre de la división para confirmar.',
+        });
+        (0, vitest_1.expect)(mocks.transaction).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(mocks.delete).not.toHaveBeenCalled();
+    });
+});
 //# sourceMappingURL=service.test.js.map

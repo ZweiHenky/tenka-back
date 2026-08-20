@@ -103,3 +103,28 @@ describe('equipoService nombre unico por usuario', () => {
     expect(mocks.delete).toHaveBeenCalledWith('team-1');
   });
 });
+
+describe('segunda condicion de eliminacion de equipo', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findById.mockResolvedValue(existing);
+  });
+
+  it('permite eliminar cuando el nombre escrito coincide (ignorando mayusculas)', async () => {
+    await expect(equipoService.delete('team-1', owner, 'halCONES')).resolves.toBeUndefined();
+    expect(mocks.delete).toHaveBeenCalledWith('team-1');
+  });
+
+  it('rechaza la eliminacion cuando el nombre no coincide', async () => {
+    await expect(equipoService.delete('team-1', owner, 'otro equipo')).rejects.toMatchObject({
+      statusCode: 422,
+      message: 'El nombre no coincide. Escribe el nombre del equipo para confirmar.',
+    });
+    expect(mocks.delete).not.toHaveBeenCalled();
+  });
+
+  it('mantiene la eliminacion directa cuando no se exige el nombre', async () => {
+    await expect(equipoService.delete('team-1', owner)).resolves.toBeUndefined();
+    expect(mocks.delete).toHaveBeenCalledWith('team-1');
+  });
+});

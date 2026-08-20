@@ -15,6 +15,9 @@ const updateMeSchema = zod_1.z.object({
     name: zod_1.z.string().min(1).max(50).optional(),
     avatarAssetId: zod_1.z.string().min(1).nullable().optional(),
 });
+const deleteAccountSchema = zod_1.z.object({
+    email: zod_1.z.string().email(),
+});
 exports.userController = {
     async activateLeagueRole(req, res, next) {
         try {
@@ -58,6 +61,18 @@ exports.userController = {
             });
             (0, jobSignals_1.signalBackgroundJob)('media-deletion');
             (0, response_1.ok)(res, user, 'Perfil actualizado');
+        }
+        catch (err) {
+            next(err);
+        }
+    },
+    async deleteAccount(req, res, next) {
+        try {
+            const parsed = deleteAccountSchema.safeParse(req.body);
+            if (!parsed.success)
+                throw new errors_1.ValidationError(parsed.error.issues[0].message);
+            await service_2.userService.deleteAccount(req.user.id, parsed.data.email);
+            (0, response_1.noContent)(res);
         }
         catch (err) {
             next(err);

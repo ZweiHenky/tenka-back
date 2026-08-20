@@ -12,7 +12,7 @@ const vitest_1 = require("vitest");
 const service_1 = require("../../service");
 vitest_1.vi.mock('../../../../config/database', () => ({
     prisma: {
-        division: { findUnique: vitest_1.vi.fn() },
+        division: { findUnique: vitest_1.vi.fn(), aggregate: vitest_1.vi.fn() },
         divisionEquipo: { findMany: vitest_1.vi.fn() },
         partido: { findMany: vitest_1.vi.fn(), deleteMany: vitest_1.vi.fn(), createMany: vitest_1.vi.fn(), update: vitest_1.vi.fn(), updateMany: vitest_1.vi.fn() },
         jornada: { findUnique: vitest_1.vi.fn(), findFirst: vitest_1.vi.fn(), create: vitest_1.vi.fn() },
@@ -68,6 +68,10 @@ exports.TEAMS = [
     { id: 't7', nombre: 'Panteras' },
 ];
 function mockDivision(opts) {
+    // Feeds the occupancy query's lower bound in validateLeagueCourtCapacity.
+    exports.prisma.division.aggregate.mockResolvedValue({
+        _max: { duracionPartido: opts && 'duracionPartido' in opts ? opts.duracionPartido : 90 },
+    });
     exports.prisma.division.findUnique.mockImplementation(async (query) => {
         if (query.select?.liga && !query.select?.diasPartido && !query.select?.ligaId)
             return { liga: { userId: exports.owner.id } };

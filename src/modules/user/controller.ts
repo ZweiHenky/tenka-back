@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../config/database';
-import { ok } from '../../utils/response';
+import { ok, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import { mediaService } from '../media/service';
 import { userService } from './service';
@@ -14,6 +14,10 @@ const phoneVisibilitySchema = z.object({
 const updateMeSchema = z.object({
   name: z.string().min(1).max(50).optional(),
   avatarAssetId: z.string().min(1).nullable().optional(),
+});
+
+const deleteAccountSchema = z.object({
+  email: z.string().email(),
 });
 
 export const userController = {
@@ -61,6 +65,18 @@ export const userController = {
       signalBackgroundJob('media-deletion');
 
       ok(res, user, 'Perfil actualizado');
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async deleteAccount(req: Request, res: Response, next: NextFunction) {
+    try {
+      const parsed = deleteAccountSchema.safeParse(req.body);
+      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+
+      await userService.deleteAccount(req.user!.id, parsed.data.email);
+      noContent(res);
     } catch (err) {
       next(err);
     }

@@ -103,6 +103,11 @@ async function findGenerationReplay(client, divisionId, generationKey, requestHa
     const { generationRequestHash: _generationRequestHash, ...jornada } = existing;
     return jornada;
 }
+/**
+ * Upper bound assumed for a match whose division has no duracionPartido. Such rows also have a
+ * null fechaFin, so they sit outside partidos_cancha_no_overlap and have no ground truth to read.
+ */
+const MAX_UNKNOWN_MATCH_MINUTES = 1440;
 function getSlotInterval(slot, timeZone) {
     const dateMatch = slot.fecha?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     const startMatch = slot.horaInicio?.match(/^(\d{2}):(\d{2})$/);
@@ -187,10 +192,20 @@ async function validateLeagueCourtCapacity(client, input) {
     if (drafts.length === 0)
         return;
     const latestDraftEnd = new Date(Math.max(...drafts.map((draft) => draft.end.getTime())));
+    // Lower bound so a league does not re-read its whole match history on every generation.
+    // Every loaded row belongs to a division of this league, so its end is at most
+    // start + margin; anything starting before the floor ends before the earliest draft.
+    const earliestDraftStart = new Date(Math.min(...drafts.map((draft) => draft.start.getTime())));
+    const { _max } = await client.division.aggregate({
+        _max: { duracionPartido: true },
+        where: { ligaId: input.ligaId },
+    });
+    const margin = Math.max(_max.duracionPartido ?? 0, MAX_UNKNOWN_MATCH_MINUTES);
+    const occupancyFloor = addMinutes(earliestDraftStart, -margin);
     const occupancies = await client.partido.findMany({
         where: {
             // A match starting after every draft ends cannot overlap, regardless of its duration.
-            fecha: { not: null, lt: latestDraftEnd },
+            fecha: { not: null, gte: occupancyFloor, lt: latestDraftEnd },
             ...(input.excludedPartidoIds.length ? { id: { notIn: input.excludedPartidoIds } } : {}),
             OR: [
                 { jornada: { division: { ligaId: input.ligaId } } },
@@ -201,21 +216,22 @@ async function validateLeagueCourtCapacity(client, input) {
             id: true,
             canchaId: true,
             fecha: true,
-            jornada: { select: { division: { select: { duracionPartido: true } } } },
-            rondaPlayoff: { select: { division: { select: { duracionPartido: true } } } },
+            jornada: { select: { division: { select: { id: true, nombre: true, duracionPartido: true } } } },
+            rondaPlayoff: { select: { division: { select: { id: true, nombre: true, duracionPartido: true } } } },
         },
     });
+    // A match whose division has no duration is unmeasurable, but that only matters if it could
+    // actually collide — a misconfigured division must not block every other division of the league.
     const persisted = occupancies.map((partido) => {
-        const duration = partido.jornada?.division.duracionPartido ?? partido.rondaPlayoff?.division.duracionPartido;
-        if (!duration || duration <= 0) {
-            throw new errors_1.ValidationError(`El partido ${partido.id} no tiene una duración de división válida; no se puede comprobar la capacidad de cancha`);
-        }
+        const division = partido.jornada?.division ?? partido.rondaPlayoff?.division ?? null;
+        const duration = division?.duracionPartido;
         return {
             id: partido.id,
+            division,
             canchaId: input.multiplesCanchas ? partido.canchaId : null,
             resolvedCourt: !input.multiplesCanchas || Boolean(partido.canchaId && activeById.has(partido.canchaId)),
             start: partido.fecha,
-            end: addMinutes(partido.fecha, duration),
+            end: duration && duration > 0 ? addMinutes(partido.fecha, duration) : null,
         };
     });
     for (let index = 0; index < drafts.length; index++) {
@@ -226,6 +242,15 @@ async function validateLeagueCourtCapacity(client, input) {
             throw new errors_1.ValidationError(`${court} ya tiene otro partido programado en ese horario (${current.slot.fecha} ${current.slot.horaInicio}-${current.slot.horaFin})`);
         }
         for (const occupancy of persisted) {
+            if (occupancy.end === null) {
+                // Unmeasurable: only blocks when it shares this draft's court (or has no resolvable one)
+                // and starts before the draft ends, since its real extent is unknowable.
+                const sharesCourt = !occupancy.resolvedCourt || occupancy.canchaId === current.canchaId;
+                if (!sharesCourt || occupancy.start >= current.end)
+                    continue;
+                const division = occupancy.division ? `"${occupancy.division.nombre}" (${occupancy.division.id})` : 'desconocida';
+                throw new errors_1.ValidationError(`La división ${division} no tiene una duración de partido válida y tiene un partido programado que podría solaparse; corrige su duración antes de generar la jornada`);
+            }
             if (!isOverlapping(current.start, current.end, occupancy.start, occupancy.end))
                 continue;
             if (!occupancy.resolvedCourt) {

@@ -6,6 +6,8 @@ import type { AuthenticatedUser } from '../../types/auth';
 import { isAdmin } from '../../utils/authorization';
 import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
+import { summarizeDivisionSchedule, type CourtScheduleRow } from '../../utils/divisionSchedule';
+import type { Prisma } from '../../generated/prisma/client';
 import type { Pagination } from '../../utils/pagination';
 import { signalBackgroundJob } from '../../workers/jobSignals';
 
@@ -23,6 +25,56 @@ async function assertDivisionOwner(id: string, actor: AuthenticatedUser): Promis
     select: { id: true },
   });
   if (!division) throw new NotFoundError('Division');
+}
+
+/**
+ * Validates the courts a per-court schedule refers to. They must all belong to the league, be
+ * active, and the league must actually run multiple courts.
+ */
+async function assertCourtsUsable(
+  tx: Prisma.TransactionClient,
+  ligaId: string,
+  rows: CourtScheduleRow[],
+): Promise<void> {
+  const liga = await tx.liga.findUnique({ where: { id: ligaId }, select: { multiplesCanchas: true } });
+  if (!liga) throw new NotFoundError('Liga');
+  if (!liga.multiplesCanchas) {
+    throw new ValidationError('La liga no tiene múltiples canchas habilitadas');
+  }
+  const canchas = await tx.ligaCancha.findMany({
+    where: { id: { in: rows.map((row) => row.canchaId) }, ligaId },
+    select: { id: true, activa: true },
+  });
+  const byId = new Map(canchas.map((cancha) => [cancha.id, cancha]));
+  for (const row of rows) {
+    const cancha = byId.get(row.canchaId);
+    if (!cancha) throw new ValidationError('La cancha indicada no pertenece a esta liga');
+    if (!cancha.activa) throw new ValidationError('La cancha seleccionada no está activa');
+  }
+}
+
+/**
+ * Replaces the division's per-court schedule with `rows` and returns the denormalized summary
+ * to write onto the division. An empty array clears the rows and reverts to the scalars.
+ */
+async function replaceCourtSchedules(
+  tx: Prisma.TransactionClient,
+  divisionId: string,
+  ligaId: string,
+  rows: CourtScheduleRow[],
+): Promise<{ diasPartido: string; horarioPartido: string } | null> {
+  if (rows.length > 0) await assertCourtsUsable(tx, ligaId, rows);
+  await tx.divisionCanchaHorario.deleteMany({
+    where: { divisionId, canchaId: { notIn: rows.map((row) => row.canchaId) } },
+  });
+  for (const row of rows) {
+    await tx.divisionCanchaHorario.upsert({
+      where: { divisionId_canchaId: { divisionId, canchaId: row.canchaId } },
+      create: { divisionId, canchaId: row.canchaId, diasPartido: row.diasPartido, horarioPartido: row.horarioPartido },
+      update: { diasPartido: row.diasPartido, horarioPartido: row.horarioPartido },
+    });
+  }
+  return rows.length > 0 ? summarizeDivisionSchedule(rows) : null;
 }
 
 async function getDivisionUpdateContext(id: string, actor: AuthenticatedUser) {
@@ -47,7 +99,11 @@ export const divisionService = {
   async getById(id: string, actor?: AuthenticatedUser): Promise<DivisionEntity> {
     const division = await prisma.division.findFirst({
       where: { id, ...visibleDivisionWhere(actor) },
-      include: { liga: { select: { id: true, nombre: true, logo: true } }, estadoLiga: { select: { id: true, nombre: true } } },
+      include: {
+        liga: { select: { id: true, nombre: true, logo: true } },
+        estadoLiga: { select: { id: true, nombre: true } },
+        canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } },
+      },
     }) as DivisionEntity | null;
     if (!division) throw new NotFoundError('Division');
     return division;
@@ -65,6 +121,7 @@ export const divisionService = {
     usarPenalesEnEmpates?: boolean;
     diasPartido?: string;
     horarioPartido?: string;
+    horariosPorCancha?: CourtScheduleRow[];
     duracionPartido?: number;
     descanso?: number;
     fechaInicio?: Date;
@@ -80,20 +137,42 @@ export const divisionService = {
       where: { nombre: 'Borrador' },
       select: { id: true },
     })).id;
-    return divisionRepository.create({ ...data, estadoLigaId });
+    const { horariosPorCancha, ...divisionData } = data;
+    if (!horariosPorCancha?.length) return divisionRepository.create({ ...divisionData, estadoLigaId });
+
+    // Rows, scalars and the derived summary must land together, and generation re-reads the
+    // division under this same lock.
+    return prisma.$transaction(async (tx) => {
+      await acquireLeagueScheduleLock(tx, data.ligaId);
+      await assertCourtsUsable(tx, data.ligaId, horariosPorCancha);
+      const summary = summarizeDivisionSchedule(horariosPorCancha);
+      return tx.division.create({
+        data: {
+          ...divisionData,
+          estadoLigaId,
+          ...summary,
+          canchaHorarios: { create: horariosPorCancha.map((row) => ({ ...row })) },
+        },
+      }) as Promise<DivisionEntity>;
+    }, { isolationLevel: 'ReadCommitted' });
   },
 
-  async update(id: string, data: Partial<DivisionEntity>, actor: AuthenticatedUser): Promise<DivisionEntity> {
+  async update(
+    id: string,
+    data: Partial<DivisionEntity> & { horariosPorCancha?: CourtScheduleRow[] },
+    actor: AuthenticatedUser,
+  ): Promise<DivisionEntity> {
     const division = await getDivisionUpdateContext(id, actor);
     if (data.ligaId) await assertLigaOwner(data.ligaId, actor);
     const ligaId = data.ligaId ?? division.ligaId;
-    let updateData = data;
+    const { horariosPorCancha, ...scalarData } = data;
+    let updateData: Partial<DivisionEntity> = scalarData;
 
     if (data.ligaId && data.canchaUnicaId === undefined && division.canchaUnicaId) {
-      updateData = { ...data, canchaUnicaId: null };
+      updateData = { ...scalarData, canchaUnicaId: null };
     }
 
-    if (data.canchaUnicaId && data.registrarParticipaciones === undefined) {
+    if (data.canchaUnicaId && data.registrarParticipaciones === undefined && horariosPorCancha === undefined) {
       const cancha = await prisma.ligaCancha.findFirst({
         where: { id: data.canchaUnicaId },
         select: { ligaId: true, activa: true, liga: { select: { multiplesCanchas: true } } },
@@ -107,7 +186,12 @@ export const divisionService = {
       if (!cancha.activa) throw new ValidationError('La cancha seleccionada no está activa');
     }
 
-    if (data.registrarParticipaciones !== undefined || data.usarPenalesEnEmpates !== undefined) {
+    // One locked path for anything that changes what jornada generation validates against.
+    const needsLock = data.registrarParticipaciones !== undefined
+      || data.usarPenalesEnEmpates !== undefined
+      || horariosPorCancha !== undefined;
+
+    if (needsLock) {
       return prisma.$transaction(async (tx) => {
         const leagueIds = [...new Set([division.ligaId, ligaId])].sort();
         for (const lockedLeagueId of leagueIds) await acquireLeagueScheduleLock(tx, lockedLeagueId);
@@ -159,9 +243,17 @@ export const divisionService = {
           }
         }
 
-        let lockedUpdateData = data;
+        let lockedUpdateData: Partial<DivisionEntity> = scalarData;
         if (data.ligaId && data.canchaUnicaId === undefined && lockedDivision.canchaUnicaId) {
-          lockedUpdateData = { ...data, canchaUnicaId: null };
+          lockedUpdateData = { ...scalarData, canchaUnicaId: null };
+        }
+
+        if (horariosPorCancha !== undefined) {
+          const summary = await replaceCourtSchedules(tx, id, ligaId, horariosPorCancha);
+          // Per-court rows supersede the fixed court, and keep the summary in sync.
+          lockedUpdateData = summary
+            ? { ...lockedUpdateData, ...summary, canchaUnicaId: null }
+            : lockedUpdateData;
         }
         return divisionRepository.update(id, lockedUpdateData, tx);
       }, { isolationLevel: 'ReadCommitted' });
@@ -170,8 +262,17 @@ export const divisionService = {
     return divisionRepository.update(id, updateData);
   },
 
-  async delete(id: string, actor: AuthenticatedUser): Promise<void> {
+  async delete(id: string, actor: AuthenticatedUser, confirmName?: string): Promise<void> {
     await assertDivisionOwner(id, actor);
+    if (confirmName !== undefined) {
+      const division = await prisma.division.findFirst({
+        where: isAdmin(actor) ? { id } : { id, liga: { userId: actor.id } },
+        select: { nombre: true },
+      });
+      if (division && division.nombre.trim().toLowerCase() !== confirmName.trim().toLowerCase()) {
+        throw new ValidationError('El nombre no coincide. Escribe el nombre de la división para confirmar.');
+      }
+    }
 
     await prisma.$transaction(async (tx) => {
       const subscriptions = await tx.divisionNotificationSubscription.findMany({

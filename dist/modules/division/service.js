@@ -145,8 +145,17 @@ exports.divisionService = {
         }
         return repository_1.divisionRepository.update(id, updateData);
     },
-    async delete(id, actor) {
+    async delete(id, actor, confirmName) {
         await assertDivisionOwner(id, actor);
+        if (confirmName !== undefined) {
+            const division = await database_1.prisma.division.findFirst({
+                where: (0, authorization_1.isAdmin)(actor) ? { id } : { id, liga: { userId: actor.id } },
+                select: { nombre: true },
+            });
+            if (division && division.nombre.trim().toLowerCase() !== confirmName.trim().toLowerCase()) {
+                throw new errors_1.ValidationError('El nombre no coincide. Escribe el nombre de la división para confirmar.');
+            }
+        }
         await database_1.prisma.$transaction(async (tx) => {
             const subscriptions = await tx.divisionNotificationSubscription.findMany({
                 where: { divisionId: id },

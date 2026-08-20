@@ -7,7 +7,8 @@ const client_1 = require("../../generated/prisma/client");
 const database_1 = require("../../config/database");
 const service_1 = require("../../modules/division/service");
 const service_2 = require("../../modules/jornada/service");
-const service_3 = require("../../modules/partido/service");
+const service_3 = require("../../modules/liga/service");
+const service_4 = require("../../modules/partido/service");
 const leagueScheduleLock_1 = require("../../utils/leagueScheduleLock");
 const database_2 = require("./database");
 const ids = {
@@ -164,6 +165,25 @@ async function cleanupFixture() {
         database_1.prisma.tipoCompetencia.deleteMany({ where: { id: ids.competencia } }),
     ]);
 }
+/**
+ * Resolves once some session is parked on an ungranted advisory lock in this database.
+ * A fixed sleep cannot tell "blocked on the lock" apart from "slow round-trip to a remote
+ * database", so the test would still pass with the lock removed.
+ */
+async function waitForBlockedAdvisoryLock(timeoutMs = 15000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const { rows } = await observer.query(`SELECT count(*)::text AS count
+         FROM pg_locks
+        WHERE locktype = 'advisory'
+          AND NOT granted
+          AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`);
+        if (Number(rows[0].count) > 0)
+            return true;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return false;
+}
 async function standingsSnapshot() {
     return database_1.prisma.tablaPosicion.findMany({
         where: { divisionId: ids.division },
@@ -191,7 +211,7 @@ async function standingsSnapshot() {
         })).resolves.toMatchObject({ dorsal: 9 });
     });
     (0, vitest_1.test)('result allocations enforce constraints, replace atomically, and preserve snapshots after player deletion', async () => {
-        const result = await service_3.partidoService.updateResult(ids.partido1, {
+        const result = await service_4.partidoService.updateResult(ids.partido1, {
             expectedVersion: 0,
             estado: 'FINALIZADO',
             golesLocal: 2,
@@ -227,7 +247,7 @@ async function standingsSnapshot() {
         const beforeMatch = await database_1.prisma.partido.findUniqueOrThrow({ where: { id: ids.partido1 } });
         const beforeStandings = await standingsSnapshot();
         await installFailureTrigger(triggerNames.standings, triggerNames.standingsFunction, 'tablas_posicion', 'INSERT');
-        await (0, vitest_1.expect)(service_3.partidoService.update(ids.partido1, {
+        await (0, vitest_1.expect)(service_4.partidoService.update(ids.partido1, {
             estado: 'FINALIZADO',
             golesLocal: 3,
             golesVisitante: 1,
@@ -310,6 +330,54 @@ async function standingsSnapshot() {
         finally {
             releaseFirst();
             await Promise.allSettled([clientA.$disconnect(), clientB.$disconnect()]);
+        }
+    });
+    (0, vitest_1.test)('deleting a court waits for the league lock and never orphans a concurrently scheduled match', async () => {
+        const canchaId = 'it-integrity-court';
+        await database_1.prisma.ligaCancha.create({
+            data: { id: canchaId, nombre: 'Cancha Integracion', nombreNormalizado: 'cancha integracion', ligaId: ids.liga },
+        });
+        const writer = newPrismaClient('it-integrity-court-writer');
+        const events = [];
+        let releaseWriter;
+        const holdWriter = new Promise((resolve) => { releaseWriter = resolve; });
+        let writerLocked;
+        const writerHasLock = new Promise((resolve) => { writerLocked = resolve; });
+        const scheduleMatch = writer.$transaction(async (tx) => {
+            await (0, leagueScheduleLock_1.acquireLeagueScheduleLock)(tx, ids.liga);
+            events.push('locked-writer');
+            writerLocked();
+            await holdWriter;
+            await tx.partido.update({
+                where: { id: ids.partido1 },
+                data: {
+                    canchaId,
+                    fecha: new Date('2099-01-01T18:00:00.000Z'),
+                    fechaFin: new Date('2099-01-01T19:00:00.000Z'),
+                },
+            });
+            events.push('written-writer');
+        });
+        try {
+            await writerHasLock;
+            const deletion = service_3.ligaService.deleteCancha(ids.liga, canchaId, owner).then(() => { events.push('deleted'); });
+            // Must be parked on the advisory lock rather than racing its own match count.
+            await (0, vitest_1.expect)(waitForBlockedAdvisoryLock()).resolves.toBe(true);
+            (0, vitest_1.expect)(events).toEqual(['locked-writer']);
+            releaseWriter();
+            await Promise.all([scheduleMatch, deletion]);
+            (0, vitest_1.expect)(events).toEqual(['locked-writer', 'written-writer', 'deleted']);
+            // Re-reading under the lock sees the new match, so the court is deactivated, not dropped.
+            await (0, vitest_1.expect)(database_1.prisma.ligaCancha.findUniqueOrThrow({ where: { id: canchaId } }))
+                .resolves.toMatchObject({ activa: false });
+            // No scheduled match was left without a court by onDelete: SetNull.
+            await (0, vitest_1.expect)(database_1.prisma.partido.count({
+                where: { jornadaId: ids.jornada, canchaId: null, fecha: { not: null } },
+            })).resolves.toBe(0);
+        }
+        finally {
+            releaseWriter();
+            await writer.$disconnect();
         }
     });
 });

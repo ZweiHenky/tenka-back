@@ -101,7 +101,7 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
                 arbitros: { where: { activo: true }, select: { nombre: true } },
             }],
         ['eliminacion', 'findDeleteContext', {
-                logo: true, logoPublicId: true, cancha: true, canchaPublicId: true,
+                nombre: true, logo: true, logoPublicId: true, cancha: true, canchaPublicId: true,
             }],
         ['configuracion', 'findManagementContext', {
                 multiplesCanchas: true, usaArbitros: true,

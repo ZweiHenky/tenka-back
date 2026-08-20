@@ -84,9 +84,12 @@ exports.equipoService = {
         }
         return updated;
     },
-    async delete(id, actor) {
+    async delete(id, actor, confirmName) {
         const old = await this.getById(id);
         (0, authorization_1.assertOwnerOrAdmin)(actor, old.userId, 'Equipo');
+        if (confirmName !== undefined && old.nombre.trim().toLowerCase() !== confirmName.trim().toLowerCase()) {
+            throw new errors_1.ValidationError('El nombre no coincide. Escribe el nombre del equipo para confirmar.');
+        }
         if (!old.logo) {
             await repository_1.equipoRepository.delete(id);
             return;

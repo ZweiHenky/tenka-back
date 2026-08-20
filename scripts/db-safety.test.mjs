@@ -9,7 +9,7 @@ const developmentEnv = {
   DB_TARGET: 'development',
   DEV_DATABASE_URL: 'postgresql://user:secret@ep-development-pooler.example.com/app',
   DEV_DIRECT_DATABASE_URL: 'postgresql://user:secret@ep-development.example.com/app',
-  TEST_DATABASE_URL: 'postgresql://user:secret@ep-integration.example.com/app?schema=myleague_integration',
+  TEST_DATABASE_URL: 'postgresql://user:secret@ep-integration.example.com/app?schema=tenka_integration',
   SHADOW_DATABASE_URL: 'postgresql://user:secret@ep-shadow.example.com/app',
 }
 
@@ -63,7 +63,7 @@ test('migrate dev requires a separate shadow target and permits an isolated inte
   }), /SHADOW_DATABASE_URL must target a different database/)
   assert.deepEqual(resolvePrismaCommand('migrate-dev', 'development', {
     ...developmentEnv,
-    TEST_DATABASE_URL: `${developmentEnv.DEV_DIRECT_DATABASE_URL}?schema=myleague_integration`,
+    TEST_DATABASE_URL: `${developmentEnv.DEV_DIRECT_DATABASE_URL}?schema=tenka_integration`,
   }).args, ['migrate', 'dev'])
 })
 

@@ -2,7 +2,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { env } from '../config/env';
 import { PrismaClient } from '../generated/prisma/client';
 
-const DEVELOPMENT_SCRIPT_AUTH = 'myleague-development-script-v1';
+const DEVELOPMENT_SCRIPT_AUTH = 'tenka-development-script-v1';
 
 export function createDevelopmentPrismaClient(): PrismaClient {
   if (process.env.DEVELOPMENT_SCRIPT_AUTH !== DEVELOPMENT_SCRIPT_AUTH) {

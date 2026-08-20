@@ -1,5 +1,5 @@
-export const PRISMA_COMMAND_AUTH = 'myleague-prisma-wrapper-v1'
-export const DEVELOPMENT_SCRIPT_AUTH = 'myleague-development-script-v1'
+export const PRISMA_COMMAND_AUTH = 'tenka-prisma-wrapper-v1'
+export const DEVELOPMENT_SCRIPT_AUTH = 'tenka-development-script-v1'
 export const SAFE_PRISMA_URL = 'postgresql://guard:guard@127.0.0.1:5432/prisma_guard'
 
 const POSTGRES_PROTOCOLS = new Set(['postgres:', 'postgresql:'])

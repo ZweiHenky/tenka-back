@@ -64,7 +64,8 @@ export const divisionController = {
 
   async delete(req: Request, res: Response, next: NextFunction) {
     try {
-      await divisionService.delete(req.params.id, req.user!);
+      const confirmName = typeof req.body?.confirmName === 'string' && req.body.confirmName.trim() ? req.body.confirmName : undefined;
+      await divisionService.delete(req.params.id, req.user!, confirmName);
       noContent(res);
     } catch (err) {
       next(err);

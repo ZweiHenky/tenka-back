@@ -67,6 +67,7 @@ const mocks = vitest_1.vi.hoisted(() => ({
     divisionCount: vitest_1.vi.fn(),
     partidoArbitroCount: vitest_1.vi.fn(),
     ubicacionFindUnique: vitest_1.vi.fn(),
+    executeRawUnsafe: vitest_1.vi.fn(),
 }));
 vitest_1.vi.mock('./repository', () => ({
     ligaRepository: {
@@ -86,6 +87,9 @@ vitest_1.vi.mock('./repository', () => ({
 }));
 vitest_1.vi.mock('../../config/database', () => ({
     prisma: {
+        // acquireLeagueScheduleLock runs against whatever client runInTransaction hands it; with no
+        // $transaction on the mock that is this object, so it needs the raw-exec entry point.
+        $executeRawUnsafe: mocks.executeRawUnsafe,
         ligaArbitro: {
             findFirst: mocks.arbitroFindFirst,
             findUnique: mocks.arbitroFindUnique,

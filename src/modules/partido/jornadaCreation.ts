@@ -4,6 +4,7 @@ import { prisma } from '../../config/database';
 import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
+import { parseConfiguredDays, resolveDivisionSchedule } from '../../utils/divisionSchedule';
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
 import { enqueueScheduleChange } from '../notification/scheduleChangeOutbox';
 import { exposePartidoRead, PARTIDO_READ_INCLUDE } from './repository';
@@ -42,42 +43,12 @@ export interface JornadaPartidoOptions {
   slots: JornadaSlotOption[];
 }
 
-const DAY_MAP: Record<string, number> = {
-  dom: 0, domingo: 0, domingos: 0, do: 0, d: 0,
-  lun: 1, lunes: 1, lu: 1, l: 1,
-  mar: 2, martes: 2, ma: 2, m: 2,
-  mie: 3, miercoles: 3, mi: 3,
-  jue: 4, jueves: 4, ju: 4, j: 4,
-  vie: 5, viernes: 5, vi: 5, v: 5,
-  sab: 6, sabado: 6, sabados: 6, sa: 6, s: 6,
-};
+// El parser de dias vive en utils/divisionSchedule (unico para todo el backend).
+// Se re-exporta aqui porque este modulo era su hogar original.
+export { parseConfiguredDays };
 
 function normalize(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-}
-
-export function parseConfiguredDays(value: string): Set<number> {
-  const days = new Set<number>();
-  for (const raw of normalize(value).replace(/\s+y\s+/g, ',').replace(/\//g, ',').split(/[,;]+/)) {
-    const part = raw.trim();
-    const range = part.match(/^(.+?)\s+(?:a|al)\s+(.+)$/) ?? part.match(/^(.+?)\s*-\s*(.+)$/);
-    if (range) {
-      const from = DAY_MAP[range[1].trim()];
-      const to = DAY_MAP[range[2].trim()];
-      if (from !== undefined && to !== undefined) {
-        let day = from;
-        while (true) {
-          days.add(day);
-          if (day === to) break;
-          day = (day + 1) % 7;
-        }
-      }
-      continue;
-    }
-    const day = DAY_MAP[part] ?? DAY_MAP[part.slice(0, 3)];
-    if (day !== undefined) days.add(day);
-  }
-  return days;
+  return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
 }
 
 export function weekBounds(anchor: Date): { start: Date; end: Date } {
@@ -170,6 +141,7 @@ async function buildOptions(jornadaId: string, actor: AuthenticatedUser, client:
           duracionPartido: true,
           descanso: true,
           canchaUnicaId: true,
+          canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } },
           estadoLiga: { select: { nombre: true } },
           liga: { select: { userId: true, multiplesCanchas: true, timeZone: true } },
           equipos: { select: { equipo: { select: { id: true, nombre: true } } } },
@@ -184,7 +156,9 @@ async function buildOptions(jornadaId: string, actor: AuthenticatedUser, client:
     throw new ValidationError('Solo se pueden agregar partidos a una división en curso');
   }
   const { diasPartido, horarioPartido, duracionPartido } = jornada.division;
-  if (!jornada.fechaInicio || !jornada.fechaFin || !diasPartido || !horarioPartido || !duracionPartido || duracionPartido <= 0) {
+  // The scalars may be empty when the schedule lives entirely in canchaHorarios; whether the
+  // division actually has a usable window is decided per court by resolveDivisionSchedule below.
+  if (!jornada.fechaInicio || !jornada.fechaFin || !duracionPartido || duracionPartido <= 0) {
     throw new ValidationError('La jornada o la división no tienen una configuración de fechas y horarios válida');
   }
 
@@ -195,58 +169,78 @@ async function buildOptions(jornadaId: string, actor: AuthenticatedUser, client:
   const pendientes = equipos.filter((team) => team.pendiente);
   const recomendacion = pendientes.length === 2 ? 'REGULAR' : pendientes.length === 1 ? 'COMPLEMENTO' : 'MANUAL';
 
-  const days = parseConfiguredDays(diasPartido);
-  const ranges = parseConfiguredRanges(horarioPartido);
-  if (!days.size || !ranges.length) throw new ValidationError('Los días u horarios configurados en la división no son válidos');
-  const candidates = configuredCandidates(now, jornada.fechaInicio, jornada.division.liga.timeZone, days, ranges, duracionPartido, jornada.division.descanso ?? 0);
-
-  if (!candidates.length) return { equipos, pendientes, recomendacion, localSugeridoId: pendientes[0]?.id ?? null, visitanteSugeridoId: pendientes[1]?.id ?? null, slots: [] };
-  const maxEnd = new Date(Math.max(...candidates.map((slot) => slot.end.getTime())));
-  const minStart = new Date(Math.min(...candidates.map((slot) => slot.start.getTime())));
-  const [courts, occupancy] = await Promise.all([
-    client.ligaCancha.findMany({
-      where: { ligaId: jornada.division.ligaId, activa: true },
-      select: { id: true, nombre: true },
-      orderBy: { nombre: 'asc' },
-    }),
-    client.partido.findMany({
-      where: {
-        fecha: { lt: maxEnd },
-        fechaFin: { gt: minStart },
-        OR: [
-          { jornada: { division: { ligaId: jornada.division.ligaId } } },
-          { rondaPlayoff: { division: { ligaId: jornada.division.ligaId } } },
-        ],
-      },
-      select: { fecha: true, fechaFin: true, canchaId: true, equipoLocalId: true, equipoVisitanteId: true },
-    }),
-  ]);
+  // Courts first: each one carries its own days/ranges, so candidates depend on them.
+  const courts = await client.ligaCancha.findMany({
+    where: { ligaId: jornada.division.ligaId, activa: true },
+    select: { id: true, nombre: true },
+    orderBy: { nombre: 'asc' },
+  });
   const activeCourtIds = new Set(courts.map((court) => court.id));
   if (jornada.division.liga.multiplesCanchas && jornada.division.canchaUnicaId && !activeCourtIds.has(jornada.division.canchaUnicaId)) {
     throw new ValidationError('La cancha fija de la división no está activa');
   }
-  const courtOptions = jornada.division.liga.multiplesCanchas
+
+  const scheduleByCourt = resolveDivisionSchedule({
+    multiplesCanchas: jornada.division.liga.multiplesCanchas,
+    diasPartido,
+    horarioPartido,
+    canchaUnicaId: jornada.division.canchaUnicaId,
+    canchaHorarios: jornada.division.canchaHorarios,
+  }, activeCourtIds);
+
+  const candidateCourts: Array<{ id: string | null; nombre: string | null }> = jornada.division.liga.multiplesCanchas
     ? courts.filter((court) => !jornada.division.canchaUnicaId || court.id === jornada.division.canchaUnicaId)
     : [{ id: null, nombre: null }];
+  // A court is usable only if it resolves to both days and ranges; otherwise the division has
+  // nothing configured there. Zero usable courts is a configuration error, not an empty result.
+  const courtOptions = candidateCourts.filter((court) => {
+    const courtSchedule = scheduleByCourt.get(court.id);
+    return !!courtSchedule && courtSchedule.days.size > 0 && courtSchedule.ranges.length > 0;
+  });
+  if (!courtOptions.length) throw new ValidationError('La división no tiene canchas con horario configurado');
 
-  const slots: JornadaSlotOption[] = [];
-  for (const candidate of candidates) {
+  // One candidate pass per court, using that court's own days and ranges.
+  const pairs = courtOptions.flatMap((court) => {
+    const courtSchedule = scheduleByCourt.get(court.id)!;
+    return configuredCandidates(
+      now, jornada.fechaInicio!, jornada.division.liga.timeZone,
+      courtSchedule.days, courtSchedule.ranges, duracionPartido, jornada.division.descanso ?? 0,
+    ).map((candidate) => ({ court, candidate }));
+  });
+
+  if (!pairs.length) return { equipos, pendientes, recomendacion, localSugeridoId: pendientes[0]?.id ?? null, visitanteSugeridoId: pendientes[1]?.id ?? null, slots: [] };
+  const maxEnd = new Date(Math.max(...pairs.map(({ candidate }) => candidate.end.getTime())));
+  const minStart = new Date(Math.min(...pairs.map(({ candidate }) => candidate.start.getTime())));
+  const occupancy = await client.partido.findMany({
+    where: {
+      fecha: { lt: maxEnd },
+      fechaFin: { gt: minStart },
+      OR: [
+        { jornada: { division: { ligaId: jornada.division.ligaId } } },
+        { rondaPlayoff: { division: { ligaId: jornada.division.ligaId } } },
+      ],
+    },
+    select: { fecha: true, fechaFin: true, canchaId: true, equipoLocalId: true, equipoVisitanteId: true },
+  });
+
+  const slots: JornadaSlotOption[] = pairs.map(({ court, candidate }) => {
     const concurrent = occupancy.filter((item) => item.fecha && item.fechaFin && overlaps(candidate.start, candidate.end, item.fecha, item.fechaFin));
     const busyTeams = [...new Set(concurrent.flatMap((item) => [item.equipoLocalId, item.equipoVisitanteId]).filter((id): id is string => Boolean(id)))];
-    for (const court of courtOptions) {
-      const courtBusy = concurrent.some((item) => jornada.division.liga.multiplesCanchas ? item.canchaId === court.id : true);
-      slots.push({
-        id: `${candidate.fecha}|${candidate.horaInicio}|${court.id ?? 'single'}`,
-        fecha: candidate.fecha,
-        horaInicio: candidate.horaInicio,
-        horaFin: candidate.horaFin,
-        canchaId: court.id,
-        canchaNombre: court.nombre,
-        equiposOcupados: busyTeams,
-        canchaDisponible: !courtBusy,
-      });
-    }
-  }
+    const courtBusy = concurrent.some((item) => jornada.division.liga.multiplesCanchas ? item.canchaId === court.id : true);
+    return {
+      id: `${candidate.fecha}|${candidate.horaInicio}|${court.id ?? 'single'}`,
+      fecha: candidate.fecha,
+      horaInicio: candidate.horaInicio,
+      horaFin: candidate.horaFin,
+      canchaId: court.id,
+      canchaNombre: court.nombre,
+      equiposOcupados: busyTeams,
+      canchaDisponible: !courtBusy,
+    };
+  }).sort((a, b) => a.fecha.localeCompare(b.fecha)
+    || a.horaInicio.localeCompare(b.horaInicio)
+    || (a.canchaNombre ?? '').localeCompare(b.canchaNombre ?? ''));
+
   return { equipos, pendientes, recomendacion, localSugeridoId: pendientes[0]?.id ?? null, visitanteSugeridoId: pendientes[1]?.id ?? null, slots };
 }
 

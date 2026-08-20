@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError } from '../../utils/errors';
+import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
 import { equipoRepository } from './repository';
 import { mediaService } from '../media/service';
 import type { EquipoEntity } from './entity';
@@ -87,9 +87,12 @@ export const equipoService = {
     return updated;
   },
 
-  async delete(id: string, actor: AuthenticatedUser): Promise<void> {
+  async delete(id: string, actor: AuthenticatedUser, confirmName?: string): Promise<void> {
     const old = await this.getById(id);
     assertOwnerOrAdmin(actor, old.userId, 'Equipo');
+    if (confirmName !== undefined && old.nombre.trim().toLowerCase() !== confirmName.trim().toLowerCase()) {
+      throw new ValidationError('El nombre no coincide. Escribe el nombre del equipo para confirmar.');
+    }
     if (!old.logo) {
       await equipoRepository.delete(id);
       return;

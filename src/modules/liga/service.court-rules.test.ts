@@ -42,12 +42,15 @@ describe('gestion de canchas de liga', () => {
       ],
     }, owner);
 
+    // Court writes go through the league schedule lock, so the repository receives the
+    // transaction client plus the disablingMultipleCourts flag.
     expect(mocks.update).toHaveBeenCalledWith('liga-1', {}, [
       expect.objectContaining({ id: 'court-1', nombre: 'Central', nombreNormalizado: 'central', activa: true }),
       expect.objectContaining({ id: 'court-2', nombre: 'Norte', activa: true }),
       expect.objectContaining({ id: 'court-3', nombre: 'Historica', activa: false }),
       { nombre: 'Sur', nombreNormalizado: 'sur', activa: true },
-    ], undefined);
+    ], undefined, false, expect.anything());
+    expect(mocks.executeRawUnsafe).toHaveBeenCalledWith(expect.stringContaining('pg_advisory_xact_lock'), 'liga-1');
   });
 
   it('al deshabilitar multiples canchas conserva y desactiva todos los registros', async () => {
@@ -57,6 +60,50 @@ describe('gestion de canchas de liga', () => {
     expect(writes).toHaveLength(3);
     expect(writes.every((court: { activa: boolean }) => court.activa === false)).toBe(true);
     expect(mocks.update.mock.calls[0][4]).toBe(true);
+  });
+
+  it('toma el lock de liga antes de contar partidos y borrar una cancha', async () => {
+    mocks.canchaFindFirst.mockResolvedValue(courts[0]);
+    mocks.partidoCount.mockResolvedValue(0);
+
+    await ligaService.deleteCancha('liga-1', 'court-1', owner);
+
+    expect(mocks.executeRawUnsafe).toHaveBeenCalledWith(expect.stringContaining('pg_advisory_xact_lock'), 'liga-1');
+    const lockOrder = mocks.executeRawUnsafe.mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(mocks.partidoCount.mock.invocationCallOrder[0]);
+    expect(lockOrder).toBeLessThan(mocks.divisionCount.mock.invocationCallOrder[0]);
+    expect(lockOrder).toBeLessThan(mocks.canchaDelete.mock.invocationCallOrder[0]);
+  });
+
+  it('desactiva la cancha cuando la relectura bajo el lock encuentra partidos', async () => {
+    mocks.canchaFindFirst.mockResolvedValue(courts[0]);
+    // A concurrent generateNext committed matches after the caller's earlier read.
+    mocks.partidoCount.mockResolvedValue(1);
+
+    await ligaService.deleteCancha('liga-1', 'court-1', owner);
+
+    expect(mocks.canchaUpdate).toHaveBeenCalledWith({ where: { id: 'court-1' }, data: { activa: false } });
+    expect(mocks.canchaDelete).not.toHaveBeenCalled();
+  });
+
+  it('toma el lock de liga antes de validar la desactivacion de una cancha', async () => {
+    mocks.canchaFindFirst.mockResolvedValue(courts[0]);
+    mocks.canchaCount.mockResolvedValue(2);
+    mocks.canchaUpdate.mockResolvedValue({ ...courts[0], activa: false });
+
+    await ligaService.updateCancha('liga-1', 'court-1', { activa: false }, owner);
+
+    expect(mocks.executeRawUnsafe).toHaveBeenCalledWith(expect.stringContaining('pg_advisory_xact_lock'), 'liga-1');
+    expect(mocks.executeRawUnsafe.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.canchaCount.mock.invocationCallOrder[0]);
+  });
+
+  it('no toma el lock cuando la edicion no toca canchas', async () => {
+    mocks.findUpdateContext.mockResolvedValue({ ...existingLiga, multiplesCanchas: true, canchas: courts });
+
+    await ligaService.update('liga-1', { descripcion: 'Solo texto' }, owner);
+
+    expect(mocks.executeRawUnsafe).not.toHaveBeenCalled();
   });
 
   it('rechaza ids ajenos y nombres normalizados duplicados', async () => {

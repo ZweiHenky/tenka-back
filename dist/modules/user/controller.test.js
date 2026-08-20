@@ -1,9 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const vitest_1 = require("vitest");
-const mocks = vitest_1.vi.hoisted(() => ({ activateLeagueRole: vitest_1.vi.fn() }));
+const mocks = vitest_1.vi.hoisted(() => ({ activateLeagueRole: vitest_1.vi.fn(), deleteAccount: vitest_1.vi.fn() }));
 vitest_1.vi.mock('./service', () => ({
-    userService: { activateLeagueRole: mocks.activateLeagueRole },
+    userService: { activateLeagueRole: mocks.activateLeagueRole, deleteAccount: mocks.deleteAccount },
 }));
 vitest_1.vi.mock('../../config/database', () => ({ prisma: { user: {} } }));
 vitest_1.vi.mock('../media/service', () => ({ mediaService: { scheduleImageCleanup: vitest_1.vi.fn() } }));
@@ -24,6 +24,31 @@ const controller_1 = require("./controller");
         (0, vitest_1.expect)(mocks.activateLeagueRole).toHaveBeenCalledWith('session-user');
         (0, vitest_1.expect)(res.json).toHaveBeenCalledWith({ success: true, data: user, message: 'Rol de liga activado' });
         (0, vitest_1.expect)(next).not.toHaveBeenCalled();
+    });
+});
+(0, vitest_1.describe)('userController.deleteAccount', () => {
+    (0, vitest_1.beforeEach)(() => vitest_1.vi.clearAllMocks());
+    (0, vitest_1.it)('calls the service with the session user id and validated email', async () => {
+        mocks.deleteAccount.mockResolvedValue(undefined);
+        const req = {
+            user: { id: 'session-user', rol: 'CAPITAN' },
+            body: { email: 'user@test.com' },
+        };
+        const res = { status: vitest_1.vi.fn().mockReturnThis(), send: vitest_1.vi.fn(), end: vitest_1.vi.fn() };
+        const next = vitest_1.vi.fn();
+        await controller_1.userController.deleteAccount(req, res, next);
+        (0, vitest_1.expect)(mocks.deleteAccount).toHaveBeenCalledOnce();
+        (0, vitest_1.expect)(mocks.deleteAccount).toHaveBeenCalledWith('session-user', 'user@test.com');
+        (0, vitest_1.expect)(res.status).toHaveBeenCalledWith(204);
+        (0, vitest_1.expect)(next).not.toHaveBeenCalled();
+    });
+    (0, vitest_1.it)('rejects an invalid email payload', async () => {
+        const req = { user: { id: 'session-user' }, body: { email: 'not-an-email' } };
+        const res = { status: vitest_1.vi.fn().mockReturnThis(), json: vitest_1.vi.fn() };
+        const next = vitest_1.vi.fn();
+        await controller_1.userController.deleteAccount(req, res, next);
+        (0, vitest_1.expect)(mocks.deleteAccount).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(next).toHaveBeenCalledOnce();
     });
 });
 //# sourceMappingURL=controller.test.js.map

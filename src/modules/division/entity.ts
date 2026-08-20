@@ -21,4 +21,9 @@ export interface DivisionEntity {
   canchaUnicaId: string | null;
   liga?: { id: string; nombre: string; logo: string | null };
   estadoLiga?: { id: string; nombre: string };
+  /**
+   * Días y horario por cancha. Cuando trae filas, son la configuración real y `diasPartido`/
+   * `horarioPartido` son solo su resumen. Sin filas, la división usa los escalares.
+   */
+  canchaHorarios?: Array<{ canchaId: string; diasPartido: string; horarioPartido: string }>;
 }

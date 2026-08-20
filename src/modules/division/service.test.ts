@@ -16,6 +16,11 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   delete: vi.fn(),
   acquireLeagueScheduleLock: vi.fn(),
+  ligaFindUnique: vi.fn(),
+  ligaCanchaFindMany: vi.fn(),
+  divisionCreate: vi.fn(),
+  courtScheduleDeleteMany: vi.fn(),
+  courtScheduleUpsert: vi.fn(),
 }));
 
 vi.mock('../../config/database', () => ({
@@ -57,9 +62,10 @@ const createData = {
 };
 
 const tx = {
-  liga: { findFirst: mocks.ligaFindFirst },
-  ligaCancha: { findFirst: mocks.ligaCanchaFindFirst },
-  division: { findFirst: mocks.divisionFindFirst },
+  liga: { findFirst: mocks.ligaFindFirst, findUnique: mocks.ligaFindUnique },
+  ligaCancha: { findFirst: mocks.ligaCanchaFindFirst, findMany: mocks.ligaCanchaFindMany },
+  division: { findFirst: mocks.divisionFindFirst, create: mocks.divisionCreate },
+  divisionCanchaHorario: { deleteMany: mocks.courtScheduleDeleteMany, upsert: mocks.courtScheduleUpsert },
   divisionNotificationSubscription: { findMany: mocks.subscriptionsFindMany },
   oneSignalTagCleanupJob: { upsert: mocks.cleanupUpsert },
   jornada: { deleteMany: mocks.jornadaDeleteMany },
@@ -78,6 +84,88 @@ describe('consultas privadas optimizadas de división', () => {
     mocks.subscriptionsFindMany.mockResolvedValue([]);
     mocks.create.mockResolvedValue({ id: 'division-1' });
     mocks.update.mockResolvedValue({ id: 'division-1' });
+    mocks.ligaFindUnique.mockResolvedValue({ multiplesCanchas: true });
+    mocks.ligaCanchaFindMany.mockResolvedValue([
+      { id: 'court-1', activa: true },
+      { id: 'court-2', activa: true },
+    ]);
+    mocks.divisionCreate.mockResolvedValue({ id: 'division-1' });
+  });
+
+  describe('horarios por cancha', () => {
+    const horariosPorCancha = [
+      { canchaId: 'court-1', diasPartido: 'lun', horarioPartido: '18:00 - 20:00' },
+      { canchaId: 'court-2', diasPartido: 'jue', horarioPartido: '20:00 - 22:00' },
+    ];
+
+    it('crea las filas y deriva el resumen bajo el lock de liga', async () => {
+      await divisionService.create({ ...createData, estadoLigaId: 'estado-1', horariosPorCancha }, owner);
+
+      expect(mocks.acquireLeagueScheduleLock).toHaveBeenCalledWith(tx, 'liga-1');
+      const payload = mocks.divisionCreate.mock.calls[0][0].data;
+      // Summary is the union of both courts, for the public listing and older clients.
+      expect(payload.diasPartido).toBe('lun, jue');
+      expect(payload.horarioPartido).toBe('18:00 - 22:00');
+      expect(payload.canchaHorarios.create).toHaveLength(2);
+    });
+
+    it('no abre transacción cuando la creación no trae filas', async () => {
+      await divisionService.create({ ...createData, estadoLigaId: 'estado-1' }, owner);
+
+      expect(mocks.acquireLeagueScheduleLock).not.toHaveBeenCalled();
+      expect(mocks.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('al actualizar reemplaza las filas y anula la cancha fija', async () => {
+      await divisionService.update('division-1', { horariosPorCancha }, owner);
+
+      expect(mocks.acquireLeagueScheduleLock).toHaveBeenCalledWith(tx, 'liga-1');
+      expect(mocks.courtScheduleDeleteMany).toHaveBeenCalledWith({
+        where: { divisionId: 'division-1', canchaId: { notIn: ['court-1', 'court-2'] } },
+      });
+      expect(mocks.courtScheduleUpsert).toHaveBeenCalledTimes(2);
+      expect(mocks.update).toHaveBeenCalledWith('division-1', expect.objectContaining({
+        diasPartido: 'lun, jue',
+        horarioPartido: '18:00 - 22:00',
+        canchaUnicaId: null,
+      }), tx);
+    });
+
+    it('un arreglo vacío borra las filas y conserva los escalares', async () => {
+      await divisionService.update('division-1', { horariosPorCancha: [] }, owner);
+
+      expect(mocks.courtScheduleDeleteMany).toHaveBeenCalledWith({
+        where: { divisionId: 'division-1', canchaId: { notIn: [] } },
+      });
+      expect(mocks.courtScheduleUpsert).not.toHaveBeenCalled();
+      const written = mocks.update.mock.calls[0][1];
+      expect(written).not.toHaveProperty('diasPartido');
+      expect(written).not.toHaveProperty('canchaUnicaId');
+    });
+
+    it('rechaza filas en una liga de cancha única', async () => {
+      mocks.ligaFindUnique.mockResolvedValue({ multiplesCanchas: false });
+
+      await expect(divisionService.update('division-1', { horariosPorCancha }, owner))
+        .rejects.toThrow('no tiene múltiples canchas');
+    });
+
+    it('rechaza una cancha de otra liga', async () => {
+      mocks.ligaCanchaFindMany.mockResolvedValue([{ id: 'court-1', activa: true }]);
+
+      await expect(divisionService.update('division-1', { horariosPorCancha }, owner))
+        .rejects.toThrow('no pertenece a esta liga');
+    });
+
+    it('rechaza una cancha inactiva', async () => {
+      mocks.ligaCanchaFindMany.mockResolvedValue([
+        { id: 'court-1', activa: true },
+        { id: 'court-2', activa: false },
+      ]);
+
+      await expect(divisionService.update('division-1', { horariosPorCancha }, owner))
+        .rejects.toThrow('no está activa');
+    });
   });
 
   it.each([
@@ -326,6 +414,29 @@ describe('consultas privadas optimizadas de división', () => {
 
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.subscriptionsFindMany).not.toHaveBeenCalled();
+    expect(mocks.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe('segunda condicion de eliminacion de division', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.divisionFindFirst.mockResolvedValue({ id: 'division-1', nombre: 'Primera' });
+    mocks.transaction.mockImplementation(async (callback) => callback(tx));
+    mocks.subscriptionsFindMany.mockResolvedValue([]);
+  });
+
+  it('permite eliminar cuando el nombre escrito coincide (ignorando mayusculas)', async () => {
+    await expect(divisionService.delete('division-1', owner, 'primera')).resolves.toBeUndefined();
+    expect(mocks.delete).toHaveBeenCalledWith('division-1', tx);
+  });
+
+  it('rechaza la eliminacion cuando el nombre no coincide', async () => {
+    await expect(divisionService.delete('division-1', owner, 'otra division')).rejects.toMatchObject({
+      statusCode: 422,
+      message: 'El nombre no coincide. Escribe el nombre de la división para confirmar.',
+    });
+    expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.delete).not.toHaveBeenCalled();
   });
 });

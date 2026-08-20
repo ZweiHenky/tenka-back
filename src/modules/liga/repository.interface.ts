@@ -29,6 +29,7 @@ export interface LigaUpdateContext {
 }
 
 export interface LigaDeleteContext {
+  nombre: string;
   logo: string | null;
   logoPublicId: string | null;
   cancha: string | null;

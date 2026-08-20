@@ -27,25 +27,25 @@ describe('integration database guard', () => {
   });
 
   it('allows the development database only through the isolated integration schema', async () => {
-    process.env.TEST_DATABASE_URL = 'postgresql://user:secret@ep-development.example.com/app?schema=myleague_integration';
+    process.env.TEST_DATABASE_URL = 'postgresql://user:secret@ep-development.example.com/app?schema=tenka_integration';
     const { getIntegrationDatabaseUrl } = await loadDatabaseGuard();
 
-    expect(new URL(getIntegrationDatabaseUrl()).searchParams.get('schema')).toBe('myleague_integration');
+    expect(new URL(getIntegrationDatabaseUrl()).searchParams.get('schema')).toBe('tenka_integration');
   });
 
   it('rejects pooled URLs and non-integration schemas', async () => {
-    process.env.TEST_DATABASE_URL = 'postgresql://user:secret@ep-test-pooler.example.com/app?schema=myleague_integration';
+    process.env.TEST_DATABASE_URL = 'postgresql://user:secret@ep-test-pooler.example.com/app?schema=tenka_integration';
     let guard = await loadDatabaseGuard();
     expect(() => guard.getIntegrationDatabaseUrl()).toThrow('direct connection');
 
     process.env.TEST_DATABASE_URL = 'postgresql://user:secret@ep-test.example.com/app?schema=public';
     guard = await loadDatabaseGuard();
-    expect(() => guard.getIntegrationDatabaseUrl()).toThrow('schema must be myleague_integration');
+    expect(() => guard.getIntegrationDatabaseUrl()).toThrow('schema must be tenka_integration');
   });
 
   it('recognizes pooled and direct production URLs as the same forbidden database', async () => {
     process.env.DATABASE_URL = 'postgresql://runtime:secret@ep-production-pooler.example.com/app';
-    process.env.TEST_DATABASE_URL = 'postgresql://test:secret@ep-production.example.com/app?schema=myleague_integration';
+    process.env.TEST_DATABASE_URL = 'postgresql://test:secret@ep-production.example.com/app?schema=tenka_integration';
     const { getIntegrationDatabaseUrl } = await loadDatabaseGuard();
 
     expect(() => getIntegrationDatabaseUrl()).toThrow('must not target the same database as DATABASE_URL');

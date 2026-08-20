@@ -3,7 +3,7 @@ import { jornadaService as rawJornadaService } from '../../service';
 
 vi.mock('../../../../config/database', () => ({
   prisma: {
-    division: { findUnique: vi.fn() },
+    division: { findUnique: vi.fn(), aggregate: vi.fn() },
     divisionEquipo: { findMany: vi.fn() },
     partido: { findMany: vi.fn(), deleteMany: vi.fn(), createMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     jornada: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
@@ -71,9 +71,23 @@ export const TEAMS = [
   { id: 't7', nombre: 'Panteras' },
 ];
 
-export function mockDivision(opts?: { maxEquipos?: number; diasPartido?: string | null; horarioPartido?: string | null; duracionPartido?: number | null; multiplesCanchas?: boolean; canchaUnicaId?: string | null }) {
+export function mockDivision(opts?: {
+  maxEquipos?: number;
+  diasPartido?: string | null;
+  horarioPartido?: string | null;
+  duracionPartido?: number | null;
+  multiplesCanchas?: boolean;
+  canchaUnicaId?: string | null;
+  /** Per-court schedule rows. Empty means the division falls back to the scalars above. */
+  canchaHorarios?: Array<{ canchaId: string; diasPartido: string; horarioPartido: string }>;
+}) {
+  // Feeds the occupancy query's lower bound in validateLeagueCourtCapacity.
+  (prisma.division.aggregate as ReturnType<typeof vi.fn>).mockResolvedValue({
+    _max: { duracionPartido: opts && 'duracionPartido' in opts ? opts.duracionPartido! : 90 },
+  });
   (prisma.division.findUnique as ReturnType<typeof vi.fn>).mockImplementation(async (query) => {
-    if (query.select?.liga && !query.select?.diasPartido && !query.select?.ligaId) return { liga: { userId: owner.id } };
+    // The ownership lookup selects `liga` and nothing else; every other call wants the full row.
+    if (query.select?.liga && Object.keys(query.select).length === 1) return { liga: { userId: owner.id } };
     return {
       maxEquipos: opts?.maxEquipos ?? 7,
       diasPartido: opts?.diasPartido ?? null,
@@ -81,6 +95,7 @@ export function mockDivision(opts?: { maxEquipos?: number; diasPartido?: string 
       duracionPartido: opts && 'duracionPartido' in opts ? opts.duracionPartido! : 90,
       ligaId: 'liga-1',
       canchaUnicaId: opts?.canchaUnicaId ?? null,
+      canchaHorarios: opts?.canchaHorarios ?? [],
       liga: { userId: owner.id, multiplesCanchas: opts?.multiplesCanchas ?? false },
     };
   });

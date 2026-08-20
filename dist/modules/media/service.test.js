@@ -40,7 +40,7 @@ vitest_1.vi.mock('../../config/database', () => ({
 vitest_1.vi.mock('../../instrument', () => ({ Sentry: { captureException: mocks.sentry } }));
 vitest_1.vi.mock('../../workers/jobSignals', () => ({ signalBackgroundJob: mocks.signalJob }));
 const service_1 = require("./service");
-const publicId = 'myleague/local/user-1/team_logo/asset';
+const publicId = 'tenka/local/user-1/team_logo/asset';
 const secureUrl = `https://res.cloudinary.com/test-cloud/image/upload/v1/${publicId}.webp`;
 (0, vitest_1.describe)('mediaService upload lifecycle', () => {
     (0, vitest_1.beforeEach)(() => {
@@ -54,7 +54,7 @@ const secureUrl = `https://res.cloudinary.com/test-cloud/image/upload/v1/${publi
     });
     (0, vitest_1.it)('creates a server-owned namespace and signs the exact policy', async () => {
         const result = await service_1.mediaService.createUploadIntent('user-1', 'TEAM_LOGO');
-        (0, vitest_1.expect)(result.publicId).toMatch(/^myleague\/local\/user-1\/team_logo\/[0-9a-f-]{36}$/);
+        (0, vitest_1.expect)(result.publicId).toMatch(/^tenka\/local\/user-1\/team_logo\/[0-9a-f-]{36}$/);
         (0, vitest_1.expect)(result.uploadParams).toMatchObject({
             public_id: result.publicId,
             allowed_formats: 'jpg,jpeg,png,webp,heic',

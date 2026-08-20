@@ -51,6 +51,72 @@ describe('generateNext court invariants', () => {
       .rejects.toThrow('fuera del rango configurado');
   });
 
+  describe('horario por cancha', () => {
+    function arrangeCourts(canchaHorarios: Array<{ canchaId: string; diasPartido: string; horarioPartido: string }>) {
+      mockDivision({ duracionPartido: 60, multiplesCanchas: true, canchaHorarios });
+      mockTeams(['t1', 't2']);
+      mockNoPreviousJornadas();
+      mockJornadaCreated();
+      (prisma.ligaCancha.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: 'c1', nombre: 'Cancha 1', activa: true },
+        { id: 'c2', nombre: 'Cancha 2', activa: true },
+      ]);
+      (prisma.partido.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+    }
+
+    // 2099-01-01 is a Thursday.
+    const jueves = 'jue';
+
+    it('acepta un horario válido en la cancha que lo tiene configurado', async () => {
+      arrangeCourts([
+        { canchaId: 'c1', diasPartido: jueves, horarioPartido: '18:00 - 20:00' },
+        { canchaId: 'c2', diasPartido: jueves, horarioPartido: '08:00 - 10:00' },
+      ]);
+
+      await expect(jornadaService.generateNext(divisionId, [{ ...slot, canchaId: 'c1' }]))
+        .resolves.toBeDefined();
+    });
+
+    it('rechaza en otra cancha el mismo horario que sí es válido en la primera', async () => {
+      arrangeCourts([
+        { canchaId: 'c1', diasPartido: jueves, horarioPartido: '18:00 - 20:00' },
+        { canchaId: 'c2', diasPartido: jueves, horarioPartido: '08:00 - 10:00' },
+      ]);
+
+      await expect(jornadaService.generateNext(divisionId, [{ ...slot, canchaId: 'c2' }]))
+        .rejects.toThrow(/fuera del rango configurado.*Cancha 2/);
+    });
+
+    it('rechaza una cancha que la división no configuró', async () => {
+      arrangeCourts([{ canchaId: 'c1', diasPartido: jueves, horarioPartido: '18:00 - 20:00' }]);
+
+      await expect(jornadaService.generateNext(divisionId, [{ ...slot, canchaId: 'c2' }]))
+        .rejects.toThrow('no está configurada para jugar');
+    });
+
+    it('rechaza un día que esa cancha no juega', async () => {
+      arrangeCourts([{ canchaId: 'c1', diasPartido: 'lun', horarioPartido: '18:00 - 20:00' }]);
+
+      await expect(jornadaService.generateNext(divisionId, [{ ...slot, canchaId: 'c1' }]))
+        .rejects.toThrow('no juega ese día');
+    });
+
+    it('sin filas usa los escalares en todas las canchas, como antes', async () => {
+      mockDivision({ duracionPartido: 60, multiplesCanchas: true, horarioPartido: '18:00 - 20:00' });
+      mockTeams(['t1', 't2']);
+      mockNoPreviousJornadas();
+      mockJornadaCreated();
+      (prisma.ligaCancha.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: 'c1', nombre: 'Cancha 1', activa: true },
+        { id: 'c2', nombre: 'Cancha 2', activa: true },
+      ]);
+      (prisma.partido.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+      await expect(jornadaService.generateNext(divisionId, [{ ...slot, canchaId: 'c2' }]))
+        .resolves.toBeDefined();
+    });
+  });
+
   it('requires horaFin to match the authoritative division duration', async () => {
     arrange();
     await expect(jornadaService.generateNext(divisionId, [{ ...slot, horaFin: '19:30' }]))

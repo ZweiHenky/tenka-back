@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const service_test_harness_1 = require("./service.test-harness");
 const vitest_1 = require("vitest");
+const errors_1 = require("../../utils/errors");
 const mocks = (0, service_test_harness_1.getServiceMocks)();
 let ligaService;
 (0, vitest_1.beforeAll)(async () => {
@@ -42,6 +43,24 @@ let ligaService;
         const schedule = { id: 'liga-1', nombre: 'Liga Centro', multiplesCanchas: false, divisiones: [] };
         mocks.findRecentSchedule.mockResolvedValue(schedule);
         await (0, vitest_1.expect)(ligaService.getRecentSchedule('liga-1', actor)).resolves.toBe(schedule);
+    });
+});
+(0, vitest_1.describe)('segunda condicion de eliminacion de liga', () => {
+    (0, vitest_1.beforeEach)(() => {
+        (0, service_test_harness_1.resetServiceMocks)();
+        mocks.findDeleteContext.mockResolvedValue(service_test_harness_1.existingLiga);
+    });
+    (0, vitest_1.it)('permite eliminar cuando el nombre escrito coincide (ignorando mayusculas)', async () => {
+        await (0, vitest_1.expect)(ligaService.delete('liga-1', service_test_harness_1.owner, 'liga CENTRO')).resolves.toBeUndefined();
+        (0, vitest_1.expect)(mocks.delete).toHaveBeenCalledWith('liga-1');
+    });
+    (0, vitest_1.it)('rechaza la eliminacion cuando el nombre no coincide', async () => {
+        await (0, vitest_1.expect)(ligaService.delete('liga-1', service_test_harness_1.owner, 'otra liga')).rejects.toBeInstanceOf(errors_1.ValidationError);
+        (0, vitest_1.expect)(mocks.delete).not.toHaveBeenCalled();
+    });
+    (0, vitest_1.it)('mantiene la eliminacion directa cuando no se exige el nombre', async () => {
+        await (0, vitest_1.expect)(ligaService.delete('liga-1', service_test_harness_1.owner)).resolves.toBeUndefined();
+        (0, vitest_1.expect)(mocks.delete).toHaveBeenCalledWith('liga-1');
     });
 });
 //# sourceMappingURL=service.authorization.test.js.map

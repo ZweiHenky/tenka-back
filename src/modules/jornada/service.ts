@@ -14,17 +14,8 @@ import type { Pagination } from '../../utils/pagination';
 import { civilToInstant, dateKeyInTimeZone } from '../../utils/timeZone';
 import { computeMinimumHistoryMatching } from './regularMatching';
 import { signalBackgroundJob } from '../../workers/jobSignals';
-import { isTimeSlotWithinConfiguredRanges, parseConfiguredRanges } from '../../utils/timeRanges';
-
-const DAY_MAP: Record<string, number> = {
-  dom: 0, domingo: 0,
-  lun: 1, lunes: 1,
-  mar: 2, martes: 2,
-  mie: 3, miercoles: 3,
-  jue: 4, jueves: 4,
-  vie: 5, viernes: 5,
-  sab: 6, sabado: 6,
-};
+import { isTimeSlotWithinConfiguredRanges } from '../../utils/timeRanges';
+ import { parseConfiguredDays, resolveDivisionSchedule, type DivisionScheduleSource } from '../../utils/divisionSchedule';
 
 function tomorrowDate(): Date {
   const d = new Date();
@@ -44,26 +35,16 @@ function isOverlapping(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): bool
 }
 
 function parseDaysPartido(text: string | null): number[] {
-  if (!text) return [];
-  const parts = text.toLowerCase().replace(/[y\/]/g, ',').split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
-  const days = new Set<number>();
-  for (const part of parts) {
-    const range = part.split(/\s*a\s*/);
-    if (range.length === 2) {
-      const a = DAY_MAP[range[0].slice(0, 3)] ?? DAY_MAP[range[0]];
-      const b = DAY_MAP[range[1].slice(0, 3)] ?? DAY_MAP[range[1]];
-      if (a !== undefined && b !== undefined) {
-        const start = Math.min(a, b);
-        const end = Math.max(a, b);
-        for (let d = start; d <= end; d++) days.add(d);
-      }
-    } else {
-      const d = DAY_MAP[part.slice(0, 3)] ?? DAY_MAP[part];
-      if (d !== undefined) days.add(d);
-    }
-  }
-  return [...days].sort();
+  return [...parseConfiguredDays(text ?? '')].sort((a, b) => a - b);
 }
+
+/** Day of week (0=Sunday) of a `YYYY-MM-DD` civil date, or null when unparseable. */
+function dateKeyDayOfWeek(fecha: string | undefined): number | null {
+  if (!fecha?.match(/^\d{4}-\d{2}-\d{2}$/)) return null;
+  const parsed = new Date(`${fecha}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getUTCDay();
+}
+
 
 interface SlotInput {
   fecha: string;
@@ -131,14 +112,23 @@ async function findGenerationReplay(
   return jornada;
 }
 
+/**
+ * Upper bound assumed for a match whose division has no duracionPartido. Such rows also have a
+ * null fechaFin, so they sit outside partidos_cancha_no_overlap and have no ground truth to read.
+ */
+const MAX_UNKNOWN_MATCH_MINUTES = 1440;
+
+type OccupancyDivision = { id: string; nombre: string; duracionPartido: number | null };
+
 type CourtValidationClient = {
   ligaCancha: { findMany(args: Record<string, unknown>): Promise<Array<{ id: string; nombre: string; activa: boolean }>> };
+  division: { aggregate(args: Record<string, unknown>): Promise<{ _max: { duracionPartido: number | null } }> };
   partido: { findMany(args: Record<string, unknown>): Promise<Array<{
     id: string;
     canchaId: string | null;
     fecha: Date | null;
-    jornada: { division: { duracionPartido: number | null } } | null;
-    rondaPlayoff: { division: { duracionPartido: number | null } } | null;
+    jornada: { division: OccupancyDivision } | null;
+    rondaPlayoff: { division: OccupancyDivision } | null;
   }>> };
 };
 
@@ -194,17 +184,13 @@ async function validateLeagueCourtCapacity(
     ligaId: string;
     multiplesCanchas: boolean;
     durationMinutes: number | null;
-    horarioPartido: string | null;
+    schedule: DivisionScheduleSource;
     fixedCourtId?: string | null;
     timeZone: string;
     slots: SlotInput[];
     excludedPartidoIds: string[];
   },
 ): Promise<void> {
-  const configuredRanges = parseConfiguredRanges(input.horarioPartido ?? '');
-  if (input.slots.length > 0 && configuredRanges.length === 0) {
-    throw new ValidationError('La división debe tener un rango de horario válido para programar partidos');
-  }
   const canchas = await client.ligaCancha.findMany({
     where: { ligaId: input.ligaId, activa: true },
     select: { id: true, nombre: true, activa: true },
@@ -223,6 +209,9 @@ async function validateLeagueCourtCapacity(
       throw new ValidationError('La cancha fija de la división no está activa');
     }
   }
+  // Days and ranges per court. A court missing from the map is one this division does not play on.
+  const scheduleByCourt = resolveDivisionSchedule(input.schedule, new Set(activeById.keys()));
+
   const drafts = input.slots.map((slot, index) => {
     if (input.fixedCourtId && slot.canchaId && slot.canchaId !== input.fixedCourtId) {
       throw new ValidationError(`El slot #${index} debe usar la cancha fija de la división`);
@@ -234,8 +223,21 @@ async function validateLeagueCourtCapacity(
       throw new ValidationError(`El slot #${index} debe usar una cancha activa de esta liga`);
     }
     const interval = getAuthoritativeSlotInterval(slot, input.durationMinutes, input.timeZone);
-    if (!isTimeSlotWithinConfiguredRanges(configuredRanges, slot.horaInicio, slot.horaFin)) {
-      throw new ValidationError(`El horario ${slot.horaInicio}-${slot.horaFin} está fuera del rango configurado de la división`);
+
+    const effectiveCourt = input.multiplesCanchas ? slot.canchaId! : null;
+    const label = effectiveCourt ? `la cancha "${activeById.get(effectiveCourt)}"` : 'la cancha única de la liga';
+    const courtSchedule = scheduleByCourt.get(effectiveCourt);
+    if (!courtSchedule || courtSchedule.ranges.length === 0) {
+      throw new ValidationError(`La división no está configurada para jugar en ${label}`);
+    }
+    if (!isTimeSlotWithinConfiguredRanges(courtSchedule.ranges, slot.horaInicio, slot.horaFin)) {
+      throw new ValidationError(`El horario ${slot.horaInicio}-${slot.horaFin} está fuera del rango configurado de la división en ${label}`);
+    }
+    if (courtSchedule.days.size > 0) {
+      const dayOfWeek = dateKeyDayOfWeek(slot.fecha);
+      if (dayOfWeek !== null && !courtSchedule.days.has(dayOfWeek)) {
+        throw new ValidationError(`La división no juega ese día en ${label}`);
+      }
     }
     return { id: `slot-${index}`, canchaId: input.multiplesCanchas ? slot.canchaId! : null, ...interval, slot };
   });
@@ -243,10 +245,21 @@ async function validateLeagueCourtCapacity(
   if (drafts.length === 0) return;
   const latestDraftEnd = new Date(Math.max(...drafts.map((draft) => draft.end.getTime())));
 
+  // Lower bound so a league does not re-read its whole match history on every generation.
+  // Every loaded row belongs to a division of this league, so its end is at most
+  // start + margin; anything starting before the floor ends before the earliest draft.
+  const earliestDraftStart = new Date(Math.min(...drafts.map((draft) => draft.start.getTime())));
+  const { _max } = await client.division.aggregate({
+    _max: { duracionPartido: true },
+    where: { ligaId: input.ligaId },
+  });
+  const margin = Math.max(_max.duracionPartido ?? 0, MAX_UNKNOWN_MATCH_MINUTES);
+  const occupancyFloor = addMinutes(earliestDraftStart, -margin);
+
   const occupancies = await client.partido.findMany({
     where: {
       // A match starting after every draft ends cannot overlap, regardless of its duration.
-      fecha: { not: null, lt: latestDraftEnd },
+      fecha: { not: null, gte: occupancyFloor, lt: latestDraftEnd },
       ...(input.excludedPartidoIds.length ? { id: { notIn: input.excludedPartidoIds } } : {}),
       OR: [
         { jornada: { division: { ligaId: input.ligaId } } },
@@ -257,22 +270,23 @@ async function validateLeagueCourtCapacity(
       id: true,
       canchaId: true,
       fecha: true,
-      jornada: { select: { division: { select: { duracionPartido: true } } } },
-      rondaPlayoff: { select: { division: { select: { duracionPartido: true } } } },
+      jornada: { select: { division: { select: { id: true, nombre: true, duracionPartido: true } } } },
+      rondaPlayoff: { select: { division: { select: { id: true, nombre: true, duracionPartido: true } } } },
     },
   });
 
+  // A match whose division has no duration is unmeasurable, but that only matters if it could
+  // actually collide — a misconfigured division must not block every other division of the league.
   const persisted = occupancies.map((partido) => {
-    const duration = partido.jornada?.division.duracionPartido ?? partido.rondaPlayoff?.division.duracionPartido;
-    if (!duration || duration <= 0) {
-      throw new ValidationError(`El partido ${partido.id} no tiene una duración de división válida; no se puede comprobar la capacidad de cancha`);
-    }
+    const division = partido.jornada?.division ?? partido.rondaPlayoff?.division ?? null;
+    const duration = division?.duracionPartido;
     return {
       id: partido.id,
+      division,
       canchaId: input.multiplesCanchas ? partido.canchaId : null,
       resolvedCourt: !input.multiplesCanchas || Boolean(partido.canchaId && activeById.has(partido.canchaId)),
       start: partido.fecha!,
-      end: addMinutes(partido.fecha!, duration),
+      end: duration && duration > 0 ? addMinutes(partido.fecha!, duration) : null,
     };
   });
 
@@ -286,6 +300,14 @@ async function validateLeagueCourtCapacity(
     }
 
     for (const occupancy of persisted) {
+      if (occupancy.end === null) {
+        // Unmeasurable: only blocks when it shares this draft's court (or has no resolvable one)
+        // and starts before the draft ends, since its real extent is unknowable.
+        const sharesCourt = !occupancy.resolvedCourt || occupancy.canchaId === current.canchaId;
+        if (!sharesCourt || occupancy.start >= current.end) continue;
+        const division = occupancy.division ? `"${occupancy.division.nombre}" (${occupancy.division.id})` : 'desconocida';
+        throw new ValidationError(`La división ${division} no tiene una duración de partido válida y tiene un partido programado que podría solaparse; corrige su duración antes de generar la jornada`);
+      }
       if (!isOverlapping(current.start, current.end, occupancy.start, occupancy.end)) continue;
       if (!occupancy.resolvedCourt) {
         throw new ValidationError(`El partido programado ${occupancy.id} se solapa con el horario solicitado y no tiene una cancha activa válida; resuelve su cancha antes de generar la jornada`);
@@ -440,6 +462,7 @@ export const jornadaService = {
         duracionPartido: true,
         ligaId: true,
         canchaUnicaId: true,
+        canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } },
         liga: { select: { userId: true, multiplesCanchas: true, timeZone: true } },
       },
     });
@@ -617,7 +640,13 @@ export const jornadaService = {
           ligaId: division.ligaId,
           multiplesCanchas: division.liga.multiplesCanchas,
           durationMinutes: division.duracionPartido,
-          horarioPartido: division.horarioPartido,
+          schedule: {
+            multiplesCanchas: division.liga.multiplesCanchas,
+            diasPartido: division.diasPartido,
+            horarioPartido: division.horarioPartido,
+            canchaUnicaId: division.canchaUnicaId,
+            canchaHorarios: division.canchaHorarios,
+          },
           fixedCourtId: division.canchaUnicaId,
           timeZone: division.liga.timeZone,
           slots: slots ?? [],
@@ -996,9 +1025,11 @@ export const jornadaService = {
             where: { id: divisionId },
             select: {
               ligaId: true,
+              diasPartido: true,
               horarioPartido: true,
               duracionPartido: true,
               canchaUnicaId: true,
+              canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } },
               liga: { select: { multiplesCanchas: true, timeZone: true } },
             },
           });
@@ -1013,7 +1044,13 @@ export const jornadaService = {
             ligaId: lockedDivision.ligaId,
             multiplesCanchas: lockedDivision.liga.multiplesCanchas,
             durationMinutes: lockedDivision.duracionPartido,
-            horarioPartido: lockedDivision.horarioPartido,
+            schedule: {
+              multiplesCanchas: lockedDivision.liga.multiplesCanchas,
+              diasPartido: lockedDivision.diasPartido,
+              horarioPartido: lockedDivision.horarioPartido,
+              canchaUnicaId: lockedDivision.canchaUnicaId,
+              canchaHorarios: lockedDivision.canchaHorarios,
+            },
             fixedCourtId: lockedDivision.canchaUnicaId,
             timeZone: lockedDivision.liga.timeZone,
             slots: slots ?? [],

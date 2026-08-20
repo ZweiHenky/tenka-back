@@ -83,4 +83,25 @@ const existing = {
         (0, vitest_1.expect)(mocks.delete).toHaveBeenCalledWith('team-1');
     });
 });
+(0, vitest_1.describe)('segunda condicion de eliminacion de equipo', () => {
+    (0, vitest_1.beforeEach)(() => {
+        vitest_1.vi.clearAllMocks();
+        mocks.findById.mockResolvedValue(existing);
+    });
+    (0, vitest_1.it)('permite eliminar cuando el nombre escrito coincide (ignorando mayusculas)', async () => {
+        await (0, vitest_1.expect)(service_1.equipoService.delete('team-1', owner, 'halCONES')).resolves.toBeUndefined();
+        (0, vitest_1.expect)(mocks.delete).toHaveBeenCalledWith('team-1');
+    });
+    (0, vitest_1.it)('rechaza la eliminacion cuando el nombre no coincide', async () => {
+        await (0, vitest_1.expect)(service_1.equipoService.delete('team-1', owner, 'otro equipo')).rejects.toMatchObject({
+            statusCode: 422,
+            message: 'El nombre no coincide. Escribe el nombre del equipo para confirmar.',
+        });
+        (0, vitest_1.expect)(mocks.delete).not.toHaveBeenCalled();
+    });
+    (0, vitest_1.it)('mantiene la eliminacion directa cuando no se exige el nombre', async () => {
+        await (0, vitest_1.expect)(service_1.equipoService.delete('team-1', owner)).resolves.toBeUndefined();
+        (0, vitest_1.expect)(mocks.delete).toHaveBeenCalledWith('team-1');
+    });
+});
 //# sourceMappingURL=service.test.js.map

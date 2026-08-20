@@ -255,12 +255,34 @@ model LigaCancha {
   ligaId String
   liga   Liga   @relation(fields: [ligaId], references: [id], onDelete: Cascade)
 
-  partidos        Partido[]
-  divisionesFijas Division[] @relation("DivisionCanchaUnica")
+  partidos          Partido[]
+  divisionesFijas   Division[]              @relation("DivisionCanchaUnica")
+  divisionHorarios  DivisionCanchaHorario[]
 
   @@unique([ligaId, nombreNormalizado])
   @@index([ligaId])
   @@map("ligas_canchas")
+}
+
+/// Días y horario que una división juega en UNA cancha concreta.
+/// Solo existen filas para canchas configuradas: si no hay fila, esa división no juega ahí.
+/// Las ligas de cancha única (multiplesCanchas = false) no usan este modelo y siguen
+/// leyendo los escalares de Division. Ver src/utils/divisionSchedule.ts.
+model DivisionCanchaHorario {
+  id             String   @id @default(cuid())
+  diasPartido    String
+  horarioPartido String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  divisionId String
+  canchaId   String
+  division   Division   @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  cancha     LigaCancha @relation(fields: [canchaId], references: [id], onDelete: Cascade)
+
+  @@unique([divisionId, canchaId])
+  @@index([canchaId])
+  @@map("divisiones_canchas_horarios")
 }
 
 model LigaArbitro {
@@ -287,6 +309,9 @@ model Division {
   arbitraje                Float     @default(0)
   registrarParticipaciones Boolean   @default(false)
   usarPenalesEnEmpates     Boolean   @default(true)
+  /// Resumen denormalizado (unión) de canchaHorarios, mantenido en la escritura para la vista
+  /// pública y los clientes viejos. Es un SUPERCONJUNTO: nunca validar contra estos campos,
+  /// usar resolveDivisionSchedule(). Son la fuente real solo en ligas de cancha única.
   diasPartido              String?
   horarioPartido           String?
   duracionPartido          Int?
@@ -318,6 +343,7 @@ model Division {
   tablaPosiciones           TablaPosicion[]
   notificationSubscriptions DivisionNotificationSubscription[]
   notificationOutbox        NotificationOutbox[]
+  canchaHorarios            DivisionCanchaHorario[]
 
   @@index([ligaId, createdAt])
   @@index([canchaUnicaId])

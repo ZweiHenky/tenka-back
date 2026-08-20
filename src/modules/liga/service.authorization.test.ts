@@ -8,6 +8,7 @@ import {
   resetServiceMocks,
 } from './service.test-harness';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { ValidationError } from '../../utils/errors';
 
 const mocks = getServiceMocks();
 let ligaService: Awaited<ReturnType<typeof loadLigaService>>;
@@ -58,5 +59,27 @@ describe('autorizacion de liga', () => {
     mocks.findRecentSchedule.mockResolvedValue(schedule);
 
     await expect(ligaService.getRecentSchedule('liga-1', actor)).resolves.toBe(schedule);
+  });
+});
+
+describe('segunda condicion de eliminacion de liga', () => {
+  beforeEach(() => {
+    resetServiceMocks();
+    mocks.findDeleteContext.mockResolvedValue(existingLiga);
+  });
+
+  it('permite eliminar cuando el nombre escrito coincide (ignorando mayusculas)', async () => {
+    await expect(ligaService.delete('liga-1', owner, 'liga CENTRO')).resolves.toBeUndefined();
+    expect(mocks.delete).toHaveBeenCalledWith('liga-1');
+  });
+
+  it('rechaza la eliminacion cuando el nombre no coincide', async () => {
+    await expect(ligaService.delete('liga-1', owner, 'otra liga')).rejects.toBeInstanceOf(ValidationError);
+    expect(mocks.delete).not.toHaveBeenCalled();
+  });
+
+  it('mantiene la eliminacion directa cuando no se exige el nombre', async () => {
+    await expect(ligaService.delete('liga-1', owner)).resolves.toBeUndefined();
+    expect(mocks.delete).toHaveBeenCalledWith('liga-1');
   });
 });

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   refereeCreateMany: vi.fn(),
   leagueUpdate: vi.fn(),
   divisionUpdateMany: vi.fn(),
+  courtScheduleDeleteMany: vi.fn(),
 }));
 
 vi.mock('../../config/database', () => ({
@@ -26,6 +27,7 @@ describe('actualizacion atomica de canchas', () => {
       ligaArbitro: { deleteMany: mocks.refereeDeleteMany, createMany: mocks.refereeCreateMany },
       liga: { update: mocks.leagueUpdate },
       division: { updateMany: mocks.divisionUpdateMany },
+      divisionCanchaHorario: { deleteMany: mocks.courtScheduleDeleteMany },
     }));
     mocks.leagueUpdate.mockResolvedValue({ id: 'liga-1' });
   });
@@ -36,6 +38,10 @@ describe('actualizacion atomica de canchas', () => {
     expect(mocks.divisionUpdateMany).toHaveBeenCalledWith({
       where: { ligaId: 'liga-1' },
       data: { canchaUnicaId: null },
+    });
+    // Per-court schedules make no sense once the league runs a single court.
+    expect(mocks.courtScheduleDeleteMany).toHaveBeenCalledWith({
+      where: { division: { ligaId: 'liga-1' } },
     });
     expect(mocks.leagueUpdate).toHaveBeenCalledOnce();
   });

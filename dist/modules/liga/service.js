@@ -6,6 +6,7 @@ const repository_1 = require("./repository");
 const service_1 = require("../media/service");
 const database_1 = require("../../config/database");
 const transaction_1 = require("../../utils/transaction");
+const leagueScheduleLock_1 = require("../../utils/leagueScheduleLock");
 const jobSignals_1 = require("../../workers/jobSignals");
 const DUPLICATE_NAME_MESSAGE = 'Ya existe una liga con ese nombre';
 const DUPLICATE_COURT_MESSAGE = 'Ya existe una cancha con ese nombre en esta liga';
@@ -179,13 +180,22 @@ exports.ligaService = {
         let updated;
         try {
             const disablingMultipleCourts = old.multiplesCanchas && data.multiplesCanchas === false;
+            // Turning multiple courts off drops every court and nulls each division's canchaUnicaId,
+            // so it has to be serialized against jornada generation like any other venue change.
+            const touchesCourts = disablingMultipleCourts || (courtWrites !== undefined && courtWrites.length > 0);
             if (logoAssetId === undefined && coverAssetId === undefined) {
-                updated = disablingMultipleCourts
-                    ? await repository_1.ligaRepository.update(id, ligaData, courtWrites, arbitros, true)
+                updated = touchesCourts
+                    ? await (0, transaction_1.runInTransaction)(async (tx) => {
+                        await (0, leagueScheduleLock_1.acquireLeagueScheduleLock)(tx, id);
+                        return repository_1.ligaRepository.update(id, ligaData, courtWrites, arbitros, disablingMultipleCourts, tx);
+                    })
                     : await repository_1.ligaRepository.update(id, ligaData, courtWrites, arbitros);
             }
             else
                 updated = await (0, transaction_1.runInTransaction)(async (tx) => {
+                    // Advisory lock first, row lock second — keeps a single ordering across all writers.
+                    if (touchesCourts)
+                        await (0, leagueScheduleLock_1.acquireLeagueScheduleLock)(tx, id);
                     await service_1.mediaService.lockAttachmentTarget(tx, 'liga', id);
                     const current = await tx.liga.findUniqueOrThrow({
                         where: { id },
@@ -211,10 +221,13 @@ exports.ligaService = {
         }
         return updated;
     },
-    async delete(id, actor) {
+    async delete(id, actor, confirmName) {
         const old = await repository_1.ligaRepository.findDeleteContext(id, actor);
         if (!old)
             throw new errors_1.NotFoundError('Liga');
+        if (confirmName !== undefined && normalizeName(old.nombre) !== normalizeName(confirmName)) {
+            throw new errors_1.ValidationError('El nombre no coincide. Escribe el nombre de la liga para confirmar.');
+        }
         if (!old.logo && !old.cancha) {
             await repository_1.ligaRepository.delete(id);
             return;
@@ -257,35 +270,40 @@ exports.ligaService = {
         const liga = await repository_1.ligaRepository.findManagementContext(ligaId, actor);
         if (!liga)
             throw new errors_1.NotFoundError('Liga');
-        const cancha = await database_1.prisma.ligaCancha.findFirst({ where: { id: canchaId, ligaId } });
-        if (!cancha)
-            throw new errors_1.NotFoundError('Cancha');
-        if (!liga.multiplesCanchas && data.activa === true) {
-            throw new errors_1.ValidationError('Una liga sin múltiples canchas no puede tener canchas activas');
-        }
-        if (liga.multiplesCanchas && cancha.activa && data.activa === false) {
-            const remainingActive = await database_1.prisma.ligaCancha.count({
-                where: { ligaId, activa: true, id: { not: canchaId } },
-            });
-            if (remainingActive < 2)
-                throw new errors_1.ValidationError(MINIMUM_COURTS_MESSAGE);
-        }
-        const updateData = {};
-        if (data.activa !== undefined)
-            updateData.activa = data.activa;
-        if (data.nombre !== undefined) {
-            const nombre = data.nombre.trim();
-            const nombreNormalizado = normalizeName(nombre);
-            const existing = await database_1.prisma.ligaCancha.findFirst({
-                where: { ligaId, nombreNormalizado, id: { not: canchaId } },
-            });
-            if (existing)
-                throw new errors_1.ConflictError(DUPLICATE_COURT_MESSAGE);
-            updateData.nombre = nombre;
-            updateData.nombreNormalizado = nombreNormalizado;
-        }
         try {
-            return await database_1.prisma.ligaCancha.update({ where: { id: canchaId }, data: updateData });
+            // Deactivating a court changes what generateNext considers a valid venue, so the reads
+            // that gate it must happen under the league schedule lock.
+            return await (0, transaction_1.runInTransaction)(async (tx) => {
+                await (0, leagueScheduleLock_1.acquireLeagueScheduleLock)(tx, ligaId);
+                const cancha = await tx.ligaCancha.findFirst({ where: { id: canchaId, ligaId } });
+                if (!cancha)
+                    throw new errors_1.NotFoundError('Cancha');
+                if (!liga.multiplesCanchas && data.activa === true) {
+                    throw new errors_1.ValidationError('Una liga sin múltiples canchas no puede tener canchas activas');
+                }
+                if (liga.multiplesCanchas && cancha.activa && data.activa === false) {
+                    const remainingActive = await tx.ligaCancha.count({
+                        where: { ligaId, activa: true, id: { not: canchaId } },
+                    });
+                    if (remainingActive < 2)
+                        throw new errors_1.ValidationError(MINIMUM_COURTS_MESSAGE);
+                }
+                const updateData = {};
+                if (data.activa !== undefined)
+                    updateData.activa = data.activa;
+                if (data.nombre !== undefined) {
+                    const nombre = data.nombre.trim();
+                    const nombreNormalizado = normalizeName(nombre);
+                    const existing = await tx.ligaCancha.findFirst({
+                        where: { ligaId, nombreNormalizado, id: { not: canchaId } },
+                    });
+                    if (existing)
+                        throw new errors_1.ConflictError(DUPLICATE_COURT_MESSAGE);
+                    updateData.nombre = nombre;
+                    updateData.nombreNormalizado = nombreNormalizado;
+                }
+                return tx.ligaCancha.update({ where: { id: canchaId }, data: updateData });
+            });
         }
         catch (error) {
             if (isUniqueConstraintError(error))
@@ -297,26 +315,33 @@ exports.ligaService = {
         const liga = await repository_1.ligaRepository.findManagementContext(ligaId, actor);
         if (!liga)
             throw new errors_1.NotFoundError('Liga');
-        const cancha = await database_1.prisma.ligaCancha.findFirst({ where: { id: canchaId, ligaId } });
-        if (!cancha)
-            throw new errors_1.NotFoundError('Cancha');
-        if (liga.multiplesCanchas && cancha.activa) {
-            const remainingActive = await database_1.prisma.ligaCancha.count({
-                where: { ligaId, activa: true, id: { not: canchaId } },
-            });
-            if (remainingActive < 2)
-                throw new errors_1.ValidationError(MINIMUM_COURTS_MESSAGE);
-        }
-        const [matchCount, fixedDivisionCount] = await Promise.all([
-            database_1.prisma.partido.count({ where: { canchaId } }),
-            database_1.prisma.division.count({ where: { canchaUnicaId: canchaId } }),
-        ]);
-        if (matchCount > 0 || fixedDivisionCount > 0) {
-            await database_1.prisma.ligaCancha.update({ where: { id: canchaId }, data: { activa: false } });
-        }
-        else {
-            await database_1.prisma.ligaCancha.delete({ where: { id: canchaId } });
-        }
+        // Everything below runs under the league schedule lock and is re-read inside it: a
+        // concurrent generateNext could otherwise commit matches on this court between the count
+        // and the delete, and onDelete: SetNull would strip their canchaId — putting them outside
+        // the partidos_cancha_no_overlap constraint and blocking generation for the whole league.
+        await (0, transaction_1.runInTransaction)(async (tx) => {
+            await (0, leagueScheduleLock_1.acquireLeagueScheduleLock)(tx, ligaId);
+            const cancha = await tx.ligaCancha.findFirst({ where: { id: canchaId, ligaId } });
+            if (!cancha)
+                throw new errors_1.NotFoundError('Cancha');
+            if (liga.multiplesCanchas && cancha.activa) {
+                const remainingActive = await tx.ligaCancha.count({
+                    where: { ligaId, activa: true, id: { not: canchaId } },
+                });
+                if (remainingActive < 2)
+                    throw new errors_1.ValidationError(MINIMUM_COURTS_MESSAGE);
+            }
+            const [matchCount, fixedDivisionCount] = await Promise.all([
+                tx.partido.count({ where: { canchaId } }),
+                tx.division.count({ where: { canchaUnicaId: canchaId } }),
+            ]);
+            if (matchCount > 0 || fixedDivisionCount > 0) {
+                await tx.ligaCancha.update({ where: { id: canchaId }, data: { activa: false } });
+            }
+            else {
+                await tx.ligaCancha.delete({ where: { id: canchaId } });
+            }
+        });
     },
     async getArbitros(ligaId, actor) {
         const arbitros = await repository_1.ligaRepository.findManageableArbitros(ligaId, actor);
