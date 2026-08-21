@@ -51,24 +51,36 @@ const PUBLIC_LEAGUE_LIST_SELECT = {
       arbitraje: true,
       diasPartido: true,
       horarioPartido: true,
+      // Los escalares son el resumen (unión). Las filas son la configuración real, y con el
+      // nombre de la cancha la vista pública puede mostrar el desglose sin otra consulta.
+      canchaHorarios: {
+        select: { canchaId: true, diasPartido: true, horarioPartido: true, cancha: { select: { nombre: true } } },
+      },
       categoria: { select: { id: true, nombre: true } },
       tipo: { select: { id: true, nombre: true } },
+      tipoCompetencia: { select: { id: true, nombre: true } },
       estadoLiga: { select: { id: true, nombre: true } },
     },
   },
 } as const;
 
 const DIVISION_RELATIONS = {
+  canchaHorarios: {
+    select: { canchaId: true, diasPartido: true, horarioPartido: true, cancha: { select: { nombre: true } } },
+  },
   categoria: { select: { id: true, nombre: true } },
   tipo: { select: { id: true, nombre: true } },
   estadoLiga: { select: { id: true, nombre: true } },
-  tipoCompetencia: { select: { id: true, nombre: true } },
+  // `codigo` es lo que decide el formato en la app; el nombre del catálogo es editable.
+  tipoCompetencia: { select: { id: true, nombre: true, codigo: true } },
 } as const;
 
 const DIVISIONES_INCLUDE = {
   ubicacion: UBICACION_SELECT,
   divisiones: {
     include: {
+      // El detalle también muestra el desglose por cancha; los escalares son solo su resumen.
+      canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } },
       categoria: { select: { id: true, nombre: true } },
       tipo: { select: { id: true, nombre: true } },
       estadoLiga: { select: { id: true, nombre: true } },
@@ -139,11 +151,7 @@ export const ligaRepository: LigaRepository = {
       : actor
         ? { id, OR: [{ userId: actor.id }, { divisiones: { some: PUBLIC_DIVISION_WHERE } }] }
         : { id, divisiones: { some: PUBLIC_DIVISION_WHERE } };
-    const divisionWhere = isAdmin
-      ? undefined
-      : actor
-        ? { OR: [PUBLIC_DIVISION_WHERE, { liga: { userId: actor.id } }] }
-        : PUBLIC_DIVISION_WHERE;
+    const divisionWhere = isAdmin ? undefined : PUBLIC_DIVISION_WHERE;
     const canchas = isAdmin
       ? CANCHAS_SELECT
       : actor

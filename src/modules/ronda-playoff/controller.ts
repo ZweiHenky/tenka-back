@@ -4,6 +4,7 @@ import { createSchema, generateSchema, updateSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import { parsePagination } from '../../utils/pagination';
+import { firstIssueMessage } from '../../utils/validation';
 
 export const rondaPlayoffController = {
   async list(req: Request, res: Response, next: NextFunction) {
@@ -19,11 +20,11 @@ export const rondaPlayoffController = {
   },
 
   async create(req: Request, res: Response, next: NextFunction) {
-    try { const p = createSchema.safeParse(req.body); if (!p.success) throw new ValidationError(p.error.issues[0].message); created(res, await rondaPlayoffService.create(p.data, req.user!), 'Ronda de playoff creada exitosamente'); } catch (e) { next(e); }
+    try { const p = createSchema.safeParse(req.body); if (!p.success) throw new ValidationError(firstIssueMessage(p.error)); created(res, await rondaPlayoffService.create(p.data, req.user!), 'Ronda de playoff creada exitosamente'); } catch (e) { next(e); }
   },
 
   async update(req: Request, res: Response, next: NextFunction) {
-    try { const p = updateSchema.safeParse(req.body); if (!p.success) throw new ValidationError(p.error.issues[0].message); ok(res, await rondaPlayoffService.update(req.params.id, p.data, req.user!), 'Ronda de playoff actualizada exitosamente'); } catch (e) { next(e); }
+    try { const p = updateSchema.safeParse(req.body); if (!p.success) throw new ValidationError(firstIssueMessage(p.error)); ok(res, await rondaPlayoffService.update(req.params.id, p.data, req.user!), 'Ronda de playoff actualizada exitosamente'); } catch (e) { next(e); }
   },
 
   async delete(req: Request, res: Response, next: NextFunction) {
@@ -37,8 +38,11 @@ export const rondaPlayoffController = {
   async generate(req: Request, res: Response, next: NextFunction) {
     try {
       const p = generateSchema.safeParse(req.body);
-      if (!p.success) throw new ValidationError(p.error.issues[0].message);
-      const rondas = await rondaPlayoffService.generate(p.data.divisionId, p.data.cantidadEquipos, req.user!);
+      if (!p.success) throw new ValidationError(firstIssueMessage(p.error));
+      const rondas = await rondaPlayoffService.generate(p.data.divisionId, p.data.cantidadEquipos, req.user!, {
+        siembra: p.data.siembra,
+        llaves: p.data.llaves,
+      });
       created(res, rondas, 'Llaves generadas exitosamente');
     } catch (e) { next(e); }
   },

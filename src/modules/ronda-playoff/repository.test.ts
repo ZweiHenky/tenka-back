@@ -55,7 +55,14 @@ describe('rondaPlayoffRepository public reads', () => {
       select: {
         rondasPlayoff: {
           orderBy: { orden: 'asc' },
-          include: { partidos: { include: expect.any(Object) } },
+          // Los partidos también van ordenados: sin esto salían en el orden físico de Postgres,
+          // que no es ninguno, y la pestaña Eliminatoria los pintaba salteados.
+          include: {
+            partidos: {
+              orderBy: [{ fecha: 'asc' }, { llave: 'asc' }],
+              include: expect.any(Object),
+            },
+          },
         },
       },
     });

@@ -21,6 +21,31 @@ Express + TypeScript + Better Auth + Prisma (PostgreSQL).
 
 Testing con **Vitest** (config en `vitest.config.ts`). Tests en `src/**/*.test.ts`.
 
+## Formato de competencia y siembra del cuadro
+
+`TipoCompetencia.codigo` (`LIGA_Y_ELIMINATORIAS` | `ELIMINATORIA`) es la identidad estable del
+formato. **Ninguna regla del backend depende de él**: lo de eliminatorias se activa preguntando si
+existen rondas para la división. Lo consume la app, que antes comparaba el *nombre* del catálogo.
+El nombre es editable por API; el código no debería cambiar.
+
+`rondaPlayoff.generate` acepta `siembra`:
+
+| Siembra | Cómo arma los cruces |
+|---|---|
+| `POSICIONES` (default) | Ordena por puntos/diferencia/ganados/goles/nombre y cruza `i` contra `n-1-i`. **Es el comportamiento histórico y no debe cambiar**: un cliente que no manda `siembra` genera el mismo cuadro que antes. |
+| `ALEATORIA` | Fisher-Yates y empareja consecutivos. El generador se inyecta (`options.random`) para fijarlo en los tests. |
+| `MANUAL` | Usa las `llaves` recibidas. |
+
+Las llaves manuales se validan **dentro de la transacción y del `acquireLeagueScheduleLock`**,
+contra los equipos que la división tiene en ese momento: entre que el usuario armó el cuadro y lo
+envió, un equipo pudo darse de baja. Los mensajes nombran el problema concreto (equipo ajeno,
+repetido, o contra sí mismo).
+
+Sin fase de liga la tabla no existe y todos entran en cero, así que `POSICIONES` degenera en orden
+alfabético — por eso un cuadro puro ya se podía generar antes de que existiera este formato.
+
+`updateDivisionSchema` **no declara** `tipoCompetenciaId` a propósito: el formato se fija al crear.
+
 ## Package manager
 
 Uses **pnpm** (see `pnpm-lock.yaml`). Do not use npm/yarn. All scripts and commands must be run with `pnpm`.
@@ -93,6 +118,7 @@ Las canchas (`LigaCancha`) son de la **liga**, y todas sus divisiones las compar
 - Orden de locks: **advisory primero, row lock (`lockAttachmentTarget`) después**.
 - El constraint solo aplica con `canchaId IS NOT NULL`, así que las ligas de cancha única dependen únicamente del lock.
 - `validateLeagueCourtCapacity` acota la consulta de ocupación con un piso (`earliestDraftStart - max(duracionMáxDeLaLiga, 1440min)`) para no releer el historial completo.
+- **Las escrituras deben devolver la división completa.** `create` y `update` incluyen `canchaHorarios` (`DIVISION_WRITE_INCLUDE` en `division/repository.ts`). El cliente guarda la respuesta en su caché con `setQueryData`; si faltara la relación, la división parecería no tener configuración por cancha hasta el siguiente refetch y la app caería al fallback legacy, mostrando todas las canchas de la liga y repartiendo los slots entre ellas.
 - **El servidor no asigna canchas, solo valida.** La `canchaId` de cada slot la manda el cliente; aquí no hay planificador. (Existió un `disponibilidad-cancha/planner.ts` sin llamadores y se eliminó.)
 - Una división con `duracionPartido` nulo hace su partido inmensurable. **No inventes una duración por defecto** — enmascararía choques reales. El chequeo se difiere hasta saber si ese partido comparte cancha y ventana con lo que se está programando, y el error nombra la **división** culpable, para que una división mal configurada no bloquee a las otras 9 de la liga.
 
@@ -280,6 +306,7 @@ interface ApiResponse<T> { success: boolean; data?: T; message?: string; error?:
   - Prisma: se mockea `src/config/database` con funciones vi.fn() para cada modelo
   - Repositorios: se mockean directo con `vi.fn()` en las funciones expuestas
 - **Referencias**: `src/modules/jornada/__tests__/generateNext.test.ts`, `src/modules/user/controller.test.ts`, `src/middlewares/errorHandler.test.ts`, `src/plugins/otpUniqueness.test.ts`
+- **Errores de validación**: los controladores usan `firstIssueMessage(parsed.error)` (`src/utils/validation.ts`), que antepone el campo a los mensajes propios de zod — `Invalid input: expected string, received undefined` por sí solo no dice cuál falló. Los mensajes de código `custom` los escribimos nosotros y se dejan intactos. **No vuelvas a usar `error.issues[0].message` directo en un controlador.**
 
 ### Tests de integración (base real)
 

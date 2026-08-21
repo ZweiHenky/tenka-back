@@ -3,6 +3,7 @@ import { refereeAccessService } from './service'
 import { refereeResultSchema } from './validator'
 import { ok, noContent, created } from '../../utils/response'
 import { ValidationError } from '../../utils/errors'
+import { firstIssueMessage } from '../../utils/validation';
 
 export const refereeAccessController = {
   async createAccess(req: Request, res: Response, next: NextFunction) {
@@ -36,7 +37,7 @@ export const refereeAccessController = {
   async updateResultByToken(req: Request, res: Response, next: NextFunction) {
     try {
       const p = refereeResultSchema.safeParse(req.body)
-      if (!p.success) throw new ValidationError(p.error.issues[0].message)
+      if (!p.success) throw new ValidationError(firstIssueMessage(p.error))
       const data = await refereeAccessService.updateResultByToken(req.headers.authorization, p.data)
       ok(res, data, 'Resultado guardado exitosamente')
     } catch (e) { next(e) }

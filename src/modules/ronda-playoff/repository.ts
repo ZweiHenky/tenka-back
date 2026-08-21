@@ -30,7 +30,10 @@ export const rondaPlayoffRepository: RondaPlayoffRepository = {
       select: {
         rondasPlayoff: {
           orderBy: { orden: 'asc' },
-          include: { partidos: { include: PARTIDO_READ_INCLUDE } },
+          // Del más temprano al más tarde. En Postgres `asc` ya manda los nulos al final, así que
+          // los partidos sin programar quedan después de los que ya tienen hora, y `llave` los
+          // desempata — que además es el orden natural del cuadro mientras no haya fechas.
+          include: { partidos: { orderBy: [{ fecha: 'asc' }, { llave: 'asc' }], include: PARTIDO_READ_INCLUDE } },
         },
       },
     });

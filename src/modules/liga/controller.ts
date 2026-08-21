@@ -4,6 +4,7 @@ import { createLigaSchema, updateLigaSchema, createCanchaSchema, updateCanchaSch
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import { parsePagination } from '../../utils/pagination';
+import { firstIssueMessage } from '../../utils/validation';
 
 function publicLiga<T extends object>(liga: T): Omit<T, 'logoPublicId' | 'canchaPublicId'> {
   const { logoPublicId: _logo, canchaPublicId: _cover, ...safe } = liga as T & { logoPublicId?: unknown; canchaPublicId?: unknown };
@@ -47,7 +48,7 @@ export const ligaController = {
   async create(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = createLigaSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const liga = await ligaService.create({
         ...parsed.data,
         userId: req.user!.id,
@@ -61,7 +62,7 @@ export const ligaController = {
   async update(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = updateLigaSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const liga = await ligaService.update(req.params.id, parsed.data, req.user!);
       ok(res, publicLiga(liga), 'Liga actualizada exitosamente');
     } catch (err) {
@@ -91,7 +92,7 @@ export const ligaController = {
   async createCancha(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = createCanchaSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const cancha = await ligaService.createCancha(req.params.ligaId, parsed.data, req.user!);
       created(res, cancha, 'Cancha creada exitosamente');
     } catch (err) {
@@ -102,7 +103,7 @@ export const ligaController = {
   async updateCancha(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = updateCanchaSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const cancha = await ligaService.updateCancha(req.params.ligaId, req.params.canchaId, parsed.data, req.user!);
       ok(res, cancha, 'Cancha actualizada exitosamente');
     } catch (err) {
@@ -140,7 +141,7 @@ export const ligaController = {
   async createArbitro(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = createArbitroSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const arbitro = await ligaService.createArbitro(req.params.ligaId, parsed.data, req.user!);
       created(res, arbitro, 'Árbitro creado exitosamente');
     } catch (err) {
@@ -151,7 +152,7 @@ export const ligaController = {
   async updateArbitro(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = updateArbitroSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const arbitro = await ligaService.updateArbitro(req.params.ligaId, req.params.arbitroId, parsed.data, req.user!);
       ok(res, arbitro, 'Árbitro actualizado exitosamente');
     } catch (err) {

@@ -31,7 +31,7 @@ async function createDivisionFixture(suffix: string): Promise<string> {
     prisma.categoria.create({ data: { id: `category-${suffix}`, nombre: 'Test' } }),
     prisma.tipo.create({ data: { id: `type-${suffix}`, nombre: 'Test' } }),
     prisma.estadoLiga.create({ data: { id: `status-${suffix}`, nombre: 'En Curso' } }),
-    prisma.tipoCompetencia.create({ data: { id: `competition-${suffix}`, nombre: 'Test' } }),
+    prisma.tipoCompetencia.create({ data: { id: `competition-${suffix}`, nombre: 'Test', codigo: 'LIGA_Y_ELIMINATORIAS' } }),
   ]);
   const division = await prisma.division.create({ data: {
     id: `division-${suffix}`, nombre: 'Test', maxEquipos: 8, ligaId: liga.id,

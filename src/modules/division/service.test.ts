@@ -109,6 +109,16 @@ describe('consultas privadas optimizadas de división', () => {
       expect(payload.canchaHorarios.create).toHaveLength(2);
     });
 
+    it('devuelve la división con sus horarios por cancha', async () => {
+      // El cliente guarda esta respuesta en caché. Sin la relación, la división parecería no
+      // tener configuración por cancha y la app mostraría todas las canchas de la liga.
+      await divisionService.create({ ...createData, estadoLigaId: 'estado-1', horariosPorCancha }, owner);
+
+      expect(mocks.divisionCreate.mock.calls[0][0].include).toEqual({
+        canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } },
+      });
+    });
+
     it('no abre transacción cuando la creación no trae filas', async () => {
       await divisionService.create({ ...createData, estadoLigaId: 'estado-1' }, owner);
 

@@ -8,6 +8,7 @@ import { mediaService } from '../media/service';
 import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 import { parsePagination } from '../../utils/pagination';
 import { signalBackgroundJob } from '../../workers/jobSignals';
+import { firstIssueMessage } from '../../utils/validation';
 
 function sanitizePublic(jugador: any) {
   return {
@@ -79,7 +80,7 @@ export const jugadorController = {
   async create(req: Request, res: Response, next: NextFunction) {
     try {
       const p = createJugadorSchema.safeParse(req.body);
-      if (!p.success) throw new ValidationError(p.error.issues[0].message);
+      if (!p.success) throw new ValidationError(firstIssueMessage(p.error));
       const { equipoId, dorsal, photoAssetId, ...jugadorData } = p.data;
       await assertTeamOwner(equipoId, req);
 
@@ -111,7 +112,7 @@ export const jugadorController = {
   async update(req: Request, res: Response, next: NextFunction) {
     try {
       const p = updateJugadorSchema.safeParse(req.body);
-      if (!p.success) throw new ValidationError(p.error.issues[0].message);
+      if (!p.success) throw new ValidationError(firstIssueMessage(p.error));
       const { equipoId, dorsal, photoAssetId, ...jugadorData } = p.data;
 
       if (!isAdmin(req.user!)) {
@@ -169,7 +170,7 @@ export const jugadorController = {
   async assignToTeam(req: Request, res: Response, next: NextFunction) {
     try {
       const p = assignJugadorSchema.safeParse(req.body);
-      if (!p.success) throw new ValidationError(p.error.issues[0].message);
+      if (!p.success) throw new ValidationError(firstIssueMessage(p.error));
       await assertTeamOwner(p.data.equipoId, req);
       const result = await prisma.$transaction(async (tx) => {
         const jugador = await tx.jugador.findUnique({ where: { id: p.data.jugadorId }, select: { id: true } });
@@ -219,7 +220,7 @@ export const jugadorController = {
   async lookupByPhone(req: Request, res: Response, next: NextFunction) {
     try {
       const p = lookupJugadorByPhoneSchema.safeParse(req.body);
-      if (!p.success) throw new ValidationError(p.error.issues[0].message);
+      if (!p.success) throw new ValidationError(firstIssueMessage(p.error));
       await assertTeamOwner(req.params.equipoId, req);
 
       const jugador = await prisma.jugador.findFirst({
@@ -301,7 +302,7 @@ export const jugadorController = {
   async assignToDivision(req: Request, res: Response, next: NextFunction) {
     try {
       const p = divisionJugadorSchema.safeParse(req.body);
-      if (!p.success) throw new ValidationError(p.error.issues[0].message);
+      if (!p.success) throw new ValidationError(firstIssueMessage(p.error));
       await assertCanManageDivisionRoster(p.data.divisionId, p.data.equipoId, req);
       const teamPlayer = await prisma.equipoJugador.findUnique({
         where: { equipoId_jugadorId: { equipoId: p.data.equipoId, jugadorId: p.data.jugadorId } },
@@ -349,7 +350,7 @@ export const jugadorController = {
       if (existing) return ok(res, existing);
 
       const p = createMeSchema.safeParse(req.body);
-      if (!p.success) throw new ValidationError(p.error.issues[0].message);
+      if (!p.success) throw new ValidationError(firstIssueMessage(p.error));
 
       const byPhone = await prisma.jugador.findUnique({ where: { telefono: user.phoneNumber } });
       if (byPhone) {
@@ -390,7 +391,7 @@ export const jugadorController = {
       if (!jugador) throw new ValidationError('No tienes un perfil de jugador');
 
       const p = updateMeSchema.safeParse(req.body);
-      if (!p.success) throw new ValidationError(p.error.issues[0].message);
+      if (!p.success) throw new ValidationError(firstIssueMessage(p.error));
 
       const { photoAssetId, ...profileData } = p.data;
       const updated = await prisma.$transaction(async (tx) => {

@@ -49,7 +49,8 @@ async function main() {
 
   await prisma.tipoCompetencia.createMany({
     data: [
-      { nombre: 'Liga y Eliminatorias' },
+      { nombre: 'Liga y Eliminatorias', codigo: 'LIGA_Y_ELIMINATORIAS' },
+      { nombre: 'Eliminatoria', codigo: 'ELIMINATORIA' },
     ],
     skipDuplicates: true,
   });

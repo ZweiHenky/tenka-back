@@ -13,7 +13,7 @@ export const tipoCompetenciaService = {
     return t;
   },
 
-  async create(data: { nombre: string }): Promise<TipoCompetenciaEntity> {
+  async create(data: { nombre: string; codigo: string }): Promise<TipoCompetenciaEntity> {
     return tipoCompetenciaRepository.create(data);
   },
 

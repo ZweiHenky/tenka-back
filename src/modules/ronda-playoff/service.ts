@@ -2,6 +2,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../../utils/error
 import { prisma } from '../../config/database';
 import { rondaPlayoffRepository } from './repository';
 import type { RondaPlayoffEntity, RondaPlayoffReadEntity } from './entity';
+import type { Siembra } from './validator';
 import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin, isAdmin } from '../../utils/authorization';
 import { assertVisibleDivision, visibleDivisionWhere } from '../../utils/divisionVisibility';
@@ -55,6 +56,91 @@ const NOMBRES_RONDAS: Record<number, string[]> = {
 const CANTIDADES_EQUIPOS = [2, 4, 8, 16, 32];
 const spanishNameCollator = new Intl.Collator('es', { sensitivity: 'base' });
 
+type EquipoClasificable = {
+  equipoId: string;
+  nombre: string;
+  puntos: number;
+  diferenciaGoles: number;
+  ganados: number;
+  golesFavor: number;
+};
+
+/** Un cruce ya resuelto. Cada estrategia de siembra produce esta misma lista. */
+type Llave = { equipoLocalId: string; equipoVisitanteId: string };
+
+export interface GenerateOptions {
+  siembra?: Siembra;
+  llaves?: Llave[];
+  /** Inyectable para poder fijar el sorteo en los tests. */
+  random?: () => number;
+}
+
+/** Fisher-Yates sobre una copia; no toca el arreglo recibido. */
+function shuffled<T>(items: T[], random: () => number): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+/** Siembra clásica: el mejor contra el peor. Es el comportamiento histórico y no debe cambiar. */
+function llavesPorPosiciones(equipos: EquipoClasificable[], cantidadEquipos: number): Llave[] {
+  const clasificados = [...equipos]
+    .sort((a, b) => b.puntos - a.puntos
+      || b.diferenciaGoles - a.diferenciaGoles
+      || b.ganados - a.ganados
+      || b.golesFavor - a.golesFavor
+      || spanishNameCollator.compare(a.nombre, b.nombre)
+      || a.equipoId.localeCompare(b.equipoId))
+    .slice(0, cantidadEquipos);
+
+  return Array.from({ length: clasificados.length / 2 }, (_, i) => ({
+    equipoLocalId: clasificados[i].equipoId,
+    equipoVisitanteId: clasificados[clasificados.length - 1 - i].equipoId,
+  }));
+}
+
+function llavesAleatorias(equipos: EquipoClasificable[], cantidadEquipos: number, random: () => number): Llave[] {
+  const sorteados = shuffled(equipos, random).slice(0, cantidadEquipos);
+  return Array.from({ length: sorteados.length / 2 }, (_, i) => ({
+    equipoLocalId: sorteados[i * 2].equipoId,
+    equipoVisitanteId: sorteados[i * 2 + 1].equipoId,
+  }));
+}
+
+/**
+ * Las llaves manuales se validan contra los equipos que la división tiene **en este momento**,
+ * dentro de la transacción: entre que el usuario armó el cuadro y lo envió, un equipo pudo
+ * haberse dado de baja.
+ */
+function validarLlavesManuales(llaves: Llave[], equipos: EquipoClasificable[]): Llave[] {
+  const porId = new Map(equipos.map((equipo) => [equipo.equipoId, equipo]));
+  const vistos = new Map<string, number>();
+
+  llaves.forEach((llave, index) => {
+    // Antes que el chequeo de repetidos: un equipo duplicado dentro de la misma llave se
+    // reportaría como "aparece en las llaves #1 y #1", que no le dice nada al usuario.
+    if (llave.equipoLocalId === llave.equipoVisitanteId) {
+      throw new ValidationError(`La llave #${index + 1} enfrenta a un equipo consigo mismo`);
+    }
+    for (const equipoId of [llave.equipoLocalId, llave.equipoVisitanteId]) {
+      const equipo = porId.get(equipoId);
+      if (!equipo) {
+        throw new ValidationError(`El equipo de la llave #${index + 1} no está asignado a esta división`);
+      }
+      const anterior = vistos.get(equipoId);
+      if (anterior !== undefined) {
+        throw new ValidationError(`El equipo "${equipo.nombre}" aparece en las llaves #${anterior + 1} y #${index + 1}`);
+      }
+      vistos.set(equipoId, index);
+    }
+  });
+
+  return llaves;
+}
+
 async function serializablePlayoffWrite<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>, conflictMessage: string): Promise<T> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -66,6 +152,18 @@ async function serializablePlayoffWrite<T>(operation: (tx: Prisma.TransactionCli
     }
   }
   throw new ConflictError(conflictMessage);
+}
+
+/**
+ * `Partido` cascadea desde `RondaPlayoff`, así que borrar las rondas se lleva los partidos del
+ * cuadro **pero deja viva la jornada que los contenía**. En una división de puro cuadro esa jornada
+ * solo tenía partidos del bracket, o sea que queda en cero y sigue apareciendo en el horario.
+ *
+ * Acotado a `partidos: { none: {} }`, así que una jornada que conserve los suyos —el caso de una
+ * división de liga, que solo pierde los de playoff— no se toca.
+ */
+async function deleteEmptyJornadas(tx: Prisma.TransactionClient, divisionId: string): Promise<void> {
+  await tx.jornada.deleteMany({ where: { divisionId, partidos: { none: {} } } });
 }
 
 async function lockedDivision(tx: Prisma.TransactionClient, divisionId: string, actor: AuthenticatedUser) {
@@ -134,6 +232,7 @@ export const rondaPlayoffService = {
         throw new ConflictError('Solo se puede eliminar la última ronda de playoff');
       }
       await tx.rondaPlayoff.delete({ where: { id } });
+      await deleteEmptyJornadas(tx, lockTarget.divisionId);
     }, 'Las rondas de playoff cambiaron durante la eliminación; vuelve a intentarlo');
   },
 
@@ -141,12 +240,22 @@ export const rondaPlayoffService = {
     await serializablePlayoffWrite(async (tx) => {
       await lockedDivision(tx, divisionId, actor);
       await tx.rondaPlayoff.deleteMany({ where: { divisionId } });
+      await deleteEmptyJornadas(tx, divisionId);
     }, 'Las rondas de playoff cambiaron durante la eliminación; vuelve a intentarlo');
   },
 
-  async generate(divisionId: string, cantidadEquipos: number, actor: AuthenticatedUser): Promise<RondaPlayoffEntity[]> {
+  async generate(
+    divisionId: string,
+    cantidadEquipos: number,
+    actor: AuthenticatedUser,
+    options: GenerateOptions = {},
+  ): Promise<RondaPlayoffEntity[]> {
     if (!CANTIDADES_EQUIPOS.includes(cantidadEquipos)) {
       throw new ValidationError('La cantidad debe ser 2, 4, 8, 16 o 32');
+    }
+    const siembra = options.siembra ?? 'POSICIONES';
+    if (siembra === 'MANUAL' && !options.llaves) {
+      throw new ValidationError('La siembra manual necesita las llaves');
     }
     return serializablePlayoffWrite(async (tx) => {
       const lockTarget = await tx.division.findUnique({ where: { id: divisionId }, select: { ligaId: true } });
@@ -179,22 +288,22 @@ export const rondaPlayoffService = {
       if (division.equipos.length < cantidadEquipos) {
         throw new ValidationError(`Se necesitan al menos ${cantidadEquipos} equipos asignados a la división`);
       }
-      const clasificados = division.equipos
-        .map(({ equipoId, equipo }) => ({
-          equipoId,
-          nombre: equipo.nombre,
-          puntos: equipo.tablaPosiciones[0]?.puntos ?? 0,
-          diferenciaGoles: equipo.tablaPosiciones[0]?.diferenciaGoles ?? 0,
-          ganados: equipo.tablaPosiciones[0]?.ganados ?? 0,
-          golesFavor: equipo.tablaPosiciones[0]?.golesFavor ?? 0,
-        }))
-        .sort((a, b) => b.puntos - a.puntos
-          || b.diferenciaGoles - a.diferenciaGoles
-          || b.ganados - a.ganados
-          || b.golesFavor - a.golesFavor
-          || spanishNameCollator.compare(a.nombre, b.nombre)
-          || a.equipoId.localeCompare(b.equipoId))
-        .slice(0, cantidadEquipos);
+      // Sin fase de liga la tabla no existe y todos entran en cero: la siembra por posiciones
+      // degenera en orden alfabético, que es justo lo que hacía falta para el cuadro puro.
+      const equipos: EquipoClasificable[] = division.equipos.map(({ equipoId, equipo }) => ({
+        equipoId,
+        nombre: equipo.nombre,
+        puntos: equipo.tablaPosiciones[0]?.puntos ?? 0,
+        diferenciaGoles: equipo.tablaPosiciones[0]?.diferenciaGoles ?? 0,
+        ganados: equipo.tablaPosiciones[0]?.ganados ?? 0,
+        golesFavor: equipo.tablaPosiciones[0]?.golesFavor ?? 0,
+      }));
+
+      const llaves = siembra === 'MANUAL'
+        ? validarLlavesManuales(options.llaves!, equipos)
+        : siembra === 'ALEATORIA'
+          ? llavesAleatorias(equipos, cantidadEquipos, options.random ?? Math.random)
+          : llavesPorPosiciones(equipos, cantidadEquipos);
 
       const rondas = await tx.rondaPlayoff.createManyAndReturn({
         data: NOMBRES_RONDAS[cantidadEquipos].map((nombre, index) => ({ nombre, orden: index + 1, divisionId })),
@@ -202,9 +311,9 @@ export const rondaPlayoffService = {
       rondas.sort((a, b) => a.orden - b.orden);
 
       const primeraRonda = rondas[0];
-      await tx.partido.createMany({ data: Array.from({ length: clasificados.length / 2 }, (_, i) => ({
-          equipoLocalId: clasificados[i].equipoId,
-          equipoVisitanteId: clasificados[clasificados.length - 1 - i].equipoId,
+      await tx.partido.createMany({ data: llaves.map((llave, i) => ({
+          equipoLocalId: llave.equipoLocalId,
+          equipoVisitanteId: llave.equipoVisitanteId,
           llave: i + 1,
           rondaPlayoffId: primeraRonda.id,
           estado: 'PROGRAMADO' as const,

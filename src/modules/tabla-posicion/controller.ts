@@ -3,6 +3,7 @@ import { tablaPosicionService } from './service';
 import { createSchema, updateSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
+import { firstIssueMessage } from '../../utils/validation';
 
 export const tablaPosicionController = {
   async findByDivision(req: Request, res: Response, next: NextFunction) {
@@ -14,7 +15,7 @@ export const tablaPosicionController = {
   },
 
   async upsert(req: Request, res: Response, next: NextFunction) {
-    try { const p = createSchema.safeParse(req.body); if (!p.success) throw new ValidationError(p.error.issues[0].message); ok(res, await tablaPosicionService.upsert(p.data.divisionId, p.data.equipoId, p.data, req.user!), 'Posición actualizada exitosamente'); } catch (e) { next(e); }
+    try { const p = createSchema.safeParse(req.body); if (!p.success) throw new ValidationError(firstIssueMessage(p.error)); ok(res, await tablaPosicionService.upsert(p.data.divisionId, p.data.equipoId, p.data, req.user!), 'Posición actualizada exitosamente'); } catch (e) { next(e); }
   },
 
   async delete(req: Request, res: Response, next: NextFunction) {

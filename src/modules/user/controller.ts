@@ -6,6 +6,7 @@ import { ValidationError } from '../../utils/errors';
 import { mediaService } from '../media/service';
 import { userService } from './service';
 import { signalBackgroundJob } from '../../workers/jobSignals';
+import { firstIssueMessage } from '../../utils/validation';
 
 const phoneVisibilitySchema = z.object({
   showPhoneInPublicLeague: z.boolean(),
@@ -33,7 +34,7 @@ export const userController = {
   async updatePhoneVisibility(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = phoneVisibilitySchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
 
       const user = await prisma.user.update({
         where: { id: req.user!.id },
@@ -50,7 +51,7 @@ export const userController = {
   async updateMe(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = updateMeSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
 
       const user = await prisma.$transaction(async (tx) => {
         await mediaService.lockAttachmentTarget(tx, 'user', req.user!.id);
@@ -73,7 +74,7 @@ export const userController = {
   async deleteAccount(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = deleteAccountSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
 
       await userService.deleteAccount(req.user!.id, parsed.data.email);
       noContent(res);

@@ -3,6 +3,7 @@ import { categoriaService } from './service';
 import { createCategoriaSchema, updateCategoriaSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
+import { firstIssueMessage } from '../../utils/validation';
 
 export const categoriaController = {
   async list(_req: Request, res: Response, next: NextFunction) {
@@ -26,7 +27,7 @@ export const categoriaController = {
   async create(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = createCategoriaSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const categoria = await categoriaService.create(parsed.data);
       created(res, categoria, 'Categoría creada exitosamente');
     } catch (err) {
@@ -37,7 +38,7 @@ export const categoriaController = {
   async update(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = updateCategoriaSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const categoria = await categoriaService.update(req.params.id, parsed.data);
       ok(res, categoria, 'Categoría actualizada exitosamente');
     } catch (err) {

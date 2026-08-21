@@ -5,6 +5,7 @@ import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import { getTeamCode } from '../../utils/teamCode';
 import { parsePagination } from '../../utils/pagination';
+import { firstIssueMessage } from '../../utils/validation';
 
 function toTeamResponse(team: Awaited<ReturnType<typeof equipoService.getById>>, actorId?: string) {
   const { logoPublicId: _logoPublicId, nombreNormalizado: _nombreNormalizado, userId, ...publicTeam } = team;
@@ -32,13 +33,13 @@ export const equipoController = {
   async create(req: Request, res: Response, next: NextFunction) {
     try {
       const p = createSchema.safeParse({ ...req.body, userId: req.user!.id });
-      if (!p.success) throw new ValidationError(p.error.issues[0].message);
+      if (!p.success) throw new ValidationError(firstIssueMessage(p.error));
       created(res, toTeamResponse(await equipoService.create(p.data), req.user!.id), 'Equipo creado exitosamente');
     } catch (e) { next(e); }
   },
 
   async update(req: Request, res: Response, next: NextFunction) {
-    try { const p = updateSchema.safeParse(req.body); if (!p.success) throw new ValidationError(p.error.issues[0].message); ok(res, toTeamResponse(await equipoService.update(req.params.id, p.data, req.user!), req.user!.id), 'Equipo actualizado exitosamente'); } catch (e) { next(e); }
+    try { const p = updateSchema.safeParse(req.body); if (!p.success) throw new ValidationError(firstIssueMessage(p.error)); ok(res, toTeamResponse(await equipoService.update(req.params.id, p.data, req.user!), req.user!.id), 'Equipo actualizado exitosamente'); } catch (e) { next(e); }
   },
 
   async delete(req: Request, res: Response, next: NextFunction) {

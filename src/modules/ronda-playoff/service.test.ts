@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   partidoDelete: vi.fn(),
   partidoUpdate: vi.fn(),
   anotacionDeleteMany: vi.fn(),
+  jornadaDeleteMany: vi.fn(),
   participacionDeleteMany: vi.fn(),
   executeRaw: vi.fn(),
 }));
@@ -92,6 +93,7 @@ describe('rondaPlayoffService batch writes', () => {
       findMany: mocks.partidoFindMany,
       update: mocks.partidoUpdate,
     },
+    jornada: { deleteMany: mocks.jornadaDeleteMany },
     anotacionPartido: { deleteMany: mocks.anotacionDeleteMany },
     participacionPartido: { deleteMany: mocks.participacionDeleteMany },
   };
@@ -110,6 +112,7 @@ describe('rondaPlayoffService batch writes', () => {
     mocks.partidoUpdate.mockResolvedValue({});
     mocks.roundDelete.mockResolvedValue({});
     mocks.roundDeleteMany.mockResolvedValue({ count: 0 });
+    mocks.jornadaDeleteMany.mockResolvedValue({ count: 0 });
     mocks.executeRaw.mockResolvedValue(0);
   });
 
@@ -158,6 +161,100 @@ describe('rondaPlayoffService batch writes', () => {
       ],
     });
   });
+
+  // La siembra por posiciones es el default y no debe cambiar: un cliente viejo que no manda
+  // `siembra` tiene que seguir generando exactamente el mismo cuadro que antes.
+  describe('estrategias de siembra', () => {
+    beforeEach(() => {
+      mocks.roundCreateManyAndReturn.mockResolvedValue([
+        { id: 'semis', nombre: 'Semifinal', orden: 1, divisionId: 'division-1' },
+        { id: 'final', nombre: 'Final', orden: 2, divisionId: 'division-1' },
+      ])
+      mocks.divisionFindFirst.mockResolvedValue({
+        rondasPlayoff: [],
+        equipos: Array.from({ length: 4 }, (_, index) => assignedTeam(`team-${index + 1}`, `Team ${index + 1}`)),
+      })
+    })
+
+    const llavesCreadas = () => mocks.partidoCreateMany.mock.calls[0][0].data
+      .map((partido: any) => [partido.equipoLocalId, partido.equipoVisitanteId])
+
+    it('sortea con el generador inyectado y empareja consecutivos', async () => {
+      // Fisher-Yates con random fijo en 0: cada vuelta manda el actual al frente.
+      await rondaPlayoffService.generate('division-1', 4, owner, { siembra: 'ALEATORIA', random: () => 0 })
+
+      const llaves = llavesCreadas()
+      expect(llaves).toHaveLength(2)
+      expect(new Set(llaves.flat()).size).toBe(4)
+      expect(llaves).toEqual([['team-2', 'team-3'], ['team-4', 'team-1']])
+    })
+
+    it('respeta las llaves manuales tal cual llegan', async () => {
+      await rondaPlayoffService.generate('division-1', 4, owner, {
+        siembra: 'MANUAL',
+        llaves: [
+          { equipoLocalId: 'team-3', equipoVisitanteId: 'team-1' },
+          { equipoLocalId: 'team-2', equipoVisitanteId: 'team-4' },
+        ],
+      })
+
+      expect(llavesCreadas()).toEqual([['team-3', 'team-1'], ['team-2', 'team-4']])
+    })
+
+    it('rechaza un equipo que no está asignado a la división', async () => {
+      await expect(rondaPlayoffService.generate('division-1', 4, owner, {
+        siembra: 'MANUAL',
+        llaves: [
+          { equipoLocalId: 'team-1', equipoVisitanteId: 'ajeno' },
+          { equipoLocalId: 'team-2', equipoVisitanteId: 'team-3' },
+        ],
+      })).rejects.toMatchObject({ statusCode: 422, message: 'El equipo de la llave #1 no está asignado a esta división' })
+      expect(mocks.partidoCreateMany).not.toHaveBeenCalled()
+    })
+
+    it('rechaza un equipo repetido y dice en qué llaves está', async () => {
+      await expect(rondaPlayoffService.generate('division-1', 4, owner, {
+        siembra: 'MANUAL',
+        llaves: [
+          { equipoLocalId: 'team-1', equipoVisitanteId: 'team-2' },
+          { equipoLocalId: 'team-1', equipoVisitanteId: 'team-3' },
+        ],
+      })).rejects.toMatchObject({ statusCode: 422, message: 'El equipo "Team 1" aparece en las llaves #1 y #2' })
+      expect(mocks.partidoCreateMany).not.toHaveBeenCalled()
+    })
+
+    it('rechaza una llave contra sí mismo', async () => {
+      await expect(rondaPlayoffService.generate('division-1', 4, owner, {
+        siembra: 'MANUAL',
+        llaves: [
+          { equipoLocalId: 'team-1', equipoVisitanteId: 'team-1' },
+          { equipoLocalId: 'team-2', equipoVisitanteId: 'team-3' },
+        ],
+      })).rejects.toMatchObject({ statusCode: 422, message: 'La llave #1 enfrenta a un equipo consigo mismo' })
+    })
+
+    it('rechaza siembra manual sin llaves antes de abrir la transacción', async () => {
+      await expect(rondaPlayoffService.generate('division-1', 4, owner, { siembra: 'MANUAL' }))
+        .rejects.toMatchObject({ statusCode: 422, message: 'La siembra manual necesita las llaves' })
+      expect(mocks.transaction).not.toHaveBeenCalled()
+    })
+
+    it('sin tabla de posiciones siembra alfabéticamente, que es el cuadro puro', async () => {
+      mocks.divisionFindFirst.mockResolvedValue({
+        rondasPlayoff: [],
+        equipos: [
+          { equipoId: 'z', equipo: { nombre: 'Zorros', tablaPosiciones: [] } },
+          { equipoId: 'a', equipo: { nombre: 'Águilas', tablaPosiciones: [] } },
+          { equipoId: 'm', equipo: { nombre: 'Muros', tablaPosiciones: [] } },
+          { equipoId: 'c', equipo: { nombre: 'Cuervos', tablaPosiciones: [] } },
+        ],
+      })
+
+      await rondaPlayoffService.generate('division-1', 4, owner)
+
+      expect(llavesCreadas()).toEqual([['a', 'z'], ['c', 'm']])
+    })
+  })
 
   it('generates a two-team final', async () => {
     mocks.divisionFindFirst.mockResolvedValue({
@@ -333,6 +430,41 @@ describe('rondaPlayoffService batch writes', () => {
     expect(mocks.roundDelete).toHaveBeenCalledWith({ where: { id: 'latest' } });
     expect(mocks.executeRaw.mock.invocationCallOrder[0]).toBeLessThan(mocks.roundDelete.mock.invocationCallOrder[0]);
   });
+
+  // Los partidos del cuadro se van por cascada, pero la jornada que los contenía sobrevive vacía
+  // y sigue apareciendo en el horario. En un cuadro puro esa jornada no tenía nada más.
+  describe('limpieza de jornadas vacías', () => {
+    const jornadasVacias = { where: { divisionId: 'division-1', partidos: { none: {} } } }
+
+    it('borra las jornadas que quedaron sin partidos al borrar las eliminatorias', async () => {
+      await rondaPlayoffService.deleteByDivision('division-1', owner)
+
+      expect(mocks.roundDeleteMany).toHaveBeenCalledWith({ where: { divisionId: 'division-1' } })
+      expect(mocks.jornadaDeleteMany).toHaveBeenCalledWith(jornadasVacias)
+      // Después de las rondas: antes no habría ninguna jornada vacía todavía.
+      expect(mocks.roundDeleteMany.mock.invocationCallOrder[0])
+        .toBeLessThan(mocks.jornadaDeleteMany.mock.invocationCallOrder[0])
+    })
+
+    // Una división de liga solo pierde sus partidos de playoff; su jornada sigue teniendo los
+    // regulares y no debe tocarse.
+    it('el filtro exige que la jornada no tenga ningún partido', async () => {
+      await rondaPlayoffService.deleteByDivision('division-1', owner)
+
+      expect(mocks.jornadaDeleteMany.mock.calls[0][0].where.partidos).toEqual({ none: {} })
+      expect(mocks.jornadaDeleteMany.mock.calls[0][0].where.divisionId).toBe('division-1')
+    })
+
+    it('también limpia al borrar una sola ronda', async () => {
+      mocks.roundFindUnique
+        .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1' } })
+        .mockResolvedValueOnce({ orden: 2, division: { ligaId: 'league-1', liga: { userId: owner.id }, rondasPlayoff: [{ id: 'latest' }] } })
+
+      await rondaPlayoffService.delete('latest', owner)
+
+      expect(mocks.jornadaDeleteMany).toHaveBeenCalledWith(jornadasVacias)
+    })
+  })
 
   it('rejects deletion of a non-latest round without deleting it', async () => {
     mocks.roundFindUnique

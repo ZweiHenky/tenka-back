@@ -33,7 +33,9 @@ export const createDivisionSchema = z.object({
   diasPartido: z.string().min(1).optional(),
   horarioPartido: z.string().min(1).optional(),
   horariosPorCancha: z.array(courtScheduleSchema).max(50).optional(),
-  duracionPartido: z.number().int().min(1).optional(),
+  // Obligatoria: sin ella la división queda inservible — generateNext y las opciones de
+  // creación de partido fallan al no poder calcular el fin de cada partido.
+  duracionPartido: z.number().int().min(1),
   descanso: z.number().int().min(0).optional(),
   fechaInicio: z.string().datetime().optional(),
   fechaFin: z.string().datetime().optional(),
@@ -72,7 +74,8 @@ export const updateDivisionSchema = z.object({
   ligaId: z.string().optional(),
   categoriaId: z.string().optional(),
   tipoId: z.string().optional(),
-  tipoCompetenciaId: z.string().optional(),
+  // `tipoCompetenciaId` no está a propósito: el formato se fija al crear la división. Zod
+  // descarta las claves que no declara, así que enviarlo no cambia nada.
   canchaUnicaId: z.string().min(1).nullable().optional(),
 }).superRefine((data, ctx) => assertUniqueCourts(data.horariosPorCancha, ctx));
 

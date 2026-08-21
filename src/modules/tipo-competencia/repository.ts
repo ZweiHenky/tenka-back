@@ -11,7 +11,7 @@ export const tipoCompetenciaRepository: TipoCompetenciaRepository = {
     return prisma.tipoCompetencia.findUnique({ where: { id } });
   },
 
-  async create(data: { nombre: string }): Promise<TipoCompetenciaEntity> {
+  async create(data: { nombre: string; codigo: string }): Promise<TipoCompetenciaEntity> {
     return prisma.tipoCompetencia.create({ data });
   },
 

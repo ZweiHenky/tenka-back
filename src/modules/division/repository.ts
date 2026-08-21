@@ -3,6 +3,15 @@ import type { DivisionEntity } from './entity';
 import type { DivisionRepository } from './repository.interface';
 import type { Prisma } from '../../generated/prisma/client';
 
+/**
+ * Las escrituras deben devolver la división completa: el cliente guarda la respuesta en su
+ * caché, y si faltara `canchaHorarios` la división parecería no tener configuración por cancha
+ * hasta el siguiente refetch — cayendo al fallback legacy y mostrando todas las canchas.
+ */
+const DIVISION_WRITE_INCLUDE = {
+  canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } },
+} as const;
+
 export const divisionRepository: DivisionRepository = {
   async findAll(): Promise<DivisionEntity[]> {
     return prisma.division.findMany({ orderBy: { createdAt: 'desc' } });
@@ -23,11 +32,11 @@ export const divisionRepository: DivisionRepository = {
   },
 
   async create(data: Record<string, unknown>): Promise<DivisionEntity> {
-    return prisma.division.create({ data: data as any });
+    return prisma.division.create({ data: data as any, include: DIVISION_WRITE_INCLUDE });
   },
 
   async update(id: string, data: Record<string, unknown>, tx?: Prisma.TransactionClient): Promise<DivisionEntity> {
-    return (tx ?? prisma).division.update({ where: { id }, data });
+    return (tx ?? prisma).division.update({ where: { id }, data, include: DIVISION_WRITE_INCLUDE });
   },
 
   async delete(id: string, tx?: Prisma.TransactionClient): Promise<void> {

@@ -4,8 +4,9 @@ import { ValidationError } from '../../utils/errors';
 import { arbitrajeService } from './service';
 import { asignacionesLigaSchema } from './validator';
 import { parsePagination } from '../../utils/pagination';
+import { firstIssueMessage } from '../../utils/validation';
 
-const parse = <T>(schema: { safeParse(value: unknown): any }, value: unknown): T => { const result = schema.safeParse(value); if (!result.success) throw new ValidationError(result.error.issues[0].message); return result.data; };
+const parse = <T>(schema: { safeParse(value: unknown): any }, value: unknown): T => { const result = schema.safeParse(value); if (!result.success) throw new ValidationError(firstIssueMessage(result.error)); return result.data; };
 const handle = (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
 export const arbitrajeController = {
   list: handle(async (req, res) => ok(res, await arbitrajeService.list(req.params.ligaId, req.user!))),

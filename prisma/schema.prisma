@@ -206,9 +206,13 @@ model EstadoLiga {
 model TipoCompetencia {
   id     String @id @default(cuid())
   nombre String
+  /// Identidad estable del formato: LIGA_Y_ELIMINATORIAS | ELIMINATORIA. La app decide qué
+  /// mostrar con esto, nunca con el nombre, que es editable por API.
+  codigo String
 
   divisiones Division[]
 
+  @@index([codigo])
   @@map("tipos_competencia")
 }
 

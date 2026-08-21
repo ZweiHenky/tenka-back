@@ -43,13 +43,16 @@ describe('consultas de lectura de liga', () => {
     }));
   });
 
-  it('permite al propietario ver borradores y exige publicacion al resto en la misma consulta', async () => {
+  // La página pública se ve igual para todos: si al dueño le mostrara sus borradores, no habría
+  // forma de comprobar qué ve el público.
+  it('tampoco le muestra borradores al propietario, aunque pueda abrir su liga', async () => {
     mocks.ligaFindFirst.mockResolvedValue({ id: 'liga-1', userId: owner.id, user: { name: 'Owner' } });
 
     const result = await ligaRepository.findVisibleById('liga-1', owner);
 
     expect(mocks.ligaFindFirst).toHaveBeenCalledTimes(1);
     const query = mocks.ligaFindFirst.mock.calls[0][0];
+    // El dueño sigue pudiendo abrir la liga aunque no tenga ninguna división publicada.
     expect(query.where).toEqual({
       id: 'liga-1',
       OR: [
@@ -57,12 +60,13 @@ describe('consultas de lectura de liga', () => {
         { divisiones: { some: { estadoLiga: { nombre: { not: 'Borrador' } } } } },
       ],
     });
-    expect(query.include.divisiones.where).toEqual({
-      OR: [
-        { estadoLiga: { nombre: { not: 'Borrador' } } },
-        { liga: { userId: owner.id } },
-      ],
-    });
+    expect(query.include.divisiones.where).toEqual({ estadoLiga: { nombre: { not: 'Borrador' } } });
+    // Sin esto el detalle no puede dibujar el selector de cancha.
+    expect(query.include.divisiones.include).toHaveProperty('canchaHorarios');
+    // Sin `codigo` la vista pública no distingue el formato y le muestra a un cuadro puro una
+    // tabla de posiciones que nunca se va a llenar.
+    expect(query.include.divisiones.include.tipoCompetencia)
+      .toEqual({ select: { id: true, nombre: true, codigo: true } });
     expect(query.include.canchas.where).toEqual({
       OR: [{ activa: true }, { liga: { userId: owner.id } }],
     });
@@ -246,7 +250,8 @@ describe('consultas de lectura de liga', () => {
     expect(select).not.toHaveProperty('canchas');
     expect(select).not.toHaveProperty('arbitros');
     expect(select.divisiones.select).toEqual(expect.objectContaining({ id: true, nombre: true, maxEquipos: true, arbitraje: true }));
-    expect(select.divisiones.select).not.toHaveProperty('tipoCompetencia');
+    // La tarjeta lo muestra junto al tipo, así que la proyección lo trae; el resto sigue liviano.
+    expect(select.divisiones.select.tipoCompetencia).toEqual({ select: { id: true, nombre: true } });
   });
 
   it('usa la proyeccion minima de tarjetas para las ligas del propietario', async () => {

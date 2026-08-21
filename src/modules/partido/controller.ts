@@ -6,6 +6,7 @@ import { ValidationError } from '../../utils/errors';
 import { refereeAccessService } from '../referee-access/service';
 import { parsePagination } from '../../utils/pagination';
 import { jornadaPartidoCreationService } from './jornadaCreation';
+import { firstIssueMessage } from '../../utils/validation';
 
 export const partidoController = {
   async list(req: Request, res: Response, next: NextFunction) {
@@ -31,20 +32,20 @@ export const partidoController = {
   async createInJornada(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = createInJornadaSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const key = req.header('Idempotency-Key') ?? '';
       created(res, await jornadaPartidoCreationService.create(req.params.jornadaId, parsed.data, key, req.user!), 'Partido agregado a la jornada');
     } catch (e) { next(e); }
   },
 
   async create(req: Request, res: Response, next: NextFunction) {
-    try { const p = createSchema.safeParse(req.body); if (!p.success) throw new ValidationError(p.error.issues[0].message); created(res, await partidoService.create(p.data, req.user!), 'Partido creado exitosamente'); } catch (e) { next(e); }
+    try { const p = createSchema.safeParse(req.body); if (!p.success) throw new ValidationError(firstIssueMessage(p.error)); created(res, await partidoService.create(p.data, req.user!), 'Partido creado exitosamente'); } catch (e) { next(e); }
   },
 
   async update(req: Request, res: Response, next: NextFunction) {
     try {
       const p = updateSchema.safeParse(req.body);
-      if (!p.success) throw new ValidationError(p.error.issues[0].message);
+      if (!p.success) throw new ValidationError(firstIssueMessage(p.error));
       if (['golesLocal', 'golesVisitante', 'penalesLocal', 'penalesVisitante'].some((field) => p.data[field as keyof typeof p.data] !== undefined)
         || p.data.estado !== undefined) {
         throw new ValidationError('Usa PATCH /api/partidos/:id/resultado para modificar el resultado');
@@ -57,7 +58,7 @@ export const partidoController = {
   async updateResult(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = resultSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       ok(res, await partidoService.updateResult(req.params.id, parsed.data, req.user!), 'Resultado actualizado exitosamente');
     } catch (e) { next(e); }
   },

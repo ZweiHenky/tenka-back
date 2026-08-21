@@ -4,6 +4,7 @@ import { createDivisionSchema, updateDivisionSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import { parsePagination } from '../../utils/pagination';
+import { firstIssueMessage } from '../../utils/validation';
 
 export const divisionController = {
   async list(req: Request, res: Response, next: NextFunction) {
@@ -35,7 +36,7 @@ export const divisionController = {
   async create(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = createDivisionSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const division = await divisionService.create({
         ...parsed.data,
         fechaInicio: parsed.data.fechaInicio ? new Date(parsed.data.fechaInicio) : undefined,
@@ -50,7 +51,7 @@ export const divisionController = {
   async update(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = updateDivisionSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const division = await divisionService.update(req.params.id, {
         ...parsed.data,
         fechaInicio: parsed.data.fechaInicio ? new Date(parsed.data.fechaInicio) : undefined,

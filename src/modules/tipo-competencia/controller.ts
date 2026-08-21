@@ -3,6 +3,7 @@ import { tipoCompetenciaService } from './service';
 import { createSchema, updateSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
+import { firstIssueMessage } from '../../utils/validation';
 
 export const tipoCompetenciaController = {
   async list(_req: Request, res: Response, next: NextFunction) {
@@ -14,11 +15,11 @@ export const tipoCompetenciaController = {
   },
 
   async create(req: Request, res: Response, next: NextFunction) {
-    try { const p = createSchema.safeParse(req.body); if (!p.success) throw new ValidationError(p.error.issues[0].message); created(res, await tipoCompetenciaService.create(p.data), 'Tipo de competencia creado exitosamente'); } catch (e) { next(e); }
+    try { const p = createSchema.safeParse(req.body); if (!p.success) throw new ValidationError(firstIssueMessage(p.error)); created(res, await tipoCompetenciaService.create(p.data), 'Tipo de competencia creado exitosamente'); } catch (e) { next(e); }
   },
 
   async update(req: Request, res: Response, next: NextFunction) {
-    try { const p = updateSchema.safeParse(req.body); if (!p.success) throw new ValidationError(p.error.issues[0].message); ok(res, await tipoCompetenciaService.update(req.params.id, p.data), 'Tipo de competencia actualizado exitosamente'); } catch (e) { next(e); }
+    try { const p = updateSchema.safeParse(req.body); if (!p.success) throw new ValidationError(firstIssueMessage(p.error)); ok(res, await tipoCompetenciaService.update(req.params.id, p.data), 'Tipo de competencia actualizado exitosamente'); } catch (e) { next(e); }
   },
 
   async delete(req: Request, res: Response, next: NextFunction) {

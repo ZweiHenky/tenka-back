@@ -153,6 +153,7 @@ export const divisionService = {
           ...summary,
           canchaHorarios: { create: horariosPorCancha.map((row) => ({ ...row })) },
         },
+        include: { canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } } },
       }) as Promise<DivisionEntity>;
     }, { isolationLevel: 'ReadCommitted' });
   },

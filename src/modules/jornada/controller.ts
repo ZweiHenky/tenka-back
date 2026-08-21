@@ -4,6 +4,7 @@ import { generateNextSchema, idempotencyKeySchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import { parsePagination } from '../../utils/pagination';
+import { firstIssueMessage } from '../../utils/validation';
 
 export const jornadaController = {
   async list(req: Request, res: Response, next: NextFunction) {
@@ -30,9 +31,9 @@ export const jornadaController = {
   async generateNext(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = generateNextSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const parsedKey = idempotencyKeySchema.safeParse(req.get('Idempotency-Key'));
-      if (!parsedKey.success) throw new ValidationError(parsedKey.error.issues[0].message);
+      if (!parsedKey.success) throw new ValidationError(firstIssueMessage(parsedKey.error));
       const jornada = await jornadaService.generateNext(req.params.divisionId, req.user!, parsed.data.slots, parsed.data.equipoIds, parsed.data.descansoEquipoId, parsedKey.data);
       const { idempotencyReplayed, ...response } = jornada;
       if (idempotencyReplayed) ok(res, response, 'Jornada generada previamente');

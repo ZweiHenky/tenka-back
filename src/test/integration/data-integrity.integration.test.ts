@@ -95,7 +95,7 @@ async function seedFixture(): Promise<void> {
     prisma.categoria.create({ data: { id: ids.categoria, nombre: 'Integration Category' } }),
     prisma.tipo.create({ data: { id: ids.tipo, nombre: 'Integration Type' } }),
     prisma.estadoLiga.create({ data: { id: ids.estado, nombre: 'En Curso' } }),
-    prisma.tipoCompetencia.create({ data: { id: ids.competencia, nombre: 'Integration Competition' } }),
+    prisma.tipoCompetencia.create({ data: { id: ids.competencia, nombre: 'Integration Competition', codigo: 'LIGA_Y_ELIMINATORIAS' } }),
   ]);
   await prisma.liga.create({
     data: {

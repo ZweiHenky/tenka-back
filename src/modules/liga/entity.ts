@@ -119,8 +119,15 @@ export interface PublicLeagueListDto extends UserLeagueListDto {
     arbitraje: number;
     diasPartido: string | null;
     horarioPartido: string | null;
+    canchaHorarios: Array<{
+      canchaId: string;
+      diasPartido: string;
+      horarioPartido: string;
+      cancha: { nombre: string };
+    }>;
     categoria: { id: string; nombre: string };
     tipo: { id: string; nombre: string };
+    tipoCompetencia: { id: string; nombre: string };
     estadoLiga: { id: string; nombre: string };
   }>;
 }

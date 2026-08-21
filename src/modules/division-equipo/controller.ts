@@ -4,6 +4,7 @@ import { createSchema, updateSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import { getTeamCode } from '../../utils/teamCode';
+import { firstIssueMessage } from '../../utils/validation';
 
 export const divisionEquipoController = {
   async findByDivision(req: Request, res: Response, next: NextFunction) {
@@ -29,13 +30,13 @@ export const divisionEquipoController = {
   },
 
   async create(req: Request, res: Response, next: NextFunction) {
-    try { const p = createSchema.safeParse(req.body); if (!p.success) throw new ValidationError(p.error.issues[0].message); created(res, await divisionEquipoService.create(p.data, req.user!), 'Equipo asignado a division exitosamente'); } catch (e) { next(e); }
+    try { const p = createSchema.safeParse(req.body); if (!p.success) throw new ValidationError(firstIssueMessage(p.error)); created(res, await divisionEquipoService.create(p.data, req.user!), 'Equipo asignado a division exitosamente'); } catch (e) { next(e); }
   },
 
   async updateSaldoPendiente(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = updateSchema.safeParse(req.body);
-      if (!parsed.success) throw new ValidationError(parsed.error.issues[0].message);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
       const result = await divisionEquipoService.updateSaldoPendiente(
         req.params.divisionId,
         req.params.equipoId,

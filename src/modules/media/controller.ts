@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ok, noContent } from '../../utils/response';
 import { mediaService } from './service';
 import { ValidationError } from '../../utils/errors';
+import { firstIssueMessage } from '../../utils/validation';
 
 const kindSchema = z.enum(['LEAGUE_LOGO', 'LEAGUE_COVER', 'TEAM_LOGO', 'ACCOUNT_AVATAR', 'PLAYER_PHOTO']);
 const completionSchema = z.object({
@@ -17,7 +18,7 @@ const completionSchema = z.object({
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
-  if (!result.success) throw new ValidationError(result.error.issues[0].message);
+  if (!result.success) throw new ValidationError(firstIssueMessage(result.error));
   return result.data;
 }
 
