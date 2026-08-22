@@ -32,11 +32,11 @@ describe('consultas de lectura de liga', () => {
     expect(mocks.ligaFindFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         id: 'liga-1',
-        divisiones: { some: { estadoLiga: { nombre: { not: 'Borrador' } } } },
+        divisiones: { some: { estadoLiga: { codigo: { not: 'BORRADOR' } } } },
       },
       include: expect.objectContaining({
         divisiones: expect.objectContaining({
-          where: { estadoLiga: { nombre: { not: 'Borrador' } } },
+          where: { estadoLiga: { codigo: { not: 'BORRADOR' } } },
         }),
         canchas: expect.objectContaining({ where: { activa: true } }),
       }),
@@ -57,10 +57,10 @@ describe('consultas de lectura de liga', () => {
       id: 'liga-1',
       OR: [
         { userId: owner.id },
-        { divisiones: { some: { estadoLiga: { nombre: { not: 'Borrador' } } } } },
+        { divisiones: { some: { estadoLiga: { codigo: { not: 'BORRADOR' } } } } },
       ],
     });
-    expect(query.include.divisiones.where).toEqual({ estadoLiga: { nombre: { not: 'Borrador' } } });
+    expect(query.include.divisiones.where).toEqual({ estadoLiga: { codigo: { not: 'BORRADOR' } } });
     // Sin esto el detalle no puede dibujar el selector de cancha.
     expect(query.include.divisiones.include).toHaveProperty('canchaHorarios');
     // Sin `codigo` la vista pública no distingue el formato y le muestra a un cuadro puro una

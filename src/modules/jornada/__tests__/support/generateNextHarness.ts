@@ -77,7 +77,7 @@ export function mockDivision(opts?: {
   horarioPartido?: string | null;
   duracionPartido?: number | null;
   multiplesCanchas?: boolean;
-  canchaUnicaId?: string | null;
+  estadoCodigo?: string;
   /** Per-court schedule rows. Empty means the division falls back to the scalars above. */
   canchaHorarios?: Array<{ canchaId: string; diasPartido: string; horarioPartido: string }>;
 }) {
@@ -94,7 +94,7 @@ export function mockDivision(opts?: {
       horarioPartido: opts && 'horarioPartido' in opts ? opts.horarioPartido! : '00:00 - 23:59',
       duracionPartido: opts && 'duracionPartido' in opts ? opts.duracionPartido! : 90,
       ligaId: 'liga-1',
-      canchaUnicaId: opts?.canchaUnicaId ?? null,
+      estadoLiga: { codigo: opts?.estadoCodigo ?? 'EN_CURSO' },
       canchaHorarios: opts?.canchaHorarios ?? [],
       liga: { userId: owner.id, multiplesCanchas: opts?.multiplesCanchas ?? false },
     };

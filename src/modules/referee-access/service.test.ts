@@ -72,7 +72,7 @@ describe('refereeAccessService.getPartidoByToken', () => {
       usedAt: null,
       partido: {
         ...basePartido,
-        jornada: { numero: 4, division: { nombre: 'Primera', registrarParticipaciones: false, liga: { nombre: 'Liga Uno', multiplesCanchas: true }, jugadores: [] } },
+        jornada: { numero: 4, division: { nombre: 'Primera', registrarParticipaciones: false, registrarGoleo: true, liga: { nombre: 'Liga Uno', multiplesCanchas: true }, jugadores: [] } },
       },
     })
 
@@ -97,6 +97,7 @@ describe('refereeAccessService.getPartidoByToken', () => {
       anotaciones: [],
       participaciones: [],
       registrarParticipaciones: false,
+      registrarGoleo: true,
       usarPenalesEnEmpates: true,
       jugadoresLocal: [],
       jugadoresVisitante: [],
@@ -130,7 +131,7 @@ describe('refereeAccessService.getPartidoByToken', () => {
         partido: {
           ...basePartido,
           tipoPartido: 'ELIMINATORIA',
-          rondaPlayoff: { division: { nombre: 'Copa', registrarParticipaciones: false, liga: { nombre: 'Liga Dos', multiplesCanchas: false }, jugadores: [] } },
+          rondaPlayoff: { division: { nombre: 'Copa', registrarParticipaciones: false, registrarGoleo: true, liga: { nombre: 'Liga Dos', multiplesCanchas: false }, jugadores: [] } },
         },
       })
       .mockResolvedValueOnce({ expiresAt: activeUntil, usedAt: null, partido: basePartido })
@@ -246,7 +247,7 @@ describe('refereeAccessService.updateResultByToken', () => {
       equipoLocalId: 'local-1', equipoVisitanteId: 'visitante-1', fecha, fechaFin: basePartido.fechaFin, canchaId: 'cancha-1',
       jornada: {
         division: {
-          id: 'division-1', registrarParticipaciones,
+          id: 'division-1', registrarParticipaciones, registrarGoleo: true,
           liga: { id: 'liga-1', userId: 'owner-1', multiplesCanchas: false },
         },
       },

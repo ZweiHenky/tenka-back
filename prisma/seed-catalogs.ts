@@ -38,11 +38,11 @@ async function main() {
 
   await prisma.estadoLiga.createMany({
     data: [
-      { nombre: 'Borrador' },
-      { nombre: 'Abierta' },
-      { nombre: 'En Curso' },
-      { nombre: 'Finalizada' },
-      { nombre: 'Cancelada' },
+      { nombre: 'Borrador', codigo: 'BORRADOR' },
+      { nombre: 'Abierta', codigo: 'ABIERTA' },
+      { nombre: 'En Curso', codigo: 'EN_CURSO' },
+      { nombre: 'Finalizada', codigo: 'FINALIZADA' },
+      { nombre: 'Cancelada', codigo: 'CANCELADA' },
     ],
     skipDuplicates: true,
   });

@@ -5,7 +5,7 @@ import { NotFoundError } from './errors';
 
 export function visibleDivisionWhere(actor?: AuthenticatedUser): Prisma.DivisionWhereInput {
   if (actor?.rol === 'ADMINISTRADOR') return {};
-  const published = { estadoLiga: { nombre: { not: 'Borrador' } } };
+  const published = { estadoLiga: { codigo: { not: 'BORRADOR' } } };
   return actor ? { OR: [published, { liga: { userId: actor.id } }] } : published;
 }
 

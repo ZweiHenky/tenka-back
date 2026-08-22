@@ -28,7 +28,6 @@ function mockJornada(opts: {
   diasPartido?: string | null;
   horarioPartido?: string | null;
   multiplesCanchas?: boolean;
-  canchaUnicaId?: string | null;
 }) {
   mocks.jornadaFindUnique.mockResolvedValue({
     id: 'jornada-1',
@@ -41,7 +40,6 @@ function mockJornada(opts: {
       horarioPartido: opts.horarioPartido ?? null,
       duracionPartido: 60,
       descanso: 0,
-      canchaUnicaId: opts.canchaUnicaId ?? null,
       canchaHorarios: opts.canchaHorarios ?? [],
       estadoLiga: { nombre: 'En Curso' },
       liga: { userId: owner.id, multiplesCanchas: opts.multiplesCanchas ?? true, timeZone: 'UTC' },

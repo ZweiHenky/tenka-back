@@ -1,4 +1,5 @@
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
+import { assertDivisionWritable } from '../../utils/divisionState';
 import { divisionRepository } from './repository';
 import type { DivisionEntity } from './entity';
 import { prisma } from '../../config/database';
@@ -19,12 +20,13 @@ async function assertLigaOwner(ligaId: string, actor: AuthenticatedUser): Promis
   if (!liga) throw new NotFoundError('Liga');
 }
 
-async function assertDivisionOwner(id: string, actor: AuthenticatedUser): Promise<void> {
+async function assertDivisionOwner(id: string, actor: AuthenticatedUser): Promise<{ estadoLiga: { codigo: string } }> {
   const division = await prisma.division.findFirst({
     where: isAdmin(actor) ? { id } : { id, liga: { userId: actor.id } },
-    select: { id: true },
+    select: { id: true, estadoLiga: { select: { codigo: true } } },
   });
   if (!division) throw new NotFoundError('Division');
+  return division;
 }
 
 /**
@@ -80,7 +82,7 @@ async function replaceCourtSchedules(
 async function getDivisionUpdateContext(id: string, actor: AuthenticatedUser) {
   const division = await prisma.division.findFirst({
     where: isAdmin(actor) ? { id } : { id, liga: { userId: actor.id } },
-    select: { id: true, ligaId: true, canchaUnicaId: true, registrarParticipaciones: true, usarPenalesEnEmpates: true },
+    select: { id: true, ligaId: true, registrarParticipaciones: true, usarPenalesEnEmpates: true },
   });
   if (!division) throw new NotFoundError('Division');
   return division;
@@ -134,7 +136,7 @@ export const divisionService = {
   }, actor: AuthenticatedUser): Promise<DivisionEntity> {
     await assertLigaOwner(data.ligaId, actor);
     const estadoLigaId = data.estadoLigaId ?? (await prisma.estadoLiga.findFirstOrThrow({
-      where: { nombre: 'Borrador' },
+      where: { codigo: 'BORRADOR' },
       select: { id: true },
     })).id;
     const { horariosPorCancha, ...divisionData } = data;
@@ -167,25 +169,7 @@ export const divisionService = {
     if (data.ligaId) await assertLigaOwner(data.ligaId, actor);
     const ligaId = data.ligaId ?? division.ligaId;
     const { horariosPorCancha, ...scalarData } = data;
-    let updateData: Partial<DivisionEntity> = scalarData;
-
-    if (data.ligaId && data.canchaUnicaId === undefined && division.canchaUnicaId) {
-      updateData = { ...scalarData, canchaUnicaId: null };
-    }
-
-    if (data.canchaUnicaId && data.registrarParticipaciones === undefined && horariosPorCancha === undefined) {
-      const cancha = await prisma.ligaCancha.findFirst({
-        where: { id: data.canchaUnicaId },
-        select: { ligaId: true, activa: true, liga: { select: { multiplesCanchas: true } } },
-      });
-      if (!cancha || cancha.ligaId !== ligaId) {
-        throw new ValidationError('La cancha indicada no pertenece a esta liga');
-      }
-      if (!cancha.liga.multiplesCanchas) {
-        throw new ValidationError('La liga no tiene múltiples canchas habilitadas');
-      }
-      if (!cancha.activa) throw new ValidationError('La cancha seleccionada no está activa');
-    }
+    const updateData: Partial<DivisionEntity> = scalarData;
 
     // One locked path for anything that changes what jornada generation validates against.
     const needsLock = data.registrarParticipaciones !== undefined
@@ -199,7 +183,7 @@ export const divisionService = {
 
         const lockedDivision = await tx.division.findFirst({
           where: isAdmin(actor) ? { id } : { id, liga: { userId: actor.id } },
-          select: { id: true, ligaId: true, canchaUnicaId: true, registrarParticipaciones: true, usarPenalesEnEmpates: true },
+          select: { id: true, ligaId: true, registrarParticipaciones: true, usarPenalesEnEmpates: true },
         });
         if (!lockedDivision) throw new NotFoundError('Division');
         if (lockedDivision.ligaId !== division.ligaId) {
@@ -212,20 +196,6 @@ export const divisionService = {
             select: { id: true },
           });
           if (!targetLeague) throw new NotFoundError('Liga');
-        }
-
-        if (data.canchaUnicaId) {
-          const cancha = await tx.ligaCancha.findFirst({
-            where: { id: data.canchaUnicaId },
-            select: { ligaId: true, activa: true, liga: { select: { multiplesCanchas: true } } },
-          });
-          if (!cancha || cancha.ligaId !== ligaId) {
-            throw new ValidationError('La cancha indicada no pertenece a esta liga');
-          }
-          if (!cancha.liga.multiplesCanchas) {
-            throw new ValidationError('La liga no tiene múltiples canchas habilitadas');
-          }
-          if (!cancha.activa) throw new ValidationError('La cancha seleccionada no está activa');
         }
 
         if (data.usarPenalesEnEmpates !== undefined
@@ -245,16 +215,10 @@ export const divisionService = {
         }
 
         let lockedUpdateData: Partial<DivisionEntity> = scalarData;
-        if (data.ligaId && data.canchaUnicaId === undefined && lockedDivision.canchaUnicaId) {
-          lockedUpdateData = { ...scalarData, canchaUnicaId: null };
-        }
-
         if (horariosPorCancha !== undefined) {
+          // El resumen denormalizado se reescribe junto con las filas.
           const summary = await replaceCourtSchedules(tx, id, ligaId, horariosPorCancha);
-          // Per-court rows supersede the fixed court, and keep the summary in sync.
-          lockedUpdateData = summary
-            ? { ...lockedUpdateData, ...summary, canchaUnicaId: null }
-            : lockedUpdateData;
+          lockedUpdateData = summary ? { ...lockedUpdateData, ...summary } : lockedUpdateData;
         }
         return divisionRepository.update(id, lockedUpdateData, tx);
       }, { isolationLevel: 'ReadCommitted' });
@@ -298,12 +262,14 @@ export const divisionService = {
   },
 
   async resetDivision(divisionId: string, actor: AuthenticatedUser): Promise<void> {
-    await assertDivisionOwner(divisionId, actor);
+    const { estadoLiga } = await assertDivisionOwner(divisionId, actor);
+    assertDivisionWritable(estadoLiga);
 
     await prisma.$transaction(async (tx) => {
       await tx.jornada.deleteMany({ where: { divisionId } });
       await tx.rondaPlayoff.deleteMany({ where: { divisionId } });
       await tx.tablaPosicion.deleteMany({ where: { divisionId } });
+      await tx.divisionCampeon.deleteMany({ where: { divisionId } });
     });
   },
 };

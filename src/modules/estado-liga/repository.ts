@@ -11,7 +11,7 @@ export const estadoLigaRepository: EstadoLigaRepository = {
     return prisma.estadoLiga.findUnique({ where: { id } });
   },
 
-  async create(data: { nombre: string }): Promise<EstadoLigaEntity> {
+  async create(data: { nombre: string; codigo: string }): Promise<EstadoLigaEntity> {
     return prisma.estadoLiga.create({ data });
   },
 

@@ -49,6 +49,9 @@ export const divisionEquipoRepository: DivisionEquipoRepository = {
             liga: { select: { id: true, nombre: true, logo: true } },
             categoria: { select: { id: true, nombre: true } },
             estadoLiga: { select: { id: true, nombre: true } },
+            // Para el palmarés en la ficha del equipo: la fila ya trae la liga, solo faltaba saber
+            // si este equipo fue el campeón de esa división.
+            campeon: { select: { equipoId: true, jugadorId: true } },
           },
         },
       },

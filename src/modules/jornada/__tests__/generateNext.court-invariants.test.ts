@@ -145,15 +145,6 @@ describe('generateNext court invariants', () => {
       .rejects.toThrow('cancha activa de esta liga');
   });
 
-  it('resuelve y persiste la cancha fija aunque el cliente la omita', async () => {
-    arrange(true);
-    mockDivision({ duracionPartido: 60, multiplesCanchas: true, canchaUnicaId: 'c1' });
-
-    await jornadaService.generateNext(divisionId, [slot]);
-
-    expect(partidoRepository.create).toHaveBeenCalledWith(expect.objectContaining({ canchaId: 'c1' }));
-  });
-
   it('repite una generación con la misma clave sin crear ni notificar otra jornada', async () => {
     arrange(true);
     await jornadaService.generateNext(divisionId, [{ ...slot, canchaId: 'c1' }], 'same-generation-key');
@@ -192,18 +183,6 @@ describe('generateNext court invariants', () => {
 
     await expect(jornadaService.generateNext(divisionId, [{ ...slot, horaInicio: '19:00', horaFin: '20:00', canchaId: 'c1' }], 'reused-generation-key'))
       .rejects.toThrow('clave de idempotencia ya fue usada');
-  });
-
-  it('rechaza una cancha distinta a la fija y una cancha fija inactiva', async () => {
-    arrange(true);
-    mockDivision({ duracionPartido: 60, multiplesCanchas: true, canchaUnicaId: 'c1' });
-    await expect(jornadaService.generateNext(divisionId, [{ ...slot, canchaId: 'c2' }]))
-      .rejects.toThrow('cancha fija de la división');
-
-    arrange(true);
-    mockDivision({ duracionPartido: 60, multiplesCanchas: true, canchaUnicaId: 'inactive' });
-    await expect(jornadaService.generateNext(divisionId, [slot]))
-      .rejects.toThrow('cancha fija de la división no está activa');
   });
 
   it('rejects MULTIPLE mode with fewer than two active named courts', async () => {
@@ -292,5 +271,24 @@ describe('generateNext court invariants', () => {
     const unrelated = Object.assign(new Error('other check failed'), { code: 'P2004' });
     (prisma.$transaction as ReturnType<typeof vi.fn>).mockRejectedValueOnce(unrelated);
     await expect(jornadaService.generateNext(divisionId, [{ ...slot, canchaId: 'c1' }])).rejects.toBe(unrelated);
+  });
+});
+
+// Antes ninguno de estos caminos miraba el estado: podías generar una jornada entera en una
+// división finalizada, pero no agregarle un partido suelto.
+describe('divisiones de solo lectura', () => {
+  it.each(['FINALIZADA', 'CANCELADA'])('rechaza generar una jornada en %s', async (estadoCodigo) => {
+    arrange(false);
+    mockDivision({ duracionPartido: 60, estadoCodigo });
+
+    await expect(jornadaService.generateNext(divisionId, [slot]))
+      .rejects.toMatchObject({ statusCode: 422 });
+  });
+
+  it.each(['BORRADOR', 'ABIERTA', 'EN_CURSO'])('deja generar en %s', async (estadoCodigo) => {
+    arrange(false);
+    mockDivision({ duracionPartido: 60, estadoCodigo });
+
+    await expect(jornadaService.generateNext(divisionId, [slot])).resolves.toBeDefined();
   });
 });

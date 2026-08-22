@@ -57,7 +57,6 @@ export interface DivisionScheduleSource {
   multiplesCanchas: boolean;
   diasPartido: string | null;
   horarioPartido: string | null;
-  canchaUnicaId: string | null;
   canchaHorarios: CourtScheduleRow[];
 }
 
@@ -75,8 +74,8 @@ export interface ResolvedCourtSchedule {
  * Three branches:
  *  1. Single-court league  → one `null` entry built from the division scalars.
  *  2. Multi-court WITH rows → one entry per configured *and active* court.
- *  3. Multi-court WITHOUT rows → legacy fallback: every active court inherits the scalars,
- *     narrowed to `canchaUnicaId` when set. Keeps pre-migration divisions working.
+ *  3. Multi-court WITHOUT rows → legacy fallback: every active court inherits the scalars.
+ *     Keeps pre-migration divisions working.
  */
 export function resolveDivisionSchedule(
   source: DivisionScheduleSource,
@@ -106,7 +105,6 @@ export function resolveDivisionSchedule(
 
   const legacy = scalar();
   for (const courtId of activeCourtIds) {
-    if (source.canchaUnicaId && courtId !== source.canchaUnicaId) continue;
     resolved.set(courtId, legacy);
   }
   return resolved;

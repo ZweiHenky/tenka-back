@@ -29,6 +29,7 @@ export const createDivisionSchema = z.object({
   maxEquipos: z.number().int().min(2),
   arbitraje: z.number().min(0).default(0),
   registrarParticipaciones: z.boolean().optional(),
+  registrarGoleo: z.boolean().optional(),
   usarPenalesEnEmpates: z.boolean().optional(),
   diasPartido: z.string().min(1).optional(),
   horarioPartido: z.string().min(1).optional(),
@@ -61,6 +62,7 @@ export const updateDivisionSchema = z.object({
   maxEquipos: z.number().int().min(2).optional(),
   arbitraje: z.number().min(0).optional(),
   registrarParticipaciones: z.boolean().optional(),
+  registrarGoleo: z.boolean().optional(),
   usarPenalesEnEmpates: z.boolean().optional(),
   diasPartido: z.string().min(1).optional(),
   horarioPartido: z.string().min(1).optional(),
@@ -76,7 +78,6 @@ export const updateDivisionSchema = z.object({
   tipoId: z.string().optional(),
   // `tipoCompetenciaId` no está a propósito: el formato se fija al crear la división. Zod
   // descarta las claves que no declara, así que enviarlo no cambia nada.
-  canchaUnicaId: z.string().min(1).nullable().optional(),
 }).superRefine((data, ctx) => assertUniqueCourts(data.horariosPorCancha, ctx));
 
 export type CreateDivisionInput = z.output<typeof createDivisionSchema>;

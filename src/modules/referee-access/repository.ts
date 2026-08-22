@@ -44,6 +44,7 @@ export const refereeAccessRepository: PartidoRefereeAccessRepository = {
                 division: { select: {
                   nombre: true,
                   registrarParticipaciones: true,
+                  registrarGoleo: true,
                   usarPenalesEnEmpates: true,
                   liga: { select: { nombre: true, multiplesCanchas: true } },
                   jugadores: { select: { equipoId: true, dorsal: true, jugador: { select: { id: true, nombre: true, foto: true } } } },
@@ -55,6 +56,7 @@ export const refereeAccessRepository: PartidoRefereeAccessRepository = {
                 division: { select: {
                   nombre: true,
                   registrarParticipaciones: true,
+                  registrarGoleo: true,
                   usarPenalesEnEmpates: true,
                   liga: { select: { nombre: true, multiplesCanchas: true } },
                   jugadores: { select: { equipoId: true, dorsal: true, jugador: { select: { id: true, nombre: true, foto: true } } } },

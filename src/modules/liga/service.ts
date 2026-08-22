@@ -213,8 +213,8 @@ export const ligaService = {
     let updated: LigaEntity;
     try {
       const disablingMultipleCourts = old.multiplesCanchas && data.multiplesCanchas === false;
-      // Turning multiple courts off drops every court and nulls each division's canchaUnicaId,
-      // so it has to be serialized against jornada generation like any other venue change.
+      // Turning multiple courts off drops every court and every per-court schedule, so it has
+      // to be serialized against jornada generation like any other venue change.
       const touchesCourts = disablingMultipleCourts || (courtWrites !== undefined && courtWrites.length > 0);
       if (logoAssetId === undefined && coverAssetId === undefined) {
         updated = touchesCourts
@@ -347,13 +347,12 @@ export const ligaService = {
         });
         if (remainingActive < 2) throw new ValidationError(MINIMUM_COURTS_MESSAGE);
       }
-      const [matchCount, fixedDivisionCount, scheduleCount] = await Promise.all([
+      const [matchCount, scheduleCount] = await Promise.all([
         tx.partido.count({ where: { canchaId } }),
-        tx.division.count({ where: { canchaUnicaId: canchaId } }),
         // A court some division schedules on must be deactivated, never hard-deleted.
         tx.divisionCanchaHorario.count({ where: { canchaId } }),
       ]);
-      if (matchCount > 0 || fixedDivisionCount > 0 || scheduleCount > 0) {
+      if (matchCount > 0 || scheduleCount > 0) {
         await tx.ligaCancha.update({ where: { id: canchaId }, data: { activa: false } });
       } else {
         await tx.ligaCancha.delete({ where: { id: canchaId } });

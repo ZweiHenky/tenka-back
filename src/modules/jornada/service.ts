@@ -6,6 +6,7 @@ import { prisma } from '../../config/database';
 import type { JornadaEntity } from './entity';
 import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
+import { assertDivisionWritable } from '../../utils/divisionState';
 import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 import { logger } from '../../config/logger';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
@@ -185,7 +186,6 @@ async function validateLeagueCourtCapacity(
     multiplesCanchas: boolean;
     durationMinutes: number | null;
     schedule: DivisionScheduleSource;
-    fixedCourtId?: string | null;
     timeZone: string;
     slots: SlotInput[];
     excludedPartidoIds: string[];
@@ -201,21 +201,10 @@ async function validateLeagueCourtCapacity(
   }
 
   const activeById = new Map(activeNamed.map((cancha) => [cancha.id, cancha.nombre]));
-  if (input.fixedCourtId) {
-    if (!input.multiplesCanchas) {
-      throw new ValidationError('La liga no tiene múltiples canchas habilitadas');
-    }
-    if (!activeById.has(input.fixedCourtId)) {
-      throw new ValidationError('La cancha fija de la división no está activa');
-    }
-  }
   // Days and ranges per court. A court missing from the map is one this division does not play on.
   const scheduleByCourt = resolveDivisionSchedule(input.schedule, new Set(activeById.keys()));
 
   const drafts = input.slots.map((slot, index) => {
-    if (input.fixedCourtId && slot.canchaId && slot.canchaId !== input.fixedCourtId) {
-      throw new ValidationError(`El slot #${index} debe usar la cancha fija de la división`);
-    }
     if (!input.multiplesCanchas && slot.canchaId) {
       throw new ValidationError('Las ligas de cancha única deben enviar canchaId nulo');
     }
@@ -367,6 +356,7 @@ export const jornadaService = {
     const preflight = await jornadaRepository.findDeleteContext(id, actor);
     if (!preflight) throw new NotFoundError('Jornada');
     assertOwnerOrAdmin(actor, preflight.ligaUserId, 'Jornada');
+    assertDivisionWritable(preflight.estadoLiga);
 
     for (let attempt = 0; ; attempt += 1) {
       try {
@@ -375,6 +365,7 @@ export const jornadaService = {
           const context = await jornadaRepository.findDeleteContext(id, actor, tx);
           if (!context) throw new NotFoundError('Jornada');
           assertOwnerOrAdmin(actor, context.ligaUserId, 'Jornada');
+          assertDivisionWritable(context.estadoLiga);
           if (context.ligaId !== preflight.ligaId) {
             throw new ConflictError('La jornada cambió durante la eliminación; vuelve a intentarlo');
           }
@@ -461,24 +452,16 @@ export const jornadaService = {
         horarioPartido: true,
         duracionPartido: true,
         ligaId: true,
-        canchaUnicaId: true,
+        estadoLiga: { select: { codigo: true } },
         canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } },
         liga: { select: { userId: true, multiplesCanchas: true, timeZone: true } },
       },
     });
     if (!division) throw new NotFoundError('División');
     assertOwnerOrAdmin(actor, division.liga.userId, 'División');
+    assertDivisionWritable(division.estadoLiga);
     const replay = await findGenerationReplay(prisma as unknown as GenerationLookupClient, divisionId, generationKey, requestHash);
     if (replay) return { ...replay, idempotencyReplayed: true };
-    if (division.canchaUnicaId) {
-      for (const [index, slot] of (slots ?? []).entries()) {
-        if (slot.canchaId && slot.canchaId !== division.canchaUnicaId) {
-          throw new ValidationError(`El slot #${index} debe usar la cancha fija de la división`);
-        }
-      }
-      slots = slots?.map((slot) => ({ ...slot, canchaId: division.canchaUnicaId }));
-    }
-
     // Check for playoff mode: when rondas exist, only amistoso and eliminatoria slots allowed
     const playoffRound = await prisma.rondaPlayoff.findFirst({ where: { divisionId }, select: { id: true } });
     const playoffMode = playoffRound !== null;
@@ -644,10 +627,8 @@ export const jornadaService = {
             multiplesCanchas: division.liga.multiplesCanchas,
             diasPartido: division.diasPartido,
             horarioPartido: division.horarioPartido,
-            canchaUnicaId: division.canchaUnicaId,
             canchaHorarios: division.canchaHorarios,
           },
-          fixedCourtId: division.canchaUnicaId,
           timeZone: division.liga.timeZone,
           slots: slots ?? [],
           excludedPartidoIds: pendingPlayoffUpdates.map((update) => update.id),
@@ -1028,7 +1009,6 @@ export const jornadaService = {
               diasPartido: true,
               horarioPartido: true,
               duracionPartido: true,
-              canchaUnicaId: true,
               canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } },
               liga: { select: { multiplesCanchas: true, timeZone: true } },
             },
@@ -1048,10 +1028,8 @@ export const jornadaService = {
               multiplesCanchas: lockedDivision.liga.multiplesCanchas,
               diasPartido: lockedDivision.diasPartido,
               horarioPartido: lockedDivision.horarioPartido,
-              canchaUnicaId: lockedDivision.canchaUnicaId,
               canchaHorarios: lockedDivision.canchaHorarios,
             },
-            fixedCourtId: lockedDivision.canchaUnicaId,
             timeZone: lockedDivision.liga.timeZone,
             slots: slots ?? [],
             excludedPartidoIds: pendingPlayoffUpdates.map((update) => update.id),

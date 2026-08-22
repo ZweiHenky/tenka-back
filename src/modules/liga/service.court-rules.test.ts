@@ -71,7 +71,7 @@ describe('gestion de canchas de liga', () => {
     expect(mocks.executeRawUnsafe).toHaveBeenCalledWith(expect.stringContaining('pg_advisory_xact_lock'), 'liga-1');
     const lockOrder = mocks.executeRawUnsafe.mock.invocationCallOrder[0];
     expect(lockOrder).toBeLessThan(mocks.partidoCount.mock.invocationCallOrder[0]);
-    expect(lockOrder).toBeLessThan(mocks.divisionCount.mock.invocationCallOrder[0]);
+    expect(lockOrder).toBeLessThan(mocks.divisionCanchaHorarioCount.mock.invocationCallOrder[0]);
     expect(lockOrder).toBeLessThan(mocks.canchaDelete.mock.invocationCallOrder[0]);
   });
 
@@ -145,10 +145,10 @@ describe('gestion de canchas de liga', () => {
     expect(mocks.canchaDelete).toHaveBeenCalledWith({ where: { id: 'court-1' } });
   });
 
-  it('desactiva en lugar de eliminar una cancha fija de una división', async () => {
+  it('desactiva en lugar de eliminar una cancha donde una división juega', async () => {
     mocks.canchaFindFirst.mockResolvedValue(courts[0]);
     mocks.partidoCount.mockResolvedValue(0);
-    mocks.divisionCount.mockResolvedValue(1);
+    mocks.divisionCanchaHorarioCount.mockResolvedValue(1);
 
     await ligaService.deleteCancha('liga-1', 'court-1', owner);
 

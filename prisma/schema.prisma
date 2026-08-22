@@ -197,9 +197,14 @@ model Ubicacion {
 model EstadoLiga {
   id     String @id @default(cuid())
   nombre String
+  /// Identidad estable del estado: BORRADOR | ABIERTA | EN_CURSO | FINALIZADA | CANCELADA.
+  /// Toda regla —visibilidad publica y solo lectura— se decide con esto, nunca con el nombre,
+  /// que es editable por API: renombrar la fila "Borrador" publicaba todos los borradores.
+  codigo String
 
   divisiones Division[]
 
+  @@index([codigo])
   @@map("estados_liga")
 }
 
@@ -260,7 +265,6 @@ model LigaCancha {
   liga   Liga   @relation(fields: [ligaId], references: [id], onDelete: Cascade)
 
   partidos          Partido[]
-  divisionesFijas   Division[]              @relation("DivisionCanchaUnica")
   divisionHorarios  DivisionCanchaHorario[]
 
   @@unique([ligaId, nombreNormalizado])
@@ -312,6 +316,9 @@ model Division {
   maxEquipos               Int
   arbitraje                Float     @default(0)
   registrarParticipaciones Boolean   @default(false)
+  /// Tabla de goleo. Encendido por defecto: existió siempre, y apagarlo por omision se la
+  /// quitaria a las divisiones que ya la usan. Apagado congela lo capturado, no lo borra.
+  registrarGoleo           Boolean   @default(true)
   usarPenalesEnEmpates     Boolean   @default(true)
   /// Resumen denormalizado (unión) de canchaHorarios, mantenido en la escritura para la vista
   /// pública y los clientes viejos. Es un SUPERCONJUNTO: nunca validar contra estos campos,
@@ -330,14 +337,12 @@ model Division {
   categoriaId       String
   tipoId            String
   tipoCompetenciaId String
-  canchaUnicaId     String?
 
   liga            Liga            @relation(fields: [ligaId], references: [id], onDelete: Cascade)
   estadoLiga      EstadoLiga      @relation(fields: [estadoLigaId], references: [id])
   categoria       Categoria       @relation(fields: [categoriaId], references: [id])
   tipo            Tipo            @relation(fields: [tipoId], references: [id])
   tipoCompetencia TipoCompetencia @relation(fields: [tipoCompetenciaId], references: [id])
-  canchaUnica     LigaCancha?     @relation("DivisionCanchaUnica", fields: [canchaUnicaId], references: [id], onDelete: SetNull)
 
   equipos                   DivisionEquipo[]
   jugadores                 DivisionJugador[]
@@ -348,9 +353,9 @@ model Division {
   notificationSubscriptions DivisionNotificationSubscription[]
   notificationOutbox        NotificationOutbox[]
   canchaHorarios            DivisionCanchaHorario[]
+  campeon                   DivisionCampeon?
 
   @@index([ligaId, createdAt])
-  @@index([canchaUnicaId])
   @@map("divisiones")
 }
 
@@ -372,6 +377,7 @@ model Equipo {
   tablaPosiciones   TablaPosicion[]
   anotaciones       AnotacionPartido[]
   participaciones   ParticipacionPartido[]
+  campeonatos       DivisionCampeon[]
 
   @@unique([userId, nombreNormalizado])
   @@map("equipos")
@@ -395,6 +401,7 @@ model Jugador {
   divisiones      DivisionJugador[]
   anotaciones     AnotacionPartido[]
   participaciones ParticipacionPartido[]
+  titulosGoleo    DivisionCampeon[]
 
   @@map("jugadores")
 }
@@ -460,6 +467,35 @@ model Premio {
 
   @@index([divisionId, posicion])
   @@map("premios")
+}
+
+/// Cierre de una division: quien la gano y, opcionalmente, quien fue su campeon de goleo.
+/// Una sola fila por division —`divisionId` es unico—, asi que reasignar es un upsert y no
+/// pueden existir dos campeones.
+model DivisionCampeon {
+  id         String   @id @default(cuid())
+  divisionId String   @unique
+  division   Division @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+
+  /// Los ids quedan nulos si el equipo o el jugador se borran despues. Los snapshots
+  /// conservan el titulo: un palmares no debe evaporarse con la baja del equipo.
+  equipoId     String?
+  equipo       Equipo? @relation(fields: [equipoId], references: [id], onDelete: SetNull)
+  equipoNombre String
+  equipoLogo   String?
+
+  jugadorId     String?
+  jugador       Jugador? @relation(fields: [jugadorId], references: [id], onDelete: SetNull)
+  jugadorNombre String?
+  jugadorFoto   String?
+  jugadorGoles  Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([equipoId])
+  @@index([jugadorId])
+  @@map("divisiones_campeones")
 }
 
 model Jornada {

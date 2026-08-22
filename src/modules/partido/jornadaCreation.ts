@@ -3,6 +3,7 @@ import type { Prisma } from '../../generated/prisma/client';
 import { prisma } from '../../config/database';
 import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
+import { assertDivisionWritable } from '../../utils/divisionState';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
 import { parseConfiguredDays, resolveDivisionSchedule } from '../../utils/divisionSchedule';
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
@@ -140,9 +141,8 @@ async function buildOptions(jornadaId: string, actor: AuthenticatedUser, client:
           horarioPartido: true,
           duracionPartido: true,
           descanso: true,
-          canchaUnicaId: true,
           canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } },
-          estadoLiga: { select: { nombre: true } },
+          estadoLiga: { select: { codigo: true } },
           liga: { select: { userId: true, multiplesCanchas: true, timeZone: true } },
           equipos: { select: { equipo: { select: { id: true, nombre: true } } } },
         },
@@ -152,9 +152,7 @@ async function buildOptions(jornadaId: string, actor: AuthenticatedUser, client:
   });
   if (!jornada) throw new NotFoundError('Jornada');
   assertOwnerOrAdmin(actor, jornada.division.liga.userId, 'Jornada');
-  if (normalize(jornada.division.estadoLiga.nombre) !== 'en curso') {
-    throw new ValidationError('Solo se pueden agregar partidos a una división en curso');
-  }
+  assertDivisionWritable(jornada.division.estadoLiga);
   const { diasPartido, horarioPartido, duracionPartido } = jornada.division;
   // The scalars may be empty when the schedule lives entirely in canchaHorarios; whether the
   // division actually has a usable window is decided per court by resolveDivisionSchedule below.
@@ -176,20 +174,16 @@ async function buildOptions(jornadaId: string, actor: AuthenticatedUser, client:
     orderBy: { nombre: 'asc' },
   });
   const activeCourtIds = new Set(courts.map((court) => court.id));
-  if (jornada.division.liga.multiplesCanchas && jornada.division.canchaUnicaId && !activeCourtIds.has(jornada.division.canchaUnicaId)) {
-    throw new ValidationError('La cancha fija de la división no está activa');
-  }
 
   const scheduleByCourt = resolveDivisionSchedule({
     multiplesCanchas: jornada.division.liga.multiplesCanchas,
     diasPartido,
     horarioPartido,
-    canchaUnicaId: jornada.division.canchaUnicaId,
     canchaHorarios: jornada.division.canchaHorarios,
   }, activeCourtIds);
 
   const candidateCourts: Array<{ id: string | null; nombre: string | null }> = jornada.division.liga.multiplesCanchas
-    ? courts.filter((court) => !jornada.division.canchaUnicaId || court.id === jornada.division.canchaUnicaId)
+    ? courts
     : [{ id: null, nombre: null }];
   // A court is usable only if it resolves to both days and ranges; otherwise the division has
   // nothing configured there. Zero usable courts is a configuration error, not an empty result.

@@ -1,5 +1,6 @@
 import type { Prisma } from '../../generated/prisma/client'
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors'
+import { assertDivisionWritable } from '../../utils/divisionState'
 import { tablaPosicionService } from '../tabla-posicion/service'
 import { rondaPlayoffService } from '../ronda-playoff/service'
 import { validatePlayoffFinalizationSchedule } from './playoffFinalization'
@@ -22,8 +23,8 @@ const RESULT_CONTEXT_SELECT = {
   fecha: true,
   fechaFin: true,
   canchaId: true,
-  jornada: { select: { division: { select: { id: true, registrarParticipaciones: true, usarPenalesEnEmpates: true, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
-  rondaPlayoff: { select: { division: { select: { id: true, registrarParticipaciones: true, usarPenalesEnEmpates: true, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
+  jornada: { select: { division: { select: { id: true, registrarParticipaciones: true, registrarGoleo: true, usarPenalesEnEmpates: true, estadoLiga: { select: { codigo: true } }, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
+  rondaPlayoff: { select: { division: { select: { id: true, registrarParticipaciones: true, registrarGoleo: true, usarPenalesEnEmpates: true, estadoLiga: { select: { codigo: true } }, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
 } as const
 
 export async function getResultContext(tx: Pick<Prisma.TransactionClient, 'partido'>, partidoId: string) {
@@ -83,10 +84,19 @@ export async function writeResultInTransaction(
     throw new ValidationError('Las notas y los participantes solo pueden guardarse al finalizar el partido')
   }
 
+  // Una división finalizada o cancelada no acepta resultados nuevos, ni desde la app ni desde
+  // el enlace del árbitro: los dos caminos pasan por aquí.
+  assertDivisionWritable(division.estadoLiga);
+
+  // Con el goleo apagado el servidor ignora lo que mande el cliente: ni valida ni escribe
+  // atribuciones nuevas. Las ya guardadas se congelan más abajo, no se borran.
+  const goleoActivo = division.registrarGoleo
+  const allocations = goleoActivo ? input.allocations : []
+
   const namedKeys = new Set<string>()
   const totals = { LOCAL: 0, VISITANTE: 0 }
   const namedPlayerIds: string[] = []
-  for (const allocation of input.allocations) {
+  for (const allocation of allocations) {
     totals[allocation.ladoMarcador] += allocation.cantidad
     if (!allocation.jugadorId) continue
     const key = `${allocation.ladoMarcador}:${allocation.jugadorId}`
@@ -120,7 +130,7 @@ export async function writeResultInTransaction(
       participationUniquePlayers.add(participacion.jugadorId)
       participationPlayerIds.push(participacion.jugadorId)
     }
-    for (const allocation of input.allocations) {
+    for (const allocation of allocations) {
       if (!allocation.jugadorId) continue
       if (!participationKeys.has(`${allocation.ladoMarcador}:${allocation.jugadorId}`)) {
         throw new ValidationError('Todos los goleadores deben estar registrados como participantes del partido')
@@ -136,7 +146,7 @@ export async function writeResultInTransaction(
     : []
   if (historicalParticipations.length > 0) {
     const historyKeys = new Set(historicalParticipations.map((row) => `${row.ladoMarcador}:${row.jugadorId ?? row.jugadorIdSnapshot}`))
-    for (const allocation of input.allocations) {
+    for (const allocation of allocations) {
       if (!allocation.jugadorId) continue
       if (!historyKeys.has(`${allocation.ladoMarcador}:${allocation.jugadorId}`)) {
         throw new ValidationError('El goleador no está en el historial de participantes del partido. Activa el registro de participantes para corregir la lista')
@@ -178,7 +188,7 @@ export async function writeResultInTransaction(
     },
     select: { jugadorId: true, jugadorIdSnapshot: true, equipoId: true, equipoIdSnapshot: true, ladoMarcador: true, jugadorNombre: true, equipoNombre: true, dorsal: true },
   })
-  const namedRows = input.allocations.filter((allocation) => allocation.jugadorId).map((allocation) => {
+  const namedRows = allocations.filter((allocation) => allocation.jugadorId).map((allocation) => {
     const equipoId = teamIds[allocation.ladoMarcador]
     const membership = membershipByTeamPlayer.get(`${equipoId}:${allocation.jugadorId}`)
     const previous = previousAllocations.find((row) => (row.jugadorId ?? row.jugadorIdSnapshot) === allocation.jugadorId
@@ -257,27 +267,46 @@ export async function writeResultInTransaction(
       select: { id: true, nombre: true },
     })
     const teamNames = new Map(teamRows.map((team) => [team.id, team.nombre]))
-    const unattributedRows = (['LOCAL', 'VISITANTE'] as const).flatMap((side) => {
-      const score = side === 'LOCAL' ? input.golesLocal : input.golesVisitante
-      const namedTotal = namedRows.filter((row) => row.ladoMarcador === side).reduce((sum, row) => sum + row.cantidad, 0)
-      const cantidad = score - namedTotal
-      const equipoId = teamIds[side]
-      return cantidad > 0 ? [{
-        partidoId,
-        jugadorId: null,
-        equipoId,
-        jugadorIdSnapshot: null,
-        equipoIdSnapshot: equipoId,
-        ladoMarcador: side,
-        cantidad,
-        jugadorNombre: null,
-        equipoNombre: equipoId ? teamNames.get(equipoId) ?? null : null,
-        dorsal: null,
-      }] : []
-    })
-    await tx.anotacionPartido.deleteMany({ where: { partidoId } })
-    if (namedRows.length + unattributedRows.length > 0) {
-      await tx.anotacionPartido.createMany({ data: [...namedRows, ...unattributedRows] })
+    const buildUnattributedRows = (namedTotalFor: (side: 'LOCAL' | 'VISITANTE') => number) =>
+      (['LOCAL', 'VISITANTE'] as const).flatMap((side) => {
+        const score = side === 'LOCAL' ? input.golesLocal : input.golesVisitante
+        const cantidad = score - namedTotalFor(side)
+        const equipoId = teamIds[side]
+        return cantidad > 0 ? [{
+          partidoId,
+          jugadorId: null,
+          equipoId,
+          jugadorIdSnapshot: null,
+          equipoIdSnapshot: equipoId,
+          ladoMarcador: side,
+          cantidad,
+          jugadorNombre: null,
+          equipoNombre: equipoId ? teamNames.get(equipoId) ?? null : null,
+          dorsal: null,
+        }] : []
+      })
+
+    if (goleoActivo) {
+      const unattributedRows = buildUnattributedRows((side) =>
+        namedRows.filter((row) => row.ladoMarcador === side).reduce((sum, row) => sum + row.cantidad, 0))
+      await tx.anotacionPartido.deleteMany({ where: { partidoId } })
+      if (namedRows.length + unattributedRows.length > 0) {
+        await tx.anotacionPartido.createMany({ data: [...namedRows, ...unattributedRows] })
+      }
+    } else {
+      // Congelado. Las filas con jugador se quedan como están —borrarlas perdería el historial,
+      // y el editor está deshabilitado, así que nadie podría recapturarlo—. Solo se rehacen los
+      // goles sin dueño, para que la suma siga cuadrando si cambió el marcador.
+      const atribuidas = await tx.anotacionPartido.findMany({
+        where: { partidoId, jugadorIdSnapshot: { not: null } },
+        select: { ladoMarcador: true, cantidad: true },
+      })
+      await tx.anotacionPartido.deleteMany({ where: { partidoId, jugadorIdSnapshot: null } })
+      const unattributedRows = buildUnattributedRows((side) =>
+        atribuidas.filter((row) => row.ladoMarcador === side).reduce((sum, row) => sum + row.cantidad, 0))
+      if (unattributedRows.length > 0) {
+        await tx.anotacionPartido.createMany({ data: unattributedRows })
+      }
     }
     if (shouldWriteParticipations) {
       await tx.participacionPartido.deleteMany({ where: { partidoId } })

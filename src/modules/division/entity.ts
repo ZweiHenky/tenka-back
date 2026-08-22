@@ -4,6 +4,7 @@ export interface DivisionEntity {
   maxEquipos: number;
   arbitraje: number;
   registrarParticipaciones: boolean;
+  registrarGoleo: boolean;
   usarPenalesEnEmpates: boolean;
   diasPartido: string | null;
   horarioPartido: string | null;
@@ -18,7 +19,6 @@ export interface DivisionEntity {
   categoriaId: string;
   tipoId: string;
   tipoCompetenciaId: string;
-  canchaUnicaId: string | null;
   liga?: { id: string; nombre: string; logo: string | null };
   estadoLiga?: { id: string; nombre: string };
   /**

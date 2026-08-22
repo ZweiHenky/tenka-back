@@ -107,6 +107,7 @@ export const refereeAccessService = {
       anotaciones: partido.anotaciones.map(exposeAnotacionRead),
       participaciones: partido.participaciones.map(exposeParticipacionRead),
       registrarParticipaciones: division?.registrarParticipaciones ?? false,
+      registrarGoleo: division?.registrarGoleo ?? true,
       usarPenalesEnEmpates: division?.usarPenalesEnEmpates ?? true,
       jugadoresLocal: (division?.jugadores ?? [])
         .filter((row) => row.equipoId === partido.equipoLocal?.id)

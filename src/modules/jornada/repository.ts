@@ -108,6 +108,7 @@ export const jornadaRepository: JornadaRepository = {
         division: {
           select: {
             ligaId: true,
+            estadoLiga: { select: { codigo: true } },
             liga: { select: { userId: true } },
             jornadas: {
               orderBy: { numero: 'desc' },
@@ -133,6 +134,7 @@ export const jornadaRepository: JornadaRepository = {
       divisionId: jornada.divisionId,
       ligaId: jornada.division.ligaId,
       ligaUserId: jornada.division.liga.userId,
+      estadoLiga: jornada.division.estadoLiga,
       latestJornadaId: jornada.division.jornadas[0]?.id ?? null,
       hasFinalizados: jornada.partidos.some((partido) => partido.estado === 'FINALIZADO'),
       playoffPartidos: jornada.partidos

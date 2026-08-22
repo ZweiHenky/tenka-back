@@ -32,17 +32,15 @@ describe('actualizacion atomica de canchas', () => {
     mocks.leagueUpdate.mockResolvedValue({ id: 'liga-1' });
   });
 
-  it('limpia las canchas fijas dentro de la transacción al desactivar el modo múltiple', async () => {
+  it('borra los horarios por cancha dentro de la transacción al desactivar el modo múltiple', async () => {
     await ligaRepository.update('liga-1', { multiplesCanchas: false }, undefined, undefined, true);
 
-    expect(mocks.divisionUpdateMany).toHaveBeenCalledWith({
-      where: { ligaId: 'liga-1' },
-      data: { canchaUnicaId: null },
-    });
     // Per-court schedules make no sense once the league runs a single court.
     expect(mocks.courtScheduleDeleteMany).toHaveBeenCalledWith({
       where: { division: { ligaId: 'liga-1' } },
     });
+    // Ya no queda nada que anular en la división: la cancha fija dejó de existir.
+    expect(mocks.divisionUpdateMany).not.toHaveBeenCalled();
     expect(mocks.leagueUpdate).toHaveBeenCalledOnce();
   });
 

@@ -22,7 +22,7 @@ import type { AuthenticatedUser } from '../../types/auth';
 const owner: AuthenticatedUser = { id: 'owner-1', email: 'owner@test.com', rol: 'LIGA' };
 const other: AuthenticatedUser = { id: 'other-1', email: 'other@test.com', rol: 'LIGA' };
 const admin: AuthenticatedUser = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' };
-const published = { estadoLiga: { nombre: { not: 'Borrador' } } };
+const published = { estadoLiga: { codigo: { not: 'BORRADOR' } } };
 const partido = {
   id: 'partido-1',
   golesLocal: 2,

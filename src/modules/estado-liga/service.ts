@@ -13,7 +13,7 @@ export const estadoLigaService = {
     return t;
   },
 
-  async create(data: { nombre: string }): Promise<EstadoLigaEntity> {
+  async create(data: { nombre: string; codigo: string }): Promise<EstadoLigaEntity> {
     return estadoLigaRepository.create(data);
   },
 

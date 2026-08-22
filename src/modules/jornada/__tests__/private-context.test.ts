@@ -46,6 +46,7 @@ describe('jornada private contexts', () => {
         division: {
           select: {
             ligaId: true,
+            estadoLiga: { select: { codigo: true } },
             liga: { select: { userId: true } },
             jornadas: { orderBy: { numero: 'desc' }, take: 1, select: { id: true } },
           },

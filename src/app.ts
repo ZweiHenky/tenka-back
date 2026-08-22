@@ -22,6 +22,7 @@ import { equipoRouter } from './modules/equipo/routes';
 import { divisionRouter } from './modules/division/routes';
 import { divisionEquipoRouter } from './modules/division-equipo/routes';
 import { premioRouter } from './modules/premio/routes';
+import { campeonRouter } from './modules/campeon/routes';
 import { jornadaRouter } from './modules/jornada/routes';
 import { rondaPlayoffRouter } from './modules/ronda-playoff/routes';
 import { partidoRouter } from './modules/partido/routes';
@@ -107,6 +108,7 @@ export function createApp() {
   app.use('/api/divisiones', divisionRouter);
   app.use('/api/divisiones-equipos', divisionEquipoRouter);
   app.use('/api/premios', premioRouter);
+  app.use('/api/campeones', campeonRouter);
   app.use('/api/jornadas', jornadaRouter);
   app.use('/api/rondas-playoff', rondaPlayoffRouter);
   app.use('/api/partidos', partidoRouter);

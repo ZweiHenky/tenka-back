@@ -39,7 +39,7 @@ describe('jornadaRepository public reads', () => {
     expect(mocks.jornadaFindFirst).toHaveBeenCalledWith({
       where: {
         id: 'j-1',
-        division: { estadoLiga: { nombre: { not: 'Borrador' } } },
+        division: { estadoLiga: { codigo: { not: 'BORRADOR' } } },
       },
       include: {
         partidos: {
@@ -72,7 +72,7 @@ describe('jornadaRepository public reads', () => {
     expect(mocks.divisionFindFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         id: 'd-1',
-        estadoLiga: { nombre: { not: 'Borrador' } },
+        estadoLiga: { codigo: { not: 'BORRADOR' } },
       },
       select: expect.objectContaining({
         jornadas: expect.objectContaining({

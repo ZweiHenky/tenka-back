@@ -30,7 +30,7 @@ describe('premioRepository public reads', () => {
       where: {
         id: 'premio-1',
         division: { OR: [
-          { estadoLiga: { nombre: { not: 'Borrador' } } },
+          { estadoLiga: { codigo: { not: 'BORRADOR' } } },
           { liga: { userId: owner.id } },
         ] },
       },
@@ -46,7 +46,7 @@ describe('premioRepository public reads', () => {
     expect(mocks.divisionFindFirst).toHaveBeenCalledWith({
       where: {
         id: 'division-1',
-        estadoLiga: { nombre: { not: 'Borrador' } },
+        estadoLiga: { codigo: { not: 'BORRADOR' } },
       },
       select: { premios: { orderBy: { posicion: 'asc' } } },
     });

@@ -22,7 +22,7 @@ const context = {
   fecha: new Date('2026-08-02T18:00:00Z'),
   fechaFin: new Date('2026-08-02T19:00:00Z'),
   canchaId: null,
-  jornada: { division: { id: 'division-1', registrarParticipaciones: false, usarPenalesEnEmpates: false, liga: { id: 'league-1', userId: 'owner-1', multiplesCanchas: false } } },
+  jornada: { division: { id: 'division-1', registrarParticipaciones: false, registrarGoleo: true, usarPenalesEnEmpates: false, estadoLiga: { codigo: 'EN_CURSO' }, liga: { id: 'league-1', userId: 'owner-1', multiplesCanchas: false } } },
   rondaPlayoff: null,
 }
 
@@ -52,7 +52,18 @@ function withParticipationEnabled(tx: any) {
     .mockReset()
     .mockResolvedValueOnce({
       ...context,
-      jornada: { division: { id: 'division-1', registrarParticipaciones: true, usarPenalesEnEmpates: false, liga: { id: 'league-1', userId: 'owner-1', multiplesCanchas: false } } },
+      jornada: { division: { id: 'division-1', registrarParticipaciones: true, registrarGoleo: true, usarPenalesEnEmpates: false, liga: { id: 'league-1', userId: 'owner-1', multiplesCanchas: false } } },
+    })
+    .mockResolvedValue({ ...context, version: 4, estado: 'FINALIZADO' })
+  return tx
+}
+
+function withGoleoDisabled(tx: any) {
+  tx.partido.findUnique
+    .mockReset()
+    .mockResolvedValueOnce({
+      ...context,
+      jornada: { division: { ...context.jornada.division, registrarGoleo: false } },
     })
     .mockResolvedValue({ ...context, version: 4, estado: 'FINALIZADO' })
   return tx
@@ -504,5 +515,101 @@ describe('writeResultInTransaction', () => {
     await expect(writeResultInTransaction(suspended as any, 'match-1', {
       expectedVersion: 3, estado: 'SUSPENDIDO', golesLocal: 2, golesVisitante: 1, allocations: [], notas: 'Debe conservarse',
     })).rejects.toThrow('Las notas y los participantes solo pueden guardarse al finalizar el partido')
+  })
+})
+
+// El interruptor de la división: apagado, el servidor deja de aceptar atribuciones nuevas pero no
+// puede perder las guardadas — el editor está deshabilitado y nadie podría recapturarlas.
+describe('tabla de goleo desactivada', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('conserva las anotaciones con jugador y solo rehace los goles sin dueño', async () => {
+    const tx = withGoleoDisabled(createTx())
+    tx.anotacionPartido.findMany.mockResolvedValue([{ ladoMarcador: 'LOCAL', cantidad: 2 }])
+
+    await writeResultInTransaction(tx as any, 'match-1', {
+      expectedVersion: 3, estado: 'FINALIZADO', golesLocal: 3, golesVisitante: 1, allocations: [],
+    })
+
+    // Solo se borran las filas sin jugador: las atribuidas sobreviven.
+    expect(tx.anotacionPartido.deleteMany).toHaveBeenCalledWith({ where: { partidoId: 'match-1', jugadorIdSnapshot: null } })
+    expect(tx.anotacionPartido.deleteMany).not.toHaveBeenCalledWith({ where: { partidoId: 'match-1' } })
+    // 3 - 2 atribuidos = 1 sin dueño del lado local, y el gol del visitante.
+    expect(tx.anotacionPartido.createMany).toHaveBeenCalledWith({ data: [
+      expect.objectContaining({ ladoMarcador: 'LOCAL', jugadorId: null, cantidad: 1 }),
+      expect.objectContaining({ ladoMarcador: 'VISITANTE', jugadorId: null, cantidad: 1 }),
+    ] })
+  })
+
+  it('ignora las atribuciones que mande el cliente en vez de guardarlas', async () => {
+    const tx = withGoleoDisabled(createTx())
+    tx.anotacionPartido.findMany.mockResolvedValue([])
+
+    await writeResultInTransaction(tx as any, 'match-1', {
+      expectedVersion: 3, estado: 'FINALIZADO', golesLocal: 2, golesVisitante: 0,
+      allocations: [{ ladoMarcador: 'LOCAL', jugadorId: 'player-1', cantidad: 2 }],
+    })
+
+    const filas = tx.anotacionPartido.createMany.mock.calls[0][0].data
+    expect(filas.every((fila: any) => fila.jugadorId === null)).toBe(true)
+    expect(filas).toEqual([expect.objectContaining({ ladoMarcador: 'LOCAL', cantidad: 2 })])
+  })
+
+  // Con el goleo apagado no hay lista de goleadores en pantalla, así que exigir que el goleador
+  // esté en la alineación dejaría un error imposible de resolver.
+  it('no valida las atribuciones que ignora', async () => {
+    const tx = withGoleoDisabled(createTx())
+    tx.anotacionPartido.findMany.mockResolvedValue([])
+
+    await expect(writeResultInTransaction(tx as any, 'match-1', {
+      expectedVersion: 3, estado: 'FINALIZADO', golesLocal: 1, golesVisitante: 0,
+      allocations: [{ ladoMarcador: 'LOCAL', jugadorId: 'ajeno', cantidad: 5 }],
+    })).resolves.toBeDefined()
+  })
+
+  it('con el goleo encendido reescribe todo, como siempre', async () => {
+    const tx = createTx()
+    await writeResultInTransaction(tx as any, 'match-1', {
+      expectedVersion: 3, estado: 'FINALIZADO', golesLocal: 2, golesVisitante: 0,
+      allocations: [{ ladoMarcador: 'LOCAL', jugadorId: 'player-1', cantidad: 2 }],
+    })
+
+    expect(tx.anotacionPartido.deleteMany).toHaveBeenCalledWith({ where: { partidoId: 'match-1' } })
+    expect(tx.anotacionPartido.createMany).toHaveBeenCalledWith({ data: [
+      expect.objectContaining({ jugadorId: 'player-1', cantidad: 2 }),
+    ] })
+  })
+})
+
+describe('divisiones de solo lectura', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  function withEstado(tx: any, codigo: string) {
+    tx.partido.findUnique
+      .mockReset()
+      .mockResolvedValueOnce({
+        ...context,
+        jornada: { division: { ...context.jornada.division, estadoLiga: { codigo } } },
+      })
+      .mockResolvedValue({ ...context, version: 4, estado: 'FINALIZADO' })
+    return tx
+  }
+
+  // Un solo punto cubre la app y el enlace del árbitro: los dos escriben por aquí.
+  it.each(['FINALIZADA', 'CANCELADA'])('rechaza guardar un resultado en %s', async (codigo) => {
+    const tx = withEstado(createTx(), codigo)
+
+    await expect(writeResultInTransaction(tx as any, 'match-1', {
+      expectedVersion: 3, estado: 'FINALIZADO', golesLocal: 1, golesVisitante: 0, allocations: [],
+    })).rejects.toMatchObject({ statusCode: 422 })
+    expect(tx.partido.updateMany).not.toHaveBeenCalled()
+  })
+
+  it('deja guardar en En Curso', async () => {
+    const tx = withEstado(createTx(), 'EN_CURSO')
+
+    await expect(writeResultInTransaction(tx as any, 'match-1', {
+      expectedVersion: 3, estado: 'FINALIZADO', golesLocal: 1, golesVisitante: 0, allocations: [],
+    })).resolves.toBeDefined()
   })
 })

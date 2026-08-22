@@ -11,6 +11,7 @@ export interface JornadaDeleteContext {
   divisionId: string;
   ligaId: string;
   ligaUserId: string;
+  estadoLiga: { codigo: string };
   latestJornadaId: string | null;
   hasFinalizados: boolean;
   playoffPartidos: Array<{

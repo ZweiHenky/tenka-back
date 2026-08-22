@@ -11,7 +11,6 @@ const base: DivisionScheduleSource = {
   multiplesCanchas: true,
   diasPartido: 'lun, jue',
   horarioPartido: '18:00 - 20:00',
-  canchaUnicaId: null,
   canchaHorarios: [],
 };
 
@@ -84,11 +83,6 @@ describe('resolveDivisionSchedule', () => {
     const resolved = resolveDivisionSchedule(base, new Set(['c1', 'c2']));
     expect([...resolved.keys()].sort()).toEqual(['c1', 'c2']);
     expect(resolved.get('c1')!.ranges).toEqual([{ start: 1080, end: 1200 }]);
-  });
-
-  it('narrows the legacy fallback to canchaUnicaId', () => {
-    const resolved = resolveDivisionSchedule({ ...base, canchaUnicaId: 'c2' }, new Set(['c1', 'c2']));
-    expect([...resolved.keys()]).toEqual(['c2']);
   });
 });
 

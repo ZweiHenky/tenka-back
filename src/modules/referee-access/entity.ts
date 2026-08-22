@@ -11,6 +11,7 @@ export interface PartidoRefereeAccessEntity {
 interface RefereePartidoDivisionContext {
   nombre: string
   registrarParticipaciones: boolean
+  registrarGoleo: boolean
   usarPenalesEnEmpates: boolean
   liga: { nombre: string; multiplesCanchas: boolean }
   jugadores: Array<{ equipoId: string; dorsal: number; jugador: { id: string; nombre: string; foto: string | null } }>

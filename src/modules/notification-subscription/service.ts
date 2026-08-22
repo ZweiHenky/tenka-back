@@ -21,7 +21,7 @@ export const notificationSubscriptionService = {
         return await prisma.$transaction(async (tx) => {
           if (divisionIds.length > 0) {
             const publicDivisions = await tx.division.findMany({
-              where: { id: { in: divisionIds }, estadoLiga: { nombre: { not: 'Borrador' } } },
+              where: { id: { in: divisionIds }, estadoLiga: { codigo: { not: 'BORRADOR' } } },
               select: { id: true },
             });
             if (publicDivisions.length !== divisionIds.length) throw new NotFoundError('Division');
@@ -65,7 +65,7 @@ export const notificationSubscriptionService = {
   async subscribe(data: SubscriptionInput) {
     return prisma.$transaction(async (tx) => {
       const division = await tx.division.findFirst({
-        where: { id: data.divisionId, estadoLiga: { nombre: { not: 'Borrador' } } },
+        where: { id: data.divisionId, estadoLiga: { codigo: { not: 'BORRADOR' } } },
         select: { id: true },
       });
       if (!division) throw new NotFoundError('Division');

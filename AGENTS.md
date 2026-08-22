@@ -92,12 +92,19 @@ Una división define **días y horario por cada cancha** en la que juega. `durac
 |------|-----------|
 | `multiplesCanchas = false` | Clave `null` con los escalares de `Division`. Las filas se ignoran. |
 | Multi-cancha **con** filas | Una entrada por cancha configurada **y activa**. Sin entrada = la división no juega ahí. |
-| Multi-cancha **sin** filas | Fallback legacy: todas las canchas activas heredan los escalares, restringido por `canchaUnicaId`. Mantiene vivas a las divisiones anteriores a la migración. |
+| Multi-cancha **sin** filas | Fallback legacy: **todas** las canchas activas heredan los escalares. Mantiene vivas a las divisiones anteriores a la migración. |
 
 **Reglas al tocar esto:**
 - `Division.diasPartido`/`horarioPartido` son un **resumen denormalizado** (unión de las filas) que se escribe con `summarizeDivisionSchedule` para la vista pública y los clientes viejos. Es un **superconjunto**: nunca validar contra ellos, siempre pasar por `resolveDivisionSchedule`.
 - Escribir horarios (`horariosPorCancha` en create/update) va **dentro de `acquireLeagueScheduleLock` y una transacción**: escalares, filas y resumen deben aterrizar juntos, y la generación relee bajo el mismo lock.
-- Cuando llegan filas se fuerza `canchaUnicaId: null` — las filas lo sustituyen. Un arreglo vacío borra las filas y revierte a los escalares.
+- Un arreglo vacío de `horariosPorCancha` borra las filas y revierte a los escalares.
+- **`canchaUnicaId` ya no existe** (migración `20260822100000_drop_division_cancha_unica`). Su único
+  efecto vivo era acotar ese fallback legacy a una sola cancha. La migración convierte ese estado
+  implícito en una fila explícita antes de borrar la columna, así que una división con cancha fija
+  sigue jugando donde jugaba, ahora por el camino normal. Con eso desaparecieron `fixedCourtId` en
+  `validateLeagueCourtCapacity`, la validación de cancha fija en `division.update` y el filtro de
+  canchas candidatas en `jornadaCreation`. Lo que retiene una cancha para que se desactive en vez de
+  borrarse es ahora **su fila de horario**, no la columna.
 - Cero canchas con días **y** rangos usables es un **error de configuración**, no un resultado vacío: `buildOptions` lanza `'La división no tiene canchas con horario configurado'`.
 - `parseConfiguredDays` vive en el mismo módulo y es el **único** parser de días del backend (`jornadaCreation` lo re-exporta por compatibilidad; `parseDaysPartido` delega en él).
 - Borrar una cancha con horarios la **desactiva** en vez de borrarla; apagar `multiplesCanchas` borra todas las filas de la liga.
@@ -122,29 +129,107 @@ Las canchas (`LigaCancha`) son de la **liga**, y todas sus divisiones las compar
 - **El servidor no asigna canchas, solo valida.** La `canchaId` de cada slot la manda el cliente; aquí no hay planificador. (Existió un `disponibilidad-cancha/planner.ts` sin llamadores y se eliminó.)
 - Una división con `duracionPartido` nulo hace su partido inmensurable. **No inventes una duración por defecto** — enmascararía choques reales. El chequeo se difiere hasta saber si ese partido comparte cancha y ventana con lo que se está programando, y el error nombra la **división** culpable, para que una división mal configurada no bloquee a las otras 9 de la liga.
 
-## Division States (Draft / Publish)
+## Estados de división (`EstadoLiga.codigo`)
 
-Las divisiones pasan por un ciclo de vida con 4 estados (`EstadoLiga`):
+Cinco estados. **Toda regla se decide con `codigo`, nunca con `nombre`**: el catálogo es CRUD de
+administrador, y comparar el nombre hacía que renombrar la fila "Borrador" publicara de golpe todos
+los borradores y rompiera la creación de divisiones. Es el mismo tratamiento que `TipoCompetencia`.
+El nombre es la etiqueta que se muestra y debe poder editarse sin consecuencias.
 
-| Estado | Descripción |
-|--------|-------------|
-| **Borrador** | No visible al público. Solo el dueño puede verla/editarla. |
-| **En Curso** | Publicada. Visible para todos, se pueden crear jornadas y partidos. |
-| **Terminada** | Temporada finalizada. Solo lectura. |
-| **Suspendida** | Suspendida. No se pueden crear más partidos. |
+| `codigo` | Nombre sembrado | Público | Escribe |
+|---|---|---|---|
+| `BORRADOR` | Borrador | No | Sí |
+| `ABIERTA` | Abierta | Sí | Sí |
+| `EN_CURSO` | En Curso | Sí | Sí |
+| `FINALIZADA` | Finalizada | Sí | **No** |
+| `CANCELADA` | Cancelada | Sí | **No** |
 
-**Comportamiento en el código:**
-- `division/service.ts:69` — Si no se envía `estadoLigaId` al crear, se auto-asigna **Borrador** (busca `estadoLiga.findFirstOrThrow` por nombre "Borrador")
-- `division/validator.ts:13` — `estadoLigaId` es `z.string().optional()` al crear
-- `division/service.ts:76` — `update()` permite cambiar `estadoLigaId` a cualquier valor
-- `division/service.ts:127` — `resetDivision()` elimina jornadas, rondas playoff y tabla de posiciones (vuelve a estado inicial)
+**Solo lectura** — [`utils/divisionState.ts`](src/utils/divisionState.ts), un único lugar decide qué
+códigos escriben. Antes convivían dos criterios: agregar *un* partido exigía "En Curso", pero generar
+la jornada entera no miraba el estado, así que en una división finalizada podías crear una jornada
+completa y no añadirle un partido. `assertDivisionWritable` se llama en `jornada.generateNext`,
+`jornada.delete`, `partido/jornadaCreation`, `resultWriter` (un solo punto cubre la app **y** el
+enlace del árbitro), `rondaPlayoff.generate/delete/deleteByDivision` y `division.resetDivision`.
+Cada uno lee el estado del `select` que ya hacía; ninguno añade una consulta.
 
-**Filtro de visibilidad pública** (`liga/repository.ts`):
-- `DIVISIONES_INCLUDE_PUBLIC` (línea 47): filtra `where: { estadoLiga: { nombre: { not: "Borrador" } } }`
-- `findAll()` (línea 83): solo ligas que tienen al menos una división no-Borrador
-- `findAllPaginated()` (línea 247): igual, con filtro compuesto (search, categoriaId, tipoId, estadoLigaId)
-- `findById()` (línea 91): usa `DIVISIONES_INCLUDE` (sin filtro público)
-- `findByUser()` (línea 235): usa `DIVISIONES_INCLUDE` (sin filtro) — el dueño ve todo
+**Excepción deliberada: `campeon.assign` y `remove` no se bloquean.** Coronar es el acto de cierre;
+bloquearlo en Finalizada haría imposible cerrar una división después de marcarla como tal.
+
+Un código desconocido **deja pasar**: bloquear por no reconocerlo dejaría inservible una división
+cuyo catálogo alguien amplió. Igual criterio que `formatFromCodigo`.
+
+**Al crear**, sin `estadoLigaId` se auto-asigna la fila con `codigo: 'BORRADOR'`. `update()` permite
+cualquier transición: no hay máquina de estados.
+
+**Visibilidad pública**: `PUBLIC_DIVISION_WHERE` en [`liga/repository.ts`](src/modules/liga/repository.ts)
+es `{ estadoLiga: { codigo: { not: 'BORRADOR' } } }`, y **todos** sus consumidores la reusan — cinco
+sitios re-inlineaban el literal, y esa duplicación es lo que dejó que el criterio se dispersara.
+Misma regla en `utils/divisionVisibility.ts` y `notification-subscription`.
+
+## Tabla de goleo por división (`registrarGoleo`)
+
+Interruptor de la división, **encendido por defecto**: el goleo existió siempre y apagarlo por
+omisión se lo quitaría a quien ya lo usa. Se prende y apaga desde el menú de opciones, no en el
+formulario de alta — igual que `registrarParticipaciones`.
+
+Ojo con la confusión: `registrarParticipaciones` es la **alineación**. Lo único que le hacía al
+goleo era acotar la lista de goleadores a quienes estuvieran en ella (`limitToParticipantes`); sin
+él se anotan goleadores igual, eligiendo del plantel de la división.
+
+**Apagarlo congela, no borra** — `partido/resultWriter.ts`:
+
+- `const allocations = goleoActivo ? input.allocations : []`. Apagado, el servidor no valida ni
+  escribe atribuciones nuevas, venga de donde venga la petición.
+- Al guardar, **las filas con jugador no se tocan**; solo se rehacen los goles sin dueño
+  (`jugadorIdSnapshot: null`) para que la suma siga cuadrando con el marcador. La variante ingenua
+  —borrar todo y reescribir— perdería el historial, porque el editor está deshabilitado y nadie
+  podría recapturarlo.
+
+**No entra en `needsLock`.** Ese lock existe para lo que cambia lo que valida la generación de
+jornadas: horarios, participaciones y penales. El goleo no toca la programación.
+
+`campeon.assign` rechaza un `jugadorId` con el goleo apagado: sin tabla en ningún lado, el premio no
+tendría dónde verse.
+
+Lo consume también `referee-access` (`RefereePartidoDivisionContext`), para que la captura por token
+esconda su editor de goleadores igual que la app.
+
+## Campeón de división (`DivisionCampeon`)
+
+Cierra una división: **equipo campeón** y, opcionalmente, **campeón de goleo**. Módulo `campeon/`,
+montado en `/api/campeones`. No hay subcampeón ni tercer lugar, y no existe premio a nivel liga.
+
+Una **sola fila por división** (`divisionId @unique`), así que reasignar es un `upsert` y no pueden
+convivir dos campeones. Se direcciona por `divisionId`, no por `id`: el cliente nunca necesita
+conocerlo y el `PUT` sale idempotente sin recuperación de escritura ambigua.
+
+**Reglas del service** (`campeon/service.ts`):
+
+- **Gate**: la ronda de `orden` máximo debe existir, tener partidos y todos `FINALIZADO`. Es la
+  final; el `nombre` de la ronda no sirve para identificarla porque la API deja editarlo.
+- El equipo debe estar en `DivisionEquipo` de esa división.
+- El goleador se valida contra `goleadoresService.findByDivision`, **no** contra `DivisionJugador`:
+  de un tirón confirma que tiene goles ahí y devuelve el `jugadorGoles` que se guarda. Una división
+  sin tabla de goleo simplemente no lleva goleador.
+- **Los snapshots (`equipoNombre`, `jugadorNombre`, `jugadorGoles`) los escribe el servidor.** El
+  cliente manda solo ids: un nombre o un conteo suyos serían falsificables. Y `equipoId`/`jugadorId`
+  son `SetNull`, así que sin snapshot el palmarés se borraría al dar de baja al equipo.
+
+**El título se va con el cuadro.** Lo borran `rondaPlayoff.delete`, `rondaPlayoff.deleteByDivision`
+y `division.resetDivision`. Sin eso quedaría un campeón declarado sobre una final que ya no existe,
+y la app —que solo ofrece asignarlo con el cuadro completo— no daría forma de quitarlo.
+
+**Exposición**: no está en las proyecciones de `liga/repository.ts`; el cliente lo pide aparte, como
+`premio`, `tabla-posicion` y `goleadores`. La única lectura existente que lo incluye es
+`divisionEquipo.findByEquipo`, y solo los ids, para el palmarés de la ficha pública del equipo.
+
+`Premio` es otra cosa: la bolsa por posición (`posicion`, `titulo`, `monto`), sin relación a equipos
+ni jugadores. No se mezclan.
+
+**El módulo `premio` no tiene cliente todavía.** Está completo en el servidor —entity, service,
+repository, validator, rutas en `/api/premios` y tests— y **cero** referencias en el frontend. No es
+código muerto por accidente: se dejó a propósito, esperando su pantalla. Si buscas dónde se muestran
+los premios, la respuesta es que aún no se muestran en ningún lado.
 
 ## Push Notifications
 
@@ -189,10 +274,11 @@ src/
     categoria/           # catálogo de categorías
     cleanup/             # lógica de limpieza de datos obsoletos
     disponibilidad-cancha/  # lectura de ocupación de canchas por liga (derivada de Partido)
+    campeon/             # campeón de división (equipo) y campeón de goleo
     division/            # divisiones + estados + reset
     division-equipo/     # pivot division↔equipo
     equipo/              # equipos + código de invitación
-    estado-liga/         # catálogo (Borrador, En Curso, Terminada, Suspendida)
+    estado-liga/         # catálogo de estados con `codigo` estable
     goleadores/          # tabla de goleadores por división
     jornada/             # generación de jornadas + notificación
     jugador/             # jugadores + perfil "mi perfil" (/me)
@@ -201,7 +287,7 @@ src/
     notification/        # envío de push OneSignal
     notification-subscription/  # subscribe/unsubscribe por división
     partido/             # partidos individuales
-    premio/              # premios
+    premio/              # bolsa de premios por posición — completo, **sin cliente todavía**
     referee-access/      # acceso árbitro por token (QR) a partido/resultado
     ronda-playoff/       # rondas de playoff
     tabla-posicion/      # tabla de posiciones
@@ -246,7 +332,9 @@ PrismaClient singleton in `src/config/database.ts` (shared with Better Auth).
 Error
 └── AppError(statusCode, message)
     ├── NotFoundError(404)       — "{resource} no encontrado"
-    ├── ValidationError(400)     — mensaje personalizado
+    ├── ValidationError(422)     — mensaje personalizado
+    ├── BadRequestError(400)     — mensaje personalizado
+    ├── ConflictError(409)       — mensaje personalizado
     ├── UnauthorizedError(401)   — "No autorizado"
     └── ForbiddenError(403)      — "No autorizado" (CORS/roles)
 ```
@@ -284,7 +372,7 @@ interface ApiResponse<T> { success: boolean; data?: T; message?: string; error?:
 
 **`rateLimits`** (`src/middlewares/rateLimits.ts`):
 - `createRateLimiter({ limit, windowMs })` con `express-rate-limit`
-- Exporta: `globalApiLimiter` (montado en `/api`), `authLimiter`, `otpSendLimiter`, `otpVerifyLimiter`, `subscriptionLimiter`, `uploadLimiter`, `playerPhoneLookupLimiter`, `refereeReadLimiter`, `refereeWriteLimiter`
+- Exporta: `globalApiLimiter` (montado en `/api`), `authLimiter`, `otpSendLimiter`, `otpVerifyLimiter`, `subscriptionLimiter`, `uploadLimiter`, `playerPhoneLookupLimiter`, `refereeReadLimiter`, `refereeWriteLimiter`, `jornadaGenerationLimiter`, `playoffGenerationLimiter`, `destructiveOperationLimiter`
 - Límites configurables vía env (`GLOBAL_RATE_LIMIT`, `AUTH_RATE_LIMIT`, `OTP_SEND_RATE_LIMIT`, `OTP_VERIFY_RATE_LIMIT`, `SUBSCRIPTION_RATE_LIMIT`, `UPLOAD_RATE_LIMIT`, `PLAYER_PHONE_LOOKUP_RATE_LIMIT`, `REFEREE_READ_RATE_LIMIT`, `EXPENSIVE_OPERATION_RATE_LIMIT`)
 
 ## Workers
@@ -325,8 +413,8 @@ interface ApiResponse<T> { success: boolean; data?: T; message?: string; error?:
 |-------|-----------|
 | `categorias` | LIBRE, VARONIL, FEMENIL, INFANTIL, INFANTIL FEMENIL, JUVENIL, SUB-15, SUB-15 FEMENIL, SUB-18, SUB-18 FEMENIL, SUB-20, SUB-20 FEMENIL, VETERANOS, VETERANOS FEMENIL, MIXTO |
 | `tipos` | FUTBOL 7, RAPIDO, FUTBOL 9, SOCCER, SALA, FUTBOL 5 |
-| `estados_liga` | Borrador, Abierta, En Curso, Finalizada, Cancelada |
-| `tipos_competencia` | Liga y Eliminatorias |
+| `estados_liga` | Borrador, Abierta, En Curso, Finalizada, Cancelada — cada uno con su `codigo` |
+| `tipos_competencia` | Liga y Eliminatorias, Eliminatoria |
 
 **Demo data** (creada con `upsert` para ser idempotente):
 | Entidad | ID fijo | Detalle |
@@ -424,7 +512,7 @@ Todas se validan en `src/config/env.ts` con zod. `APP_ENV` debe ser `local` en d
 | `UPLOAD_RATE_LIMIT` | 30 | uploadLimiter (15 min) |
 | `PLAYER_PHONE_LOOKUP_RATE_LIMIT` | 30 | playerPhoneLookupLimiter (10 min) |
 | `REFEREE_READ_RATE_LIMIT` | 40 | refereeReadLimiter (15 min) |
-| `EXPENSIVE_OPERATION_RATE_LIMIT` | 20 | expensiveOperationLimiter (60 min) |
+| `EXPENSIVE_OPERATION_RATE_LIMIT` | 20 | `jornadaGenerationLimiter`, `playoffGenerationLimiter` y `destructiveOperationLimiter` (60 min) |
 
 **HTTP / CORS**
 | Var | Default | Notes |

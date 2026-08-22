@@ -50,7 +50,7 @@ describe('rondaPlayoffRepository public reads', () => {
     expect(mocks.divisionFindFirst).toHaveBeenCalledWith({
       where: {
         id: 'division-1',
-        estadoLiga: { nombre: { not: 'Borrador' } },
+        estadoLiga: { codigo: { not: 'BORRADOR' } },
       },
       select: {
         rondasPlayoff: {

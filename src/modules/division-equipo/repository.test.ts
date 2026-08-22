@@ -30,9 +30,9 @@ describe('divisionEquipoRepository.findByDivision', () => {
   });
 
   it.each([
-    [undefined, { estadoLiga: { nombre: { not: 'Borrador' } } }, false, false],
+    [undefined, { estadoLiga: { codigo: { not: 'BORRADOR' } } }, false, false],
     [owner, { OR: [
-      { estadoLiga: { nombre: { not: 'Borrador' } } },
+      { estadoLiga: { codigo: { not: 'BORRADOR' } } },
       { liga: { userId: owner.id } },
     ] }, true, true],
     [admin, {}, true, false],
@@ -92,7 +92,7 @@ describe('divisionEquipoRepository saldo boundaries', () => {
 
     expect(mocks.divisionEquipoFindMany).toHaveBeenCalledWith({
       where: { equipoId: 'equipo-1', division: { OR: [
-        { estadoLiga: { nombre: { not: 'Borrador' } } },
+        { estadoLiga: { codigo: { not: 'BORRADOR' } } },
         { liga: { userId: owner.id } },
       ] } },
       select: {
@@ -102,6 +102,9 @@ describe('divisionEquipoRepository saldo boundaries', () => {
           liga: { select: { id: true, nombre: true, logo: true } },
           categoria: { select: { id: true, nombre: true } },
           estadoLiga: { select: { id: true, nombre: true } },
+          // Solo los ids: el palmarés de la ficha del equipo compara `equipoId`, no necesita
+          // los snapshots ni ensanchar esta proyección pública.
+          campeon: { select: { equipoId: true, jugadorId: true } },
         } },
       },
     });

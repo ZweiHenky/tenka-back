@@ -18,9 +18,9 @@ describe('tablaPosicionRepository public reads', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it.each([
-    [undefined, { estadoLiga: { nombre: { not: 'Borrador' } } }],
+    [undefined, { estadoLiga: { codigo: { not: 'BORRADOR' } } }],
     [owner, { OR: [
-      { estadoLiga: { nombre: { not: 'Borrador' } } },
+      { estadoLiga: { codigo: { not: 'BORRADOR' } } },
       { liga: { userId: owner.id } },
     ] }],
     [admin, {}],
@@ -55,9 +55,9 @@ describe('tablaPosicionRepository public reads', () => {
   });
 
   it.each([
-    [undefined, { estadoLiga: { nombre: { not: 'Borrador' } } }],
+    [undefined, { estadoLiga: { codigo: { not: 'BORRADOR' } } }],
     [owner, { OR: [
-      { estadoLiga: { nombre: { not: 'Borrador' } } },
+      { estadoLiga: { codigo: { not: 'BORRADOR' } } },
       { liga: { userId: owner.id } },
     ] }],
     [admin, {}],
