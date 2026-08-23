@@ -152,8 +152,32 @@ completa y no añadirle un partido. `assertDivisionWritable` se llama en `jornad
 enlace del árbitro), `rondaPlayoff.generate/delete/deleteByDivision` y `division.resetDivision`.
 Cada uno lee el estado del `select` que ya hacía; ninguno añade una consulta.
 
+**`division.resetDivision` tampoco se bloquea**, y además **devuelve la división a `EN_CURSO`** si
+estaba en un estado de solo lectura. Es la acción que se hace sobre una división cerrada para
+reutilizarla —la división se auto-finaliza al cerrarse la final—, y sin reabrirla quedaría vacía
+pero todavía bloqueada, sin poder generar siquiera el cuadro nuevo. Un borrador se queda en borrador.
+
 **Excepción deliberada: `campeon.assign` y `remove` no se bloquean.** Coronar es el acto de cierre;
-bloquearlo en Finalizada haría imposible cerrar una división después de marcarla como tal.
+bloquearlo en Finalizada haría imposible cerrar una división después de marcarla como tal. Y con el
+cierre automático de abajo eso dejó de ser hipotético: para cuando toca coronar, la división **ya
+está** finalizada.
+
+**Cierre automático al terminar el cuadro.** `resultWriter` finaliza la división sola cuando el
+resultado que se guarda cierra la última ronda (`finalizarDivisionSiTerminoElCuadro`, misma
+transacción, justo después de `syncAdvancement`). Va en el servidor porque la final también puede
+cerrarla un árbitro desde su enlace por token, y los dos caminos escriben por ahí.
+
+- **Desde `BORRADOR` no se finaliza**: `FINALIZADA` es pública y un cuadro jugado en borrador es una
+  prueba, no un torneo que se publica solo.
+- No hay guarda contra "ya finalizada": esos estados son de solo lectura, así que el gate del
+  principio rechaza la escritura y no se llega. Es la razón de que **corregir la final exija reabrir
+  la división** — de ahí la acción "Reabrir división" en la app.
+- Si falta la fila `FINALIZADA` del catálogo se omite en silencio: un hueco ahí no puede tumbar la
+  captura de un resultado.
+
+**`isCuadroCompleto`** ([`utils/bracketCompletion.ts`](src/utils/bracketCompletion.ts)) es la única
+definición de "el cuadro terminó" —última ronda por `orden`, con partidos, todos `FINALIZADO`— y la
+comparten el gate del campeón y el cierre automático.
 
 Un código desconocido **deja pasar**: bloquear por no reconocerlo dejaría inservible una división
 cuyo catálogo alguien amplió. Igual criterio que `formatFromCodigo`.
@@ -215,9 +239,44 @@ conocerlo y el `PUT` sale idempotente sin recuperación de escritura ambigua.
   cliente manda solo ids: un nombre o un conteo suyos serían falsificables. Y `equipoId`/`jugadorId`
   son `SetNull`, así que sin snapshot el palmarés se borraría al dar de baja al equipo.
 
-**El título se va con el cuadro.** Lo borran `rondaPlayoff.delete`, `rondaPlayoff.deleteByDivision`
-y `division.resetDivision`. Sin eso quedaría un campeón declarado sobre una final que ya no existe,
-y la app —que solo ofrece asignarlo con el cuadro completo— no daría forma de quitarlo.
+**El palmarés es historia: una división acumula N títulos**, uno por temporada. `archivadoEn`
+distingue el vigente (nulo) de los anteriores, y un **índice único parcial** por SQL crudo
+—`ON ("divisionId") WHERE "archivadoEn" IS NULL`— garantiza como mucho un vigente por división.
+Prisma no sabe declararlo, así que `assign` **no puede ser un `upsert`**: `saveVigente` actualiza el
+vigente o crea, y el índice es el respaldo contra dos creaciones a la vez.
+
+| Acción | Qué le hace al título |
+|---|---|
+| `rondaPlayoff.generate` | **Archiva el vigente.** Un cuadro nuevo es una temporada nueva, y es el único momento inequívoco. |
+| `rondaPlayoff.delete` / `deleteByDivision` | **Nada.** Sigue vigente para que el dueño lo corrija con "Quitar campeón"; archivarlo ahí lo volvería irreversible. |
+| `division.resetDivision` | **Archiva el vigente.** Reiniciar es la forma normal de arrancar la temporada siguiente: borrarlo destruiría al campeón de cada temporada. La marcha atrás de coronar mal es "Quitar campeón" **antes** de reiniciar. |
+| `division.delete` | Nada explícito: `SetNull` deja los títulos huérfanos. |
+
+**El palmarés sobrevive a la división.** `divisionId` es nullable con `SetNull`, y la fila guarda
+`divisionNombre`, `ligaId`, `ligaNombre`, `ligaLogo` y **`divisionEstadoCodigo`** como snapshots que
+escribe el servidor al coronar. Ese último resuelve la visibilidad de un huérfano, que ya no tiene
+división contra la cual comprobarla:
+
+- **División viva** → manda su estado de ahora (`visibleDivisionWhere`), como siempre.
+- **División borrada** → manda el snapshot: se ve si `divisionEstadoCodigo` no es `BORRADOR`.
+
+El estado va **por título y no por división** a propósito: una división puede haber coronado
+campeones legítimos estando En Curso y terminar su vida en borrador. Con un solo dato de la división
+se habrían escondido todos.
+
+**Palmarés por equipo**: `GET /api/campeones/equipo/:equipoId` devuelve las divisiones que ganó un
+equipo —vigentes, archivadas y huérfanas—, ordenadas por `createdAt` descendente, con la regla de
+visibilidad de arriba. **No se puede derivar de `DivisionEquipo`**: ese pivote es la inscripción, y
+al sacar al equipo de la división desaparece, mientras que el título sobrevive.
+
+**Títulos anteriores de una división**: `GET /api/campeones/division/:divisionId/historial`, solo los
+archivados, más nuevos primero.
+
+**Palmarés de goleo de un jugador**: `GET /api/campeones/jugador/:jugadorId`. El campeón de goleo
+**vive en la misma fila** que el de equipo (`jugadorId`, `jugadorNombre`, `jugadorFoto`,
+`jugadorGoles`), así que hereda gratis los snapshots, el archivado y la supervivencia al borrado de
+la división: no hay historial aparte que mantener. El `where` de visibilidad lo comparten las
+lecturas de equipo y de jugador en `campeonVisibleWhere`, con un test que impide que se separen.
 
 **Exposición**: no está en las proyecciones de `liga/repository.ts`; el cliente lo pide aparte, como
 `premio`, `tabla-posicion` y `goleadores`. La única lectura existente que lo incluye es

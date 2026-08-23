@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   findVisibleByDivision: vi.fn(),
-  upsert: vi.fn(),
+  saveVigente: vi.fn(),
   deleteByDivision: vi.fn(),
   divisionFindUnique: vi.fn(),
   rondaFindFirst: vi.fn(),
@@ -25,15 +25,26 @@ import type { AuthenticatedUser } from '../../types/auth';
 
 const owner: AuthenticatedUser = { id: 'owner-1', email: 'owner@test.com', rol: 'LIGA' };
 
+/** Lo que `loadDivisionForWrite` lee: autorización más lo que se congela en el título. */
+function divisionBase(over: Record<string, unknown> = {}) {
+  return {
+    registrarGoleo: true,
+    nombre: 'Primera Fuerza',
+    estadoLiga: { codigo: 'FINALIZADA' },
+    liga: { id: 'liga-1', nombre: 'Liga Nocturna', logo: null, userId: owner.id },
+    ...over,
+  };
+}
+
 function cuadroTerminado() {
   mocks.rondaFindFirst.mockResolvedValue({ partidos: [{ estado: 'FINALIZADO' }, { estado: 'FINALIZADO' }] });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.divisionFindUnique.mockResolvedValue({ registrarGoleo: true, liga: { userId: owner.id } });
+  mocks.divisionFindUnique.mockResolvedValue(divisionBase());
   mocks.divisionEquipoFindUnique.mockResolvedValue({ equipo: { nombre: 'Cuauhtémoc', logo: 'logo.png' } });
-  mocks.upsert.mockImplementation(async (divisionId: string, data: unknown) => ({ id: 'campeon-1', divisionId, ...(data as object) }));
+  mocks.saveVigente.mockImplementation(async (divisionId: string, data: unknown) => ({ id: 'campeon-1', divisionId, ...(data as object) }));
   cuadroTerminado();
 });
 
@@ -60,14 +71,14 @@ describe('asignación', () => {
       statusCode: 422,
       message: 'Termina todos los partidos de la última ronda antes de asignar al campeón.',
     });
-    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.saveVigente).not.toHaveBeenCalled();
   });
 
   it('rechaza asignar cuando la división no tiene cuadro', async () => {
     mocks.rondaFindFirst.mockResolvedValue(null);
 
     await expect(campeonService.assign('division-1', { equipoId: 'equipo-1' }, owner)).rejects.toMatchObject({ statusCode: 422 });
-    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.saveVigente).not.toHaveBeenCalled();
   });
 
   it('rechaza un equipo que no está inscrito en la división', async () => {
@@ -77,7 +88,7 @@ describe('asignación', () => {
       statusCode: 422,
       message: 'El equipo no pertenece a esta división.',
     });
-    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.saveVigente).not.toHaveBeenCalled();
   });
 
   it('guarda el campeón sin goleador y no consulta la tabla de goleo', async () => {
@@ -101,7 +112,7 @@ describe('asignación', () => {
       statusCode: 422,
       message: 'Ese jugador no tiene goles registrados en la división.',
     });
-    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.saveVigente).not.toHaveBeenCalled();
   });
 
   // Los snapshots los escribe el servidor: un nombre o un conteo venidos del cliente serían
@@ -123,32 +134,32 @@ describe('asignación', () => {
     mocks.divisionEquipoFindUnique.mockResolvedValue({ equipo: { nombre: 'Halcones', logo: null } });
     await campeonService.assign('division-1', { equipoId: 'equipo-2' }, owner);
 
-    expect(mocks.upsert).toHaveBeenCalledTimes(2);
-    expect(mocks.upsert).toHaveBeenLastCalledWith('division-1', expect.objectContaining({ equipoId: 'equipo-2', equipoNombre: 'Halcones' }));
+    expect(mocks.saveVigente).toHaveBeenCalledTimes(2);
+    expect(mocks.saveVigente).toHaveBeenLastCalledWith('division-1', expect.objectContaining({ equipoId: 'equipo-2', equipoNombre: 'Halcones' }));
   });
 
   it('exige ser dueño de la liga', async () => {
-    mocks.divisionFindUnique.mockResolvedValue({ registrarGoleo: true, liga: { userId: 'otro-usuario' } });
+    mocks.divisionFindUnique.mockResolvedValue(divisionBase({ liga: { id: 'liga-1', nombre: 'Liga Nocturna', logo: null, userId: 'otro-usuario' } }));
 
     await expect(campeonService.assign('division-1', { equipoId: 'equipo-1' }, owner)).rejects.toMatchObject({ statusCode: 404 });
-    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.saveVigente).not.toHaveBeenCalled();
   });
 
   // Con la tabla de goleo apagada no se muestra en ningún lado, así que el premio no tendría
   // dónde verse.
   it('rechaza un goleador si la división tiene la tabla de goleo desactivada', async () => {
-    mocks.divisionFindUnique.mockResolvedValue({ registrarGoleo: false, liga: { userId: owner.id } });
+    mocks.divisionFindUnique.mockResolvedValue(divisionBase({ registrarGoleo: false }));
 
     await expect(campeonService.assign('division-1', { equipoId: 'equipo-1', jugadorId: 'jugador-1' }, owner)).rejects.toMatchObject({
       statusCode: 422,
       message: 'La división tiene la tabla de goleo desactivada.',
     });
     expect(mocks.goleadores).not.toHaveBeenCalled();
-    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.saveVigente).not.toHaveBeenCalled();
   });
 
   it('con el goleo desactivado el campeón de equipo se asigna igual', async () => {
-    mocks.divisionFindUnique.mockResolvedValue({ registrarGoleo: false, liga: { userId: owner.id } });
+    mocks.divisionFindUnique.mockResolvedValue(divisionBase({ registrarGoleo: false }));
 
     await expect(campeonService.assign('division-1', { equipoId: 'equipo-1' }, owner)).resolves.toMatchObject({ equipoId: 'equipo-1', jugadorId: null });
   });
@@ -161,7 +172,7 @@ describe('quitar el título', () => {
   });
 
   it('exige ser dueño de la liga', async () => {
-    mocks.divisionFindUnique.mockResolvedValue({ registrarGoleo: true, liga: { userId: 'otro-usuario' } });
+    mocks.divisionFindUnique.mockResolvedValue(divisionBase({ liga: { id: 'liga-1', nombre: 'Liga Nocturna', logo: null, userId: 'otro-usuario' } }));
     await expect(campeonService.remove('division-1', owner)).rejects.toMatchObject({ statusCode: 404 });
     expect(mocks.deleteByDivision).not.toHaveBeenCalled();
   });
@@ -171,14 +182,16 @@ describe('quitar el título', () => {
 // imposible cerrar una división después de marcarla como tal.
 describe('la división finalizada no bloquea al campeón', () => {
   it('permite asignarlo con la división de solo lectura', async () => {
-    mocks.divisionFindUnique.mockResolvedValue({ registrarGoleo: true, estadoLiga: { codigo: 'FINALIZADA' }, liga: { userId: owner.id } });
+    mocks.divisionFindUnique.mockResolvedValue(divisionBase());
 
     await expect(campeonService.assign('division-1', { equipoId: 'equipo-1' }, owner))
       .resolves.toMatchObject({ equipoId: 'equipo-1' });
   });
 
+  // El escenario real: el servidor la finalizó solo al cerrarse la final, y justo después
+  // hay que coronar. Si esto se bloqueara, cerrar un torneo sería imposible.
   it('permite quitarlo también', async () => {
-    mocks.divisionFindUnique.mockResolvedValue({ registrarGoleo: true, estadoLiga: { codigo: 'FINALIZADA' }, liga: { userId: owner.id } });
+    mocks.divisionFindUnique.mockResolvedValue(divisionBase());
 
     await campeonService.remove('division-1', owner);
     expect(mocks.deleteByDivision).toHaveBeenCalledWith('division-1');

@@ -1,5 +1,6 @@
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
-import { assertDivisionWritable } from '../../utils/divisionState';
+import { assertDivisionWritable, isDivisionWritable } from '../../utils/divisionState';
+import { campeonRepository } from '../campeon/repository';
 import { divisionRepository } from './repository';
 import type { DivisionEntity } from './entity';
 import { prisma } from '../../config/database';
@@ -261,15 +262,27 @@ export const divisionService = {
     signalBackgroundJob('tag-cleanup');
   },
 
+  /**
+   * Reiniciar **no pasa por el gate de solo lectura**, junto a asignar campeón. Es precisamente la
+   * acción que se hace sobre una división cerrada para reutilizarla: la división se auto-finaliza
+   * al cerrarse la final, y exigir reabrirla antes sería un rodeo sin motivo.
+   */
   async resetDivision(divisionId: string, actor: AuthenticatedUser): Promise<void> {
     const { estadoLiga } = await assertDivisionOwner(divisionId, actor);
-    assertDivisionWritable(estadoLiga);
 
     await prisma.$transaction(async (tx) => {
       await tx.jornada.deleteMany({ where: { divisionId } });
       await tx.rondaPlayoff.deleteMany({ where: { divisionId } });
       await tx.tablaPosicion.deleteMany({ where: { divisionId } });
-      await tx.divisionCampeon.deleteMany({ where: { divisionId } });
+      // Se archiva, no se borra: reiniciar es la forma normal de arrancar la temporada siguiente,
+      // y borrarlo destruiría al campeón de cada temporada junto con el trofeo del equipo.
+      await campeonRepository.archiveByDivision(tx, divisionId);
+      // Y la deja utilizable: sin esto quedaría vacía pero todavía bloqueada, sin poder generar
+      // siquiera el cuadro nuevo.
+      if (!isDivisionWritable(estadoLiga?.codigo)) {
+        const enCurso = await tx.estadoLiga.findFirst({ where: { codigo: 'EN_CURSO' }, select: { id: true } });
+        if (enCurso) await tx.division.update({ where: { id: divisionId }, data: { estadoLigaId: enCurso.id } });
+      }
     });
   },
 };

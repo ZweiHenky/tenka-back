@@ -353,7 +353,7 @@ model Division {
   notificationSubscriptions DivisionNotificationSubscription[]
   notificationOutbox        NotificationOutbox[]
   canchaHorarios            DivisionCanchaHorario[]
-  campeon                   DivisionCampeon?
+  campeones                 DivisionCampeon[]
 
   @@index([ligaId, createdAt])
   @@map("divisiones")
@@ -469,13 +469,28 @@ model Premio {
   @@map("premios")
 }
 
-/// Cierre de una division: quien la gano y, opcionalmente, quien fue su campeon de goleo.
-/// Una sola fila por division —`divisionId` es unico—, asi que reasignar es un upsert y no
-/// pueden existir dos campeones.
+/// Un titulo ganado: quien gano una division y, opcionalmente, quien fue su campeon de goleo.
+/// Una division acumula N filas, una por temporada. `archivadoEn` distingue la vigente de las
+/// anteriores, y un indice unico parcial garantiza como mucho una vigente por division.
 model DivisionCampeon {
-  id         String   @id @default(cuid())
-  divisionId String   @unique
-  division   Division @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  id String @id @default(cuid())
+
+  /// Nulo cuando la division se borro. Los snapshots mantienen el titulo legible: un palmares no
+  /// se evapora porque la liga limpie una division vieja.
+  divisionId     String?
+  division       Division? @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  divisionNombre String
+  ligaId         String?
+  ligaNombre     String
+  ligaLogo       String?
+
+  /// El estado de la division **cuando se corono a este campeon**, no el de ahora. Es lo que decide
+  /// si un titulo huerfano —de una division ya borrada— puede verse en publico: una division que
+  /// corono campeones estando En Curso y termino su vida en borrador conserva esos titulos.
+  divisionEstadoCodigo String
+
+  /// Nulo = campeon vigente de esa division. Con fecha = titulo de una temporada anterior.
+  archivadoEn DateTime?
 
   /// Los ids quedan nulos si el equipo o el jugador se borran despues. Los snapshots
   /// conservan el titulo: un palmares no debe evaporarse con la baja del equipo.
@@ -495,6 +510,7 @@ model DivisionCampeon {
 
   @@index([equipoId])
   @@index([jugadorId])
+  @@index([divisionId, archivadoEn])
   @@map("divisiones_campeones")
 }
 

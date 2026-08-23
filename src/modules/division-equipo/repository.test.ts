@@ -102,9 +102,9 @@ describe('divisionEquipoRepository saldo boundaries', () => {
           liga: { select: { id: true, nombre: true, logo: true } },
           categoria: { select: { id: true, nombre: true } },
           estadoLiga: { select: { id: true, nombre: true } },
-          // Solo los ids: el palmarés de la ficha del equipo compara `equipoId`, no necesita
-          // los snapshots ni ensanchar esta proyección pública.
-          campeon: { select: { equipoId: true, jugadorId: true } },
+          // Solo el id del equipo: el distintivo compara contra él, y ensanchar esta proyección
+          // pública expondría los snapshots del título sin motivo.
+          campeones: { select: { equipoId: true } },
         } },
       },
     });

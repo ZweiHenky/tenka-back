@@ -11,7 +11,9 @@ const mocks = vi.hoisted(() => ({
   jornadaDeleteMany: vi.fn(),
   rondaPlayoffDeleteMany: vi.fn(),
   tablaPosicionDeleteMany: vi.fn(),
-  campeonDeleteMany: vi.fn(),
+  campeonUpdateMany: vi.fn(),
+  estadoLigaFindFirst: vi.fn(),
+  divisionUpdate: vi.fn(),
   partidoCount: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
@@ -65,14 +67,15 @@ const createData = {
 const tx = {
   liga: { findFirst: mocks.ligaFindFirst, findUnique: mocks.ligaFindUnique },
   ligaCancha: { findFirst: mocks.ligaCanchaFindFirst, findMany: mocks.ligaCanchaFindMany },
-  division: { findFirst: mocks.divisionFindFirst, create: mocks.divisionCreate },
+  division: { findFirst: mocks.divisionFindFirst, create: mocks.divisionCreate, update: mocks.divisionUpdate },
   divisionCanchaHorario: { deleteMany: mocks.courtScheduleDeleteMany, upsert: mocks.courtScheduleUpsert },
   divisionNotificationSubscription: { findMany: mocks.subscriptionsFindMany },
   oneSignalTagCleanupJob: { upsert: mocks.cleanupUpsert },
   jornada: { deleteMany: mocks.jornadaDeleteMany },
   rondaPlayoff: { deleteMany: mocks.rondaPlayoffDeleteMany },
   tablaPosicion: { deleteMany: mocks.tablaPosicionDeleteMany },
-  divisionCampeon: { deleteMany: mocks.campeonDeleteMany },
+  divisionCampeon: { updateMany: mocks.campeonUpdateMany },
+  estadoLiga: { findFirst: mocks.estadoLigaFindFirst },
   partido: { count: mocks.partidoCount },
 };
 
@@ -331,9 +334,11 @@ describe('consultas privadas optimizadas de división', () => {
     expect(mocks.jornadaDeleteMany).toHaveBeenCalledWith({ where: { divisionId: 'division-1' } });
     expect(mocks.rondaPlayoffDeleteMany).toHaveBeenCalledOnce();
     expect(mocks.tablaPosicionDeleteMany).toHaveBeenCalledOnce();
-    // El campeón salió de una final que el reset acaba de borrar.
-    expect(mocks.campeonDeleteMany).toHaveBeenCalledOnce();
-    expect(mocks.campeonDeleteMany).toHaveBeenCalledWith({ where: { divisionId: 'division-1' } });
+    // Se archiva, no se borra: reiniciar es la forma normal de arrancar la temporada siguiente.
+    expect(mocks.campeonUpdateMany).toHaveBeenCalledWith({
+      where: { divisionId: 'division-1', archivadoEn: null },
+      data: { archivadoEn: expect.any(Date) },
+    });
   });
 
   it('propaga un fallo del reset y no ejecuta escrituras posteriores fuera de la transacción', async () => {
@@ -447,17 +452,33 @@ describe('divisiones de solo lectura', () => {
     mocks.transaction.mockImplementation(async (callback: any) => callback(tx));
   });
 
-  it.each(['FINALIZADA', 'CANCELADA'])('rechaza reiniciar una división en %s', async (codigo) => {
+  // Reiniciar es la excepción al modo solo lectura, junto a coronar: la división se auto-finaliza
+  // al cerrarse la final, y es justo ahí donde se reinicia para la temporada siguiente.
+  it.each(['FINALIZADA', 'CANCELADA'])('deja reiniciar una división en %s y la devuelve a En Curso', async (codigo) => {
     mocks.divisionFindFirst.mockResolvedValue({ id: 'division-1', estadoLiga: { codigo } });
+    mocks.estadoLigaFindFirst.mockResolvedValue({ id: 'en-curso-1' });
 
-    await expect(divisionService.resetDivision('division-1', owner)).rejects.toMatchObject({ statusCode: 422 });
-    expect(mocks.transaction).not.toHaveBeenCalled();
+    await divisionService.resetDivision('division-1', owner);
+
+    expect(mocks.transaction).toHaveBeenCalledOnce();
+    // Sin esto quedaría vacía pero todavía bloqueada, sin poder generar siquiera el cuadro nuevo.
+    expect(mocks.divisionUpdate).toHaveBeenCalledWith({ where: { id: 'division-1' }, data: { estadoLigaId: 'en-curso-1' } });
   });
 
-  it('deja reiniciar una división en curso', async () => {
+  it('reiniciar una división en curso no le cambia el estado', async () => {
     mocks.divisionFindFirst.mockResolvedValue({ id: 'division-1', estadoLiga: { codigo: 'EN_CURSO' } });
 
     await divisionService.resetDivision('division-1', owner);
+
     expect(mocks.transaction).toHaveBeenCalledOnce();
+    expect(mocks.divisionUpdate).not.toHaveBeenCalled();
+  });
+
+  it('reiniciar un borrador lo deja en borrador', async () => {
+    mocks.divisionFindFirst.mockResolvedValue({ id: 'division-1', estadoLiga: { codigo: 'BORRADOR' } });
+
+    await divisionService.resetDivision('division-1', owner);
+
+    expect(mocks.divisionUpdate).not.toHaveBeenCalled();
   });
 });

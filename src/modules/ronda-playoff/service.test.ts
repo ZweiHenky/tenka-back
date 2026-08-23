@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   partidoUpdate: vi.fn(),
   anotacionDeleteMany: vi.fn(),
   jornadaDeleteMany: vi.fn(),
-  campeonDeleteMany: vi.fn(),
+  campeonUpdateMany: vi.fn(),
   participacionDeleteMany: vi.fn(),
   executeRaw: vi.fn(),
 }));
@@ -95,7 +95,7 @@ describe('rondaPlayoffService batch writes', () => {
       update: mocks.partidoUpdate,
     },
     jornada: { deleteMany: mocks.jornadaDeleteMany },
-    divisionCampeon: { deleteMany: mocks.campeonDeleteMany },
+    divisionCampeon: { updateMany: mocks.campeonUpdateMany },
     anotacionPartido: { deleteMany: mocks.anotacionDeleteMany },
     participacionPartido: { deleteMany: mocks.participacionDeleteMany },
   };
@@ -115,7 +115,7 @@ describe('rondaPlayoffService batch writes', () => {
     mocks.roundDelete.mockResolvedValue({});
     mocks.roundDeleteMany.mockResolvedValue({ count: 0 });
     mocks.jornadaDeleteMany.mockResolvedValue({ count: 0 });
-    mocks.campeonDeleteMany.mockResolvedValue({ count: 0 });
+    mocks.campeonUpdateMany.mockResolvedValue({ count: 0 });
     mocks.executeRaw.mockResolvedValue(0);
   });
 
@@ -470,36 +470,36 @@ describe('rondaPlayoffService batch writes', () => {
     })
   })
 
-  // El campeón se declaró a partir de la final. Sin cuadro, la app esconde la acción de asignarlo
-  // y el banner quedaría en pantalla sin forma de quitarlo.
-  describe('el campeón se va con el cuadro', () => {
-    const campeonDeLaDivision = { where: { divisionId: 'division-1' } }
+  // Un cuadro nuevo es una temporada nueva: ahí se archiva el título anterior. Borrar el cuadro
+  // **no** lo toca, para que el dueño lo pueda seguir corrigiendo con "Quitar campeón".
+  describe('el título se archiva al empezar otra temporada', () => {
+    it('generar un cuadro archiva el campeón vigente', async () => {
+      mocks.roundCreateManyAndReturn.mockResolvedValue([
+        { id: 'final', nombre: 'Final', orden: 3, divisionId: 'division-1' },
+      ])
 
-    it('borra el campeón al borrar las eliminatorias de la división', async () => {
-      await rondaPlayoffService.deleteByDivision('division-1', owner)
+      await rondaPlayoffService.generate('division-1', 2, owner)
 
-      expect(mocks.campeonDeleteMany).toHaveBeenCalledWith(campeonDeLaDivision)
-      expect(mocks.roundDeleteMany.mock.invocationCallOrder[0])
-        .toBeLessThan(mocks.campeonDeleteMany.mock.invocationCallOrder[0])
+      expect(mocks.campeonUpdateMany).toHaveBeenCalledWith({
+        where: { divisionId: 'division-1', archivadoEn: null },
+        data: { archivadoEn: expect.any(Date) },
+      })
     })
 
-    it('también lo borra al borrar la última ronda, que es la que tiene la final', async () => {
+    it('borrar las eliminatorias no toca el campeón', async () => {
+      await rondaPlayoffService.deleteByDivision('division-1', owner)
+
+      expect(mocks.campeonUpdateMany).not.toHaveBeenCalled()
+    })
+
+    it('borrar la última ronda tampoco lo toca', async () => {
       mocks.roundFindUnique
         .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1' } })
         .mockResolvedValueOnce({ orden: 2, division: { ligaId: 'league-1', liga: { userId: owner.id }, rondasPlayoff: [{ id: 'latest' }] } })
 
       await rondaPlayoffService.delete('latest', owner)
 
-      expect(mocks.campeonDeleteMany).toHaveBeenCalledWith(campeonDeLaDivision)
-    })
-
-    it('no lo toca cuando la ronda no era la última y el borrado se rechaza', async () => {
-      mocks.roundFindUnique
-        .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1' } })
-        .mockResolvedValueOnce({ orden: 1, division: { ligaId: 'league-1', liga: { userId: owner.id }, rondasPlayoff: [{ id: 'latest' }] } })
-
-      await expect(rondaPlayoffService.delete('earlier', owner)).rejects.toMatchObject({ statusCode: 409 })
-      expect(mocks.campeonDeleteMany).not.toHaveBeenCalled()
+      expect(mocks.campeonUpdateMany).not.toHaveBeenCalled()
     })
   })
 

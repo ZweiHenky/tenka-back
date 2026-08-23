@@ -1,5 +1,6 @@
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
 import { assertDivisionWritable } from '../../utils/divisionState';
+import { campeonRepository } from '../campeon/repository';
 import { prisma } from '../../config/database';
 import { rondaPlayoffRepository } from './repository';
 import type { RondaPlayoffEntity, RondaPlayoffReadEntity } from './entity';
@@ -167,14 +168,6 @@ async function deleteEmptyJornadas(tx: Prisma.TransactionClient, divisionId: str
   await tx.jornada.deleteMany({ where: { divisionId, partidos: { none: {} } } });
 }
 
-/**
- * El campeón se declara a partir de la final. Si esa final deja de existir el título se queda sin
- * respaldo: la app volvería a esconder la acción de asignarlo mientras sigue mostrando el banner.
- */
-async function deleteCampeon(tx: Prisma.TransactionClient, divisionId: string): Promise<void> {
-  await tx.divisionCampeon.deleteMany({ where: { divisionId } });
-}
-
 async function lockedDivision(tx: Prisma.TransactionClient, divisionId: string, actor: AuthenticatedUser) {
   const lockTarget = await tx.division.findUnique({ where: { id: divisionId }, select: { ligaId: true } });
   if (!lockTarget) throw new NotFoundError('División');
@@ -244,7 +237,6 @@ export const rondaPlayoffService = {
       }
       await tx.rondaPlayoff.delete({ where: { id } });
       await deleteEmptyJornadas(tx, lockTarget.divisionId);
-      await deleteCampeon(tx, lockTarget.divisionId);
     }, 'Las rondas de playoff cambiaron durante la eliminación; vuelve a intentarlo');
   },
 
@@ -253,7 +245,6 @@ export const rondaPlayoffService = {
       await lockedDivision(tx, divisionId, actor);
       await tx.rondaPlayoff.deleteMany({ where: { divisionId } });
       await deleteEmptyJornadas(tx, divisionId);
-      await deleteCampeon(tx, divisionId);
     }, 'Las rondas de playoff cambiaron durante la eliminación; vuelve a intentarlo');
   },
 
@@ -299,6 +290,8 @@ export const rondaPlayoffService = {
       if (!division) throw new NotFoundError('División');
       if (division.ligaId !== lockTarget.ligaId) throw new ConflictError('La división cambió de liga durante la generación; vuelve a intentarlo');
       assertDivisionWritable(division.estadoLiga);
+      // Un cuadro nuevo es una temporada nueva: el campeón anterior pasa a ser un título anterior.
+      await campeonRepository.archiveByDivision(tx, divisionId);
       if (division.rondasPlayoff.length > 0) throw new ConflictError('La división ya tiene rondas de playoff');
       if (division.equipos.length < cantidadEquipos) {
         throw new ValidationError(`Se necesitan al menos ${cantidadEquipos} equipos asignados a la división`);

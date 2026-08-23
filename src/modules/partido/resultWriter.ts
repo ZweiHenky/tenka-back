@@ -1,6 +1,7 @@
 import type { Prisma } from '../../generated/prisma/client'
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors'
 import { assertDivisionWritable } from '../../utils/divisionState'
+import { isCuadroCompleto } from '../../utils/bracketCompletion'
 import { tablaPosicionService } from '../tabla-posicion/service'
 import { rondaPlayoffService } from '../ronda-playoff/service'
 import { validatePlayoffFinalizationSchedule } from './playoffFinalization'
@@ -26,6 +27,35 @@ const RESULT_CONTEXT_SELECT = {
   jornada: { select: { division: { select: { id: true, registrarParticipaciones: true, registrarGoleo: true, usarPenalesEnEmpates: true, estadoLiga: { select: { codigo: true } }, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
   rondaPlayoff: { select: { division: { select: { id: true, registrarParticipaciones: true, registrarGoleo: true, usarPenalesEnEmpates: true, estadoLiga: { select: { codigo: true } }, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
 } as const
+
+/**
+ * Cerrar la final cierra la temporada: la división pasa a `FINALIZADA` sola.
+ *
+ * Va acá y no en el cliente porque la final también puede cerrarla un árbitro desde su enlace por
+ * token, y los dos caminos escriben por `writeResultInTransaction`. Corre dentro de la misma
+ * transacción que el resultado.
+ *
+ * El gate de solo lectura ya corrió al principio, así que esta transición no se bloquea a sí misma;
+ * el siguiente intento de guardar sí, que es justo la intención.
+ */
+async function finalizarDivisionSiTerminoElCuadro(
+  tx: Prisma.TransactionClient,
+  divisionId: string,
+  codigoActual: string | undefined,
+): Promise<void> {
+  // Desde borrador no: `FINALIZADA` es pública, y un cuadro jugado en borrador es una prueba.
+  // No hace falta descartar FINALIZADA ni CANCELADA: son de solo lectura, así que el gate del
+  // principio ya rechazó la escritura y no se llega hasta acá.
+  if (codigoActual === 'BORRADOR') return
+  if (!(await isCuadroCompleto(tx, divisionId))) return
+
+  const finalizada = await tx.estadoLiga.findFirst({ where: { codigo: 'FINALIZADA' }, select: { id: true } })
+  // Si alguien borró la fila del catálogo se omite en silencio: un hueco ahí no puede tumbar la
+  // captura de un resultado.
+  if (!finalizada) return
+
+  await tx.division.update({ where: { id: divisionId }, data: { estadoLigaId: finalizada.id } })
+}
 
 export async function getResultContext(tx: Pick<Prisma.TransactionClient, 'partido'>, partidoId: string) {
   const partido = await tx.partido.findUnique({ where: { id: partidoId }, select: RESULT_CONTEXT_SELECT })
@@ -320,6 +350,9 @@ export async function writeResultInTransaction(
     await tablaPosicionService.recalcular(division.id, tx)
   }
   if (partido.rondaPlayoffId) await rondaPlayoffService.syncAdvancement(tx, partido.rondaPlayoffId)
+  if (partido.rondaPlayoffId && input.estado === 'FINALIZADO') {
+    await finalizarDivisionSiTerminoElCuadro(tx, division.id, division.estadoLiga?.codigo)
+  }
 
   const updated = await tx.partido.findUnique({
     where: { id: partidoId },

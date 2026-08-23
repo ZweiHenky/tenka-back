@@ -1,36 +1,35 @@
 import { prisma } from '../../config/database';
 import { NotFoundError, ValidationError } from '../../utils/errors';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
+import { isCuadroCompleto } from '../../utils/bracketCompletion';
 import type { AuthenticatedUser } from '../../types/auth';
 import { goleadoresService } from '../goleadores/service';
 import { campeonRepository } from './repository';
-import type { CampeonEntity } from './entity';
+import type { CampeonEntity, CampeonatoEquipoEntity, CampeonatoJugadorEntity, CampeonHistorialEntity } from './entity';
 import type { AssignInput } from './validator';
 
-async function assertDivisionOwner(divisionId: string, actor: AuthenticatedUser): Promise<boolean> {
+/**
+ * Autoriza y de paso devuelve lo que hay que congelar en el título: los snapshots los escribe el
+ * servidor leyendo la base, nunca el cliente. Sale del mismo `select` que ya se hacía.
+ */
+async function loadDivisionForWrite(divisionId: string, actor: AuthenticatedUser) {
   const division = await prisma.division.findUnique({
     where: { id: divisionId },
-    select: { registrarGoleo: true, liga: { select: { userId: true } } },
+    select: {
+      registrarGoleo: true,
+      nombre: true,
+      estadoLiga: { select: { codigo: true } },
+      liga: { select: { id: true, nombre: true, logo: true, userId: true } },
+    },
   });
   if (!division) throw new NotFoundError('División');
   assertOwnerOrAdmin(actor, division.liga.userId, 'División');
-  return division.registrarGoleo;
+  return division;
 }
 
-/**
- * El campeón sale de la final, así que no se puede declarar antes de jugarla.
- *
- * La final es la ronda de `orden` máximo, no la que se llama "Final": el nombre es texto libre y
- * la API deja editarlo.
- */
+/** El campeón sale de la final, así que no se puede declarar antes de jugarla. */
 async function assertCuadroCompleto(divisionId: string): Promise<void> {
-  const ultimaRonda = await prisma.rondaPlayoff.findFirst({
-    where: { divisionId },
-    orderBy: { orden: 'desc' },
-    select: { partidos: { select: { estado: true } } },
-  });
-  const partidos = ultimaRonda?.partidos ?? [];
-  if (partidos.length === 0 || partidos.some((partido) => partido.estado !== 'FINALIZADO')) {
+  if (!(await isCuadroCompleto(prisma, divisionId))) {
     throw new ValidationError('Termina todos los partidos de la última ronda antes de asignar al campeón.');
   }
 }
@@ -42,8 +41,21 @@ export const campeonService = {
     return division.campeon;
   },
 
+  async findByEquipo(equipoId: string, actor?: AuthenticatedUser): Promise<CampeonatoEquipoEntity[]> {
+    return campeonRepository.findByEquipo(equipoId, actor);
+  },
+
+  async findByJugador(jugadorId: string, actor?: AuthenticatedUser): Promise<CampeonatoJugadorEntity[]> {
+    return campeonRepository.findByJugador(jugadorId, actor);
+  },
+
+  async findHistorialByDivision(divisionId: string, actor?: AuthenticatedUser): Promise<CampeonHistorialEntity[]> {
+    return campeonRepository.findHistorialByDivision(divisionId, actor);
+  },
+
   async assign(divisionId: string, data: AssignInput, actor: AuthenticatedUser): Promise<CampeonEntity> {
-    const goleoActivo = await assertDivisionOwner(divisionId, actor);
+    const division = await loadDivisionForWrite(divisionId, actor);
+    const goleoActivo = division.registrarGoleo;
     await assertCuadroCompleto(divisionId);
 
     const inscripcion = await prisma.divisionEquipo.findUnique({
@@ -65,7 +77,12 @@ export const campeonService = {
       goleo = { jugadorId: fila.jugadorId, jugadorNombre: fila.nombre, jugadorFoto: fila.foto, jugadorGoles: fila.goles };
     }
 
-    return campeonRepository.upsert(divisionId, {
+    return campeonRepository.saveVigente(divisionId, {
+      divisionNombre: division.nombre,
+      ligaId: division.liga.id,
+      ligaNombre: division.liga.nombre,
+      ligaLogo: division.liga.logo,
+      divisionEstadoCodigo: division.estadoLiga.codigo,
       equipoId: data.equipoId,
       equipoNombre: inscripcion.equipo.nombre,
       equipoLogo: inscripcion.equipo.logo,
@@ -74,7 +91,7 @@ export const campeonService = {
   },
 
   async remove(divisionId: string, actor: AuthenticatedUser): Promise<void> {
-    await assertDivisionOwner(divisionId, actor);
+    await loadDivisionForWrite(divisionId, actor);
     await campeonRepository.deleteByDivision(divisionId);
   },
 };

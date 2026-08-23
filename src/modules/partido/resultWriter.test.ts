@@ -42,6 +42,9 @@ function createTx() {
       }]),
     },
     equipo: { findMany: vi.fn().mockResolvedValue([{ id: 'team-local', nombre: 'Locales' }, { id: 'team-away', nombre: 'Visita' }]) },
+    rondaPlayoff: { findFirst: vi.fn().mockResolvedValue(null) },
+    estadoLiga: { findFirst: vi.fn().mockResolvedValue({ id: 'estado-finalizada' }) },
+    division: { update: vi.fn() },
     anotacionPartido: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn(), createMany: vi.fn() },
     participacionPartido: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn(), createMany: vi.fn() },
   }
@@ -611,5 +614,101 @@ describe('divisiones de solo lectura', () => {
     await expect(writeResultInTransaction(tx as any, 'match-1', {
       expectedVersion: 3, estado: 'FINALIZADO', golesLocal: 1, golesVisitante: 0, allocations: [],
     })).resolves.toBeDefined()
+  })
+})
+
+// Cerrar la final cierra la temporada. Va en el servidor porque la final también puede cerrarla un
+// árbitro desde su enlace por token, y los dos caminos escriben por aquí.
+describe('cierre automático de la división', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  /** Un partido de cuadro, con la división en el estado indicado. */
+  function playoffTx(codigo = 'EN_CURSO', cuadroTerminado = true) {
+    const tx = createTx()
+    const contexto = {
+      ...context,
+      jornadaId: null,
+      rondaPlayoffId: 'ronda-final',
+      jornada: null,
+      rondaPlayoff: { division: { ...context.jornada.division, estadoLiga: { codigo } } },
+    }
+    tx.partido.findUnique
+      .mockReset()
+      .mockResolvedValueOnce(contexto)
+      .mockResolvedValue({ ...contexto, version: 4, estado: 'FINALIZADO' })
+    tx.rondaPlayoff.findFirst.mockResolvedValue(
+      cuadroTerminado
+        ? { partidos: [{ estado: 'FINALIZADO' }] }
+        : { partidos: [{ estado: 'FINALIZADO' }, { estado: 'PROGRAMADO' }] },
+    )
+    return tx
+  }
+
+  const finalizar = { expectedVersion: 3, estado: 'FINALIZADO' as const, golesLocal: 2, golesVisitante: 1, allocations: [] }
+
+  it('finaliza la división al cerrar el último partido del cuadro', async () => {
+    const tx = playoffTx()
+
+    await writeResultInTransaction(tx as any, 'match-1', finalizar)
+
+    expect(tx.division.update).toHaveBeenCalledWith({
+      where: { id: 'division-1' },
+      data: { estadoLigaId: 'estado-finalizada' },
+    })
+  })
+
+  // El falso positivo obvio: una ronda intermedia no cierra nada.
+  it('no la finaliza si el cuadro todavía tiene partidos pendientes', async () => {
+    const tx = playoffTx('EN_CURSO', false)
+
+    await writeResultInTransaction(tx as any, 'match-1', finalizar)
+
+    expect(tx.division.update).not.toHaveBeenCalled()
+  })
+
+  it('un partido de jornada regular nunca finaliza nada', async () => {
+    const tx = createTx()
+    tx.rondaPlayoff.findFirst.mockResolvedValue({ partidos: [{ estado: 'FINALIZADO' }] })
+
+    await writeResultInTransaction(tx as any, 'match-1', finalizar)
+
+    expect(tx.division.update).not.toHaveBeenCalled()
+    expect(tx.rondaPlayoff.findFirst).not.toHaveBeenCalled()
+  })
+
+  // FINALIZADA es pública: auto-finalizar un borrador lo publicaría de golpe.
+  it('no finaliza —ni publica— una división en borrador', async () => {
+    const tx = playoffTx('BORRADOR')
+
+    await writeResultInTransaction(tx as any, 'match-1', finalizar)
+
+    expect(tx.division.update).not.toHaveBeenCalled()
+  })
+
+  // No hay guarda contra "ya finalizada" porque no se llega: el gate de solo lectura rechaza la
+  // escritura antes. Para corregir la final hay que reabrir la división primero.
+  it('una división ya finalizada rechaza la escritura antes de llegar al cierre', async () => {
+    const tx = playoffTx('FINALIZADA')
+
+    await expect(writeResultInTransaction(tx as any, 'match-1', finalizar)).rejects.toMatchObject({ statusCode: 422 })
+    expect(tx.division.update).not.toHaveBeenCalled()
+  })
+
+  // Un hueco del catálogo no puede tumbar la captura de un resultado.
+  it('guarda el resultado igual si falta la fila FINALIZADA del catálogo', async () => {
+    const tx = playoffTx()
+    tx.estadoLiga.findFirst.mockResolvedValue(null)
+
+    await expect(writeResultInTransaction(tx as any, 'match-1', finalizar)).resolves.toBeDefined()
+    expect(tx.partido.updateMany).toHaveBeenCalled()
+    expect(tx.division.update).not.toHaveBeenCalled()
+  })
+
+  it('no finaliza al reabrir o suspender un partido del cuadro', async () => {
+    const tx = playoffTx()
+
+    await writeResultInTransaction(tx as any, 'match-1', { expectedVersion: 3, estado: 'SUSPENDIDO', golesLocal: 0, golesVisitante: 0, allocations: [] })
+
+    expect(tx.division.update).not.toHaveBeenCalled()
   })
 })
