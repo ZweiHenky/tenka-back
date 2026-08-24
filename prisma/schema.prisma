@@ -233,6 +233,10 @@ model Liga {
   multiplesCanchas  Boolean  @default(false)
   usaArbitros       Boolean  @default(false)
   reglas            Json?
+  facebook          String?
+  x                 String?
+  instagram         String?
+  tiktok            String?
   timeZone          String   @default("America/Mexico_City")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -320,6 +324,10 @@ model Division {
   /// quitaria a las divisiones que ya la usan. Apagado congela lo capturado, no lo borra.
   registrarGoleo           Boolean   @default(true)
   usarPenalesEnEmpates     Boolean   @default(true)
+  /// Partidos de la fase regular que un jugador debe tener para poder alinear en eliminatorias.
+  /// **0 = sin requisito**, que es como se comportan todas las divisiones anteriores a este campo.
+  /// Solo aplica con registrarParticipaciones encendido: sin eso no existe el dato de quien jugo.
+  minPartidosEliminatoria  Int       @default(0)
   /// Resumen denormalizado (unión) de canchaHorarios, mantenido en la escritura para la vista
   /// pública y los clientes viejos. Es un SUPERCONJUNTO: nunca validar contra estos campos,
   /// usar resolveDivisionSchedule(). Son la fuente real solo en ligas de cancha única.

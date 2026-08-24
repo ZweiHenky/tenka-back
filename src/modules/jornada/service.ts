@@ -687,7 +687,13 @@ export const jornadaService = {
               if (!localId || !visitaId) throw new ValidationError('Asigna ambos equipos del partido de complemento antes de generar la jornada');
               if (!teamIds.has(localId)) throw new ValidationError('El equipo que gana puntos en el complemento no pertenece a esta división');
               if (!teamIds.has(visitaId)) throw new ValidationError('El equipo que repite sin puntos en el complemento no pertenece a esta división');
-              if (usedTeamIds.has(localId)) throw new ValidationError('El equipo que gana puntos en el complemento ya está asignado a otro partido');
+              // El equipo de puntos **puede repetir**: a veces hace falta que juegue dos o tres veces
+              // en la semana para alcanzar a los que llevan más partidos. Solo pasa si lo asignan a
+              // mano en los dos sitios; el reparto automático nunca lo hace solo.
+              //
+              // El `add` se conserva y hace el trabajo fino, porque sobre un Set es idempotente:
+              //   - equipo libre  -> queda reservado, absorbe al sobrante y no juega regular
+              //   - equipo ya usado -> no-op, conserva su regular y además juega el complemento
               usedTeamIds.add(localId);
               plan.push({ localId, visitaId, fecha, tipo: 'complemento', canchaId: slot.canchaId });
             } else if (slot.tipo === 'amistoso') {
@@ -896,18 +902,28 @@ export const jornadaService = {
       }
 
       const assignedByMatching = new Set<string>();
-      for (const p of incompleteRegularSlots) {
-        if (p.localId || p.visitaId) {
-          const fixedId = p.localId ?? p.visitaId!;
-          const opponentId = matching.get(fixedId);
-          if (!opponentId) throw new ValidationError('No existe un rival válido para uno de los equipos asignados');
-          if (p.localId) p.visitaId = opponentId;
-          else p.localId = opponentId;
-          assignedByMatching.add(fixedId);
-          assignedByMatching.add(opponentId);
-          continue;
-        }
 
+      // Dos pasadas, y el orden importa: **primero los slots que ya traen un equipo puesto a mano**.
+      //
+      // En una sola pasada, un slot vacío anterior tomaba "el primer equipo sin partido" y podía
+      // llevarse justamente al equipo fijado en un slot posterior, junto con su rival. Al llegar a
+      // ese slot se rearmaba la misma pareja y el filtro de duplicados de más abajo la descartaba:
+      // la jornada salía con un partido menos y dos equipos habilitados sin jugar, sin ningún error.
+      // Reservar antes al equipo fijado y a su rival hace que el robo no pueda ocurrir.
+      const conEquipoFijado = incompleteRegularSlots.filter((p) => p.localId || p.visitaId);
+      const sinEquipos = incompleteRegularSlots.filter((p) => !p.localId && !p.visitaId);
+
+      for (const p of conEquipoFijado) {
+        const fixedId = p.localId ?? p.visitaId!;
+        const opponentId = matching.get(fixedId);
+        if (!opponentId) throw new ValidationError('No existe un rival válido para uno de los equipos asignados');
+        if (p.localId) p.visitaId = opponentId;
+        else p.localId = opponentId;
+        assignedByMatching.add(fixedId);
+        assignedByMatching.add(opponentId);
+      }
+
+      for (const p of sinEquipos) {
         const local = matchingTeams.find((team) => !assignedByMatching.has(team.id) && matching.has(team.id));
         if (!local) continue;
         const visitorId = matching.get(local.id);
@@ -917,6 +933,19 @@ export const jornadaService = {
         assignedByMatching.add(local.id);
         assignedByMatching.add(visitorId);
       }
+
+      // Un slot que se quedó sin equipos ya no se descarta en silencio. Antes la jornada se guardaba
+      // incompleta y el único rastro eran los partidos jugados descuadrados en la tabla de posiciones.
+      //
+      // El umbral es dos: con un número impar de equipos siempre sobra uno, y ese descansa. Que
+      // sobren dos o más significa que una pareja entera se quedó sin horario.
+      const sinEmparejar = matchingTeams.filter((team) => !assignedByMatching.has(team.id));
+      if (sinEmparejar.length >= 2) {
+        throw new ValidationError(
+          `No se pudo emparejar a ${sinEmparejar.length} equipos habilitados; revisa las asignaciones manuales o libera un horario`,
+        );
+      }
+
       for (const id of assignedByMatching) usedTeamIds.add(id);
 
       // Move DESCANSO to the last non-amistoso real pairing, so regular slots stay filled

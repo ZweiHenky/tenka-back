@@ -77,6 +77,10 @@ export interface LigaEntity {
   canchaPublicId: string | null;
   multiplesCanchas: boolean;
   usaArbitros: boolean;
+  facebook: string | null;
+  x: string | null;
+  instagram: string | null;
+  tiktok: string | null;
   timeZone: string;
   reglas?: LigaReglaItem[] | null;
   createdAt: Date;

@@ -157,15 +157,28 @@ async function serializablePlayoffWrite<T>(operation: (tx: Prisma.TransactionCli
 }
 
 /**
- * `Partido` cascadea desde `RondaPlayoff`, así que borrar las rondas se lleva los partidos del
- * cuadro **pero deja viva la jornada que los contenía**. En una división de puro cuadro esa jornada
- * solo tenía partidos del bracket, o sea que queda en cero y sigue apareciendo en el horario.
+ * Borra las jornadas que solo existían para fechar el cuadro.
  *
- * Acotado a `partidos: { none: {} }`, así que una jornada que conserve los suyos —el caso de una
- * división de liga, que solo pierde los de playoff— no se toca.
+ * `Partido` cascadea desde `RondaPlayoff`, así que borrar las rondas se lleva los partidos del
+ * bracket **pero deja viva la jornada que los contenía**. Eso deja dos clases de escombro:
+ *
+ *  - **Jornada en cero**, el caso de la división de puro cuadro, donde no había nada más.
+ *  - **Jornada con puros amistosos sin jugar.** Con el bracket activo, `prepareJornadaSlots` manda
+ *    como amistoso todo slot que no sea de eliminatoria, así que una jornada generada durante las
+ *    eliminatorias queda con partidos que nadie jugó, que no dan puntos y que solo estaban ahí para
+ *    acompañar al cuadro. Medir solo "sin partidos" no las alcanzaba.
+ *
+ * La jornada **sobrevive** en cuanto tiene algo que valga la pena conservar: un partido que no sea
+ * amistoso —regular o complemento, los que dan puntos— o cualquiera con resultado capturado, aunque
+ * sea un amistoso. Es lo que impide que esto se lleve por delante una jornada de liga.
  */
-async function deleteEmptyJornadas(tx: Prisma.TransactionClient, divisionId: string): Promise<void> {
-  await tx.jornada.deleteMany({ where: { divisionId, partidos: { none: {} } } });
+async function deleteJornadasSinContenido(tx: Prisma.TransactionClient, divisionId: string): Promise<void> {
+  await tx.jornada.deleteMany({
+    where: {
+      divisionId,
+      partidos: { none: { OR: [{ tipoPartido: { not: 'AMISTOSO' } }, { estado: 'FINALIZADO' }] } },
+    },
+  });
 }
 
 async function lockedDivision(tx: Prisma.TransactionClient, divisionId: string, actor: AuthenticatedUser) {
@@ -236,7 +249,7 @@ export const rondaPlayoffService = {
         throw new ConflictError('Solo se puede eliminar la última ronda de playoff');
       }
       await tx.rondaPlayoff.delete({ where: { id } });
-      await deleteEmptyJornadas(tx, lockTarget.divisionId);
+      await deleteJornadasSinContenido(tx, lockTarget.divisionId);
     }, 'Las rondas de playoff cambiaron durante la eliminación; vuelve a intentarlo');
   },
 
@@ -244,7 +257,7 @@ export const rondaPlayoffService = {
     await serializablePlayoffWrite(async (tx) => {
       await lockedDivision(tx, divisionId, actor);
       await tx.rondaPlayoff.deleteMany({ where: { divisionId } });
-      await deleteEmptyJornadas(tx, divisionId);
+      await deleteJornadasSinContenido(tx, divisionId);
     }, 'Las rondas de playoff cambiaron durante la eliminación; vuelve a intentarlo');
   },
 

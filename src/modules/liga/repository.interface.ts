@@ -52,6 +52,10 @@ export interface LigaWriteData {
   multiplesCanchas?: boolean;
   usaArbitros?: boolean;
   reglas?: Array<{ titulo: string; detalle: string }>;
+  facebook?: string | null;
+  x?: string | null;
+  instagram?: string | null;
+  tiktok?: string | null;
   timeZone?: string;
   ubicacionId?: string;
   userId?: string;

@@ -60,6 +60,53 @@ describe('generateNext slots', () => {
     expect(regulars.every(([args]: any[]) => args.equipoLocalId !== 't4' && args.equipoVisitanteId !== 't4')).toBe(true);
   });
 
+  /**
+   * El complemento existe para que un equipo atrasado alcance a los demás, así que el equipo de
+   * puntos **puede repetir** — pero solo si lo asignan a mano en los dos sitios. El reparto
+   * automático nunca lo hace solo: cuando el equipo de puntos está libre queda reservado y no
+   * juega regular, que es lo que fija el test de arriba.
+   */
+  it('el equipo Puntos también fijado en un regular juega los dos partidos', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(4);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-02', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't4' },
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't1' },
+      ...capacitySlots(3),
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    const enComplemento = calls.filter(([args]: any[]) => args.tipoPartido === 'COMPLEMENTO' && args.equipoLocalId === 't4');
+    const enRegular = calls.filter(([args]: any[]) => args.tipoPartido === 'REGULAR' && (args.equipoLocalId === 't4' || args.equipoVisitanteId === 't4'));
+
+    expect(enComplemento).toHaveLength(1);
+    expect(enRegular).toHaveLength(1);
+  });
+
+  it('el mismo equipo puede ganar puntos en varios complementos', async () => {
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(5);
+
+    await jornadaService.generateNext(divisionId, [
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't1' },
+      { fecha: '2099-01-01', horaInicio: '20:00', horaFin: '21:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't2' },
+      ...capacitySlots(3),
+    ]);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    const complementos = calls.filter(([args]: any[]) => args.tipoPartido === 'COMPLEMENTO');
+
+    expect(complementos).toHaveLength(2);
+    expect(complementos.every(([args]: any[]) => args.equipoLocalId === 't4')).toBe(true);
+  });
+
   it('complemento vacío → ValidationError', async () => {
     mockDivision();
     mockTeams();

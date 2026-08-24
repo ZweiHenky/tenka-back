@@ -126,3 +126,49 @@ describe('validacion de arbitros de liga', () => {
     }
   });
 });
+
+describe('validacion de redes sociales de liga', () => {
+  it('permite omitir todas las redes sociales', () => {
+    expect(createLigaSchema.safeParse(baseLiga).success).toBe(true);
+  });
+
+  it('acepta y recorta URLs HTTPS', () => {
+    const result = createLigaSchema.parse({
+      ...baseLiga,
+      facebook: '  https://www.facebook.com/liga.prueba  ',
+      x: 'https://x.com/liga_prueba',
+      instagram: 'https://instagram.com/liga.prueba',
+      tiktok: 'https://www.tiktok.com/@liga_prueba',
+    });
+
+    expect(result).toMatchObject({
+      facebook: 'https://www.facebook.com/liga.prueba',
+      x: 'https://x.com/liga_prueba',
+      instagram: 'https://instagram.com/liga.prueba',
+      tiktok: 'https://www.tiktok.com/@liga_prueba',
+    });
+  });
+
+  it.each([
+    ['facebook', 'facebook.com/liga'],
+    ['x', 'http://x.com/liga'],
+    ['instagram', 'no-es-una-url'],
+  ])('rechaza una URL inválida o sin HTTPS en %s', (field, value) => {
+    const result = createLigaSchema.safeParse({ ...baseLiga, [field]: value });
+
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0].message).toBe('Debe ser una URL HTTPS válida');
+  });
+
+  it('permite actualizar una sola red y borrar otra con null', () => {
+    const result = updateLigaSchema.parse({
+      instagram: 'https://instagram.com/nueva_liga',
+      tiktok: null,
+    });
+
+    expect(result).toEqual({
+      instagram: 'https://instagram.com/nueva_liga',
+      tiktok: null,
+    });
+  });
+});

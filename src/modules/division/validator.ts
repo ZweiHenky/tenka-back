@@ -30,6 +30,8 @@ export const createDivisionSchema = z.object({
   arbitraje: z.number().min(0).default(0),
   registrarParticipaciones: z.boolean().optional(),
   registrarGoleo: z.boolean().optional(),
+  /** Partidos de la fase regular exigidos para alinear en eliminatorias. 0 = sin requisito. */
+  minPartidosEliminatoria: z.number().int().min(0).max(99).optional(),
   usarPenalesEnEmpates: z.boolean().optional(),
   diasPartido: z.string().min(1).optional(),
   horarioPartido: z.string().min(1).optional(),
@@ -63,6 +65,8 @@ export const updateDivisionSchema = z.object({
   arbitraje: z.number().min(0).optional(),
   registrarParticipaciones: z.boolean().optional(),
   registrarGoleo: z.boolean().optional(),
+  /** Partidos de la fase regular exigidos para alinear en eliminatorias. 0 = sin requisito. */
+  minPartidosEliminatoria: z.number().int().min(0).max(99).optional(),
   usarPenalesEnEmpates: z.boolean().optional(),
   diasPartido: z.string().min(1).optional(),
   horarioPartido: z.string().min(1).optional(),

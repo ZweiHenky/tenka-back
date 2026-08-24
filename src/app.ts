@@ -9,6 +9,7 @@ import { logger } from './config/logger';
 import { requestContext } from './middlewares/requestContext';
 import { errorHandler } from './middlewares/errorHandler';
 import { createHealthRouter } from './routes/health';
+import { createAssetLinksRouter } from './routes/assetLinks';
 import { getCorsAllowedOrigins, env } from './config/env';
 import { authLimiter, globalApiLimiter, otpSendLimiter, otpVerifyLimiter } from './middlewares/rateLimits';
 import { AppError, ForbiddenError, NotFoundError } from './utils/errors';
@@ -34,6 +35,7 @@ import { notificationSubscriptionRouter } from './modules/notification-subscript
 import { refereeAccessRouter } from './modules/referee-access/routes';
 import { disponibilidadCanchaRouter } from './modules/disponibilidad-cancha/routes';
 import { goleadoresRouter } from './modules/goleadores/routes';
+import { elegibilidadRouter } from './modules/elegibilidad/routes';
 
 export function createApp() {
   const app = express();
@@ -83,6 +85,7 @@ export function createApp() {
   });
   app.use(express.json({ limit: env.JSON_BODY_LIMIT }));
   app.use(express.urlencoded({ extended: false, limit: env.URLENCODED_BODY_LIMIT }));
+  app.use(createAssetLinksRouter());
   app.use(createHealthRouter());
   app.use('/api', globalApiLimiter);
 
@@ -119,6 +122,7 @@ export function createApp() {
   app.use('/api/notification-subscriptions', notificationSubscriptionRouter);
   app.use('/api/referee', refereeAccessRouter);
   app.use('/api/goleadores', goleadoresRouter);
+  app.use('/api/elegibilidad', elegibilidadRouter);
 
   app.use((_req, _res, next) => next(new NotFoundError('Ruta')));
 

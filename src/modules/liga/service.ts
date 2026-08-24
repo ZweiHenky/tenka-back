@@ -129,6 +129,10 @@ export const ligaService = {
     usaArbitros?: boolean;
     arbitros?: { nombre: string }[];
     reglas?: LigaReglaItem[];
+    facebook?: string | null;
+    x?: string | null;
+    instagram?: string | null;
+    tiktok?: string | null;
     ubicacionId: string;
     userId: string;
   }): Promise<LigaEntity> {
@@ -179,6 +183,10 @@ export const ligaService = {
     usaArbitros?: boolean;
     arbitros?: { nombre: string }[];
     reglas?: LigaReglaItem[];
+    facebook?: string | null;
+    x?: string | null;
+    instagram?: string | null;
+    tiktok?: string | null;
     ubicacionId?: string;
   }, actor: AuthenticatedUser): Promise<LigaEntity> {
     const old = await ligaRepository.findUpdateContext(id, actor);

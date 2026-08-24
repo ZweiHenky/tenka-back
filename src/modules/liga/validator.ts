@@ -2,6 +2,13 @@ import { z } from 'zod';
 
 const nombreSchema = z.string().trim().min(1).max(20);
 const descripcionSchema = z.string().max(150);
+const socialUrlSchema = z.string().trim().max(500).refine((value) => {
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}, 'Debe ser una URL HTTPS válida').nullable().optional();
 
 const createCanchaItemSchema = z.object({
   nombre: z.string().trim().min(1).max(50),
@@ -113,6 +120,10 @@ export const createLigaSchema = z.object({
   usaArbitros: z.boolean().optional(),
   arbitros: z.array(arbitroItemSchema).optional(),
   reglas: z.array(reglaItemSchema).max(30).optional(),
+  facebook: socialUrlSchema,
+  x: socialUrlSchema,
+  instagram: socialUrlSchema,
+  tiktok: socialUrlSchema,
   ubicacionId: z.string(),
 }).superRefine(validateCanchas).superRefine(validateArbitros).superRefine(validateReglas);
 
@@ -126,6 +137,10 @@ export const updateLigaSchema = z.object({
   usaArbitros: z.boolean().optional(),
   arbitros: z.array(arbitroItemSchema).optional(),
   reglas: z.array(reglaItemSchema).max(30).optional(),
+  facebook: socialUrlSchema,
+  x: socialUrlSchema,
+  instagram: socialUrlSchema,
+  tiktok: socialUrlSchema,
   ubicacionId: z.string().optional(),
 }).superRefine((data, ctx) => {
   if (data.canchas) validateCanchas({ ...data, multiplesCanchas: undefined }, ctx);

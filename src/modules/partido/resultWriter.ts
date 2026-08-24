@@ -7,6 +7,7 @@ import { rondaPlayoffService } from '../ronda-playoff/service'
 import { validatePlayoffFinalizationSchedule } from './playoffFinalization'
 import type { ResultInput } from './validator'
 import { exposePartidoReadWithNotas } from './repository'
+import { contarPartidosJugados } from '../elegibilidad/service'
 
 const RESULT_CONTEXT_SELECT = {
   id: true,
@@ -24,8 +25,8 @@ const RESULT_CONTEXT_SELECT = {
   fecha: true,
   fechaFin: true,
   canchaId: true,
-  jornada: { select: { division: { select: { id: true, registrarParticipaciones: true, registrarGoleo: true, usarPenalesEnEmpates: true, estadoLiga: { select: { codigo: true } }, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
-  rondaPlayoff: { select: { division: { select: { id: true, registrarParticipaciones: true, registrarGoleo: true, usarPenalesEnEmpates: true, estadoLiga: { select: { codigo: true } }, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
+  jornada: { select: { division: { select: { id: true, registrarParticipaciones: true, registrarGoleo: true, minPartidosEliminatoria: true, usarPenalesEnEmpates: true, estadoLiga: { select: { codigo: true } }, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
+  rondaPlayoff: { select: { division: { select: { id: true, registrarParticipaciones: true, registrarGoleo: true, minPartidosEliminatoria: true, usarPenalesEnEmpates: true, estadoLiga: { select: { codigo: true } }, liga: { select: { id: true, userId: true, multiplesCanchas: true } } } } } },
 } as const
 
 /**
@@ -164,6 +165,29 @@ export async function writeResultInTransaction(
       if (!allocation.jugadorId) continue
       if (!participationKeys.has(`${allocation.ladoMarcador}:${allocation.jugadorId}`)) {
         throw new ValidationError('Todos los goleadores deben estar registrados como participantes del partido')
+      }
+    }
+
+    // Mínimo de partidos para alinear en eliminatorias. Solo en el cuadro y solo si la división lo
+    // exige; con el mínimo en 0 —el default— nada de esto corre.
+    //
+    // `permitirInelegibles` es la excepción del dueño de la liga, y no hace falta comprobar quién
+    // pide: el validador de `referee-access` no declara el campo, así que zod lo descarta y el
+    // árbitro no puede saltarse la regla. El camino autenticado ya pasó por `assertOwnerOrAdmin`.
+    if (partido.rondaPlayoffId && division.minPartidosEliminatoria > 0 && !input.permitirInelegibles) {
+      const jugados = await contarPartidosJugados(tx, division.id, participationPlayerIds)
+      const inelegibles = participationPlayerIds
+        .filter((jugadorId) => (jugados.get(jugadorId) ?? 0) < division.minPartidosEliminatoria)
+      if (inelegibles.length > 0) {
+        // Solo en el camino del error: nombrarlos es lo que permite corregir sin adivinar.
+        const nombres = await tx.jugador.findMany({ where: { id: { in: inelegibles } }, select: { id: true, nombre: true } })
+        const porId = new Map(nombres.map((fila) => [fila.id, fila.nombre]))
+        const detalle = inelegibles
+          .map((jugadorId) => `${porId.get(jugadorId) ?? jugadorId} (${jugados.get(jugadorId) ?? 0})`)
+          .join(', ')
+        throw new ValidationError(
+          `Esta división exige ${division.minPartidosEliminatoria} partidos jugados para alinear en eliminatorias. No llegan: ${detalle}`,
+        )
       }
     }
   }

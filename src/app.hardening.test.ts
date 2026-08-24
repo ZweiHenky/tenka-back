@@ -45,6 +45,13 @@ describe('API hardening', () => {
     expect(missing.body).toEqual({ success: false, error: 'Ruta no encontrado', requestId: 'request-404' });
   });
 
+  it('mounts Digital Asset Links outside the API namespace', async () => {
+    const response = await request(app).get('/.well-known/assetlinks.json');
+
+    expect(response.status).toBe(200);
+    expect(response.body[0].target.package_name).toBe('studio.tenka.app');
+  });
+
   it('returns a normalized 429 response', async () => {
     const limitedApp = express();
     limitedApp.set('trust proxy', 1);

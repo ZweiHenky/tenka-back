@@ -437,25 +437,38 @@ describe('rondaPlayoffService batch writes', () => {
 
   // Los partidos del cuadro se van por cascada, pero la jornada que los contenía sobrevive vacía
   // y sigue apareciendo en el horario. En un cuadro puro esa jornada no tenía nada más.
-  describe('limpieza de jornadas vacías', () => {
-    const jornadasVacias = { where: { divisionId: 'division-1', partidos: { none: {} } } }
+  describe('limpieza de jornadas del cuadro', () => {
+    // Se borra la jornada que no conserva nada aprovechable: ni un partido que dé puntos, ni uno
+    // con resultado capturado. Cubre la jornada en cero y la que queda con puros amistosos sin
+    // jugar, que es el escombro que deja el bracket.
+    const sinContenido = {
+      where: {
+        divisionId: 'division-1',
+        partidos: { none: { OR: [{ tipoPartido: { not: 'AMISTOSO' } }, { estado: 'FINALIZADO' }] } },
+      },
+    }
 
     it('borra las jornadas que quedaron sin partidos al borrar las eliminatorias', async () => {
       await rondaPlayoffService.deleteByDivision('division-1', owner)
 
       expect(mocks.roundDeleteMany).toHaveBeenCalledWith({ where: { divisionId: 'division-1' } })
-      expect(mocks.jornadaDeleteMany).toHaveBeenCalledWith(jornadasVacias)
-      // Después de las rondas: antes no habría ninguna jornada vacía todavía.
+      expect(mocks.jornadaDeleteMany).toHaveBeenCalledWith(sinContenido)
+      // Después de las rondas: antes no habría ninguna jornada sin contenido todavía.
       expect(mocks.roundDeleteMany.mock.invocationCallOrder[0])
         .toBeLessThan(mocks.jornadaDeleteMany.mock.invocationCallOrder[0])
     })
 
-    // Una división de liga solo pierde sus partidos de playoff; su jornada sigue teniendo los
-    // regulares y no debe tocarse.
-    it('el filtro exige que la jornada no tenga ningún partido', async () => {
+    /**
+     * El filtro es lo único que protege una jornada de liga: sobrevive en cuanto tiene un partido
+     * que no sea amistoso —regular o complemento— o cualquiera ya finalizado. Aflojarlo se llevaría
+     * resultados por delante.
+     */
+    it('conserva la jornada que tenga un partido con puntos o un resultado', async () => {
       await rondaPlayoffService.deleteByDivision('division-1', owner)
 
-      expect(mocks.jornadaDeleteMany.mock.calls[0][0].where.partidos).toEqual({ none: {} })
+      expect(mocks.jornadaDeleteMany.mock.calls[0][0].where.partidos).toEqual({
+        none: { OR: [{ tipoPartido: { not: 'AMISTOSO' } }, { estado: 'FINALIZADO' }] },
+      })
       expect(mocks.jornadaDeleteMany.mock.calls[0][0].where.divisionId).toBe('division-1')
     })
 
@@ -466,7 +479,7 @@ describe('rondaPlayoffService batch writes', () => {
 
       await rondaPlayoffService.delete('latest', owner)
 
-      expect(mocks.jornadaDeleteMany).toHaveBeenCalledWith(jornadasVacias)
+      expect(mocks.jornadaDeleteMany).toHaveBeenCalledWith(sinContenido)
     })
   })
 

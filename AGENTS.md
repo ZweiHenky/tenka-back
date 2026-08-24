@@ -109,6 +109,91 @@ Una división define **días y horario por cada cancha** en la que juega. `durac
 - `parseConfiguredDays` vive en el mismo módulo y es el **único** parser de días del backend (`jornadaCreation` lo re-exporta por compatibilidad; `parseDaysPartido` delega en él).
 - Borrar una cancha con horarios la **desactiva** en vez de borrarla; apagar `multiplesCanchas` borra todas las filas de la liga.
 
+## Mínimo de partidos para eliminatorias (`minPartidosEliminatoria`)
+
+Campo de `Division`, **0 por defecto = sin requisito**, así que ninguna división existente cambia de
+comportamiento. Solo tiene sentido con `registrarParticipaciones` encendido: sin él no existe el
+dato de quién jugó, y exigir un mínimo dejaría fuera al plantel entero — por eso
+`elegibilidadService` lo ignora en ese caso.
+
+**Qué partidos cuentan** — [`elegibilidad/service.ts`](src/modules/elegibilidad/service.ts),
+`participacionesQueCuentan`: finalizados, de la fase regular (`rondaPlayoffId: null`), y
+
+| Tipo | Cuenta |
+|---|---|
+| `REGULAR` | Sí, los dos equipos |
+| `COMPLEMENTO` | **Solo `ladoMarcador: 'LOCAL'`**, el que suma puntos |
+| `AMISTOSO` | No |
+| Del cuadro | No |
+
+Lo del complemento no es arbitrario: es el mismo criterio de `tablaPosicion.recalcular`, donde el
+visitante "repite sin puntos" y tampoco recibe nada. Se agrupa por `jugadorIdSnapshot`, que
+sobrevive a la baja del jugador.
+
+**Dónde se bloquea**: en `resultWriter`, junto a las validaciones que ya existen de la lista de
+participantes, y solo si el partido es de eliminatoria y el mínimo es mayor que 0. El error nombra a
+los jugadores y sus partidos.
+
+**La excepción no necesita un permiso propio.** `writeResultInTransaction` no recibe el actor, pero
+su llamador en `partido/service.ts` ya pasó por `assertOwnerOrAdmin` y el del árbitro no. Así que la
+autorización es un campo del input, `permitirInelegibles`, **declarado solo en `resultSchema`**: los
+dos esquemas son `.strict()`, de modo que la petición del árbitro se **rechaza** si lo trae. Hay un
+test en `referee-access/validator.test.ts` que detiene a quien lo agregue "por simetría".
+
+## El complemento (`tipo: 'complemento'`)
+
+Un partido de relleno para que un equipo atrasado alcance a los demás. Tiene dos lados asimétricos:
+**"Puntos"** (`equipoLocalId`, el único que suma en la tabla — ver `tablaPosicion.recalcular`) y
+**"Sin puntos"** (`equipoVisitanteId`, que repite partido sin recibir nada).
+
+**Los dos lados pueden repetir**, y solo asignándolos a mano: el reparto automático nunca duplica a
+nadie. Lo que decide el efecto sobre los regulares es una sola línea, `usedTeamIds.add(localId)`,
+que es idempotente sobre un `Set`:
+
+| Equipo de "Puntos" | Efecto |
+|---|---|
+| Sin slot regular | Queda reservado: absorbe al sobrante cuando los habilitados son impares y no juega regular. |
+| Con un regular asignado a mano | El `add` no hace nada: conserva su regular **y** juega el complemento. |
+
+**Solo un slot regular libera al equipo de puntos.** Son los únicos que el servidor procesa antes y
+que alimentan `usedTeamIds` — el amistoso no reserva a nadie. El cliente replica exactamente esa
+regla en [`utils/descanso.ts`](../frontend/src/features/division/utils/descanso.ts) para saber
+cuántos equipos quedan disponibles: de ahí salen el aviso de "elige quién descansa" y
+`maxRegularSlots`, y los **tres** llamadores de `getActiveSlots` reciben ese conteo, no
+`habilitados.length`. Si divergen, la pantalla muestra un slot que la generación no puede llenar.
+
+**Un complemento NO cuenta como que esa pareja ya se enfrentó**, y es deliberado.
+`buildHistoricalMatchCounts(existing, 'REGULAR')` descarta cualquier otro tipo, así que A vs B en un
+complemento no impide que el calendario los cruce en un regular — ni siquiera el mismo día, porque
+el filtro de parejas duplicadas exime a los complementos. El complemento empareja calendarios; el
+enfrentamiento de verdad sigue pendiente. Los amistosos sí llevan historial propio y prohíben
+repetir pareja.
+
+## Reparto de equipos a slots (`generateNext`)
+
+**Dos pasadas, y el orden no es cosmético**: primero los slots que ya traen un equipo puesto a mano,
+después los vacíos.
+
+En una sola pasada un slot vacío anterior tomaba "el primer equipo sin partido" y podía llevarse al
+equipo fijado en un slot **posterior**, junto con su rival. Al llegar a ese slot se rearmaba la misma
+pareja y el filtro de duplicados la descartaba: la jornada se guardaba con **un partido menos y dos
+equipos habilitados sin jugar, sin ningún error**. El único rastro eran los partidos jugados
+descuadrados en la tabla de posiciones. Se disparaba siempre que hubiera un slot vacío antes de uno
+con equipo fijado — por ejemplo, fijar un equipo en el primer slot y otro en el noveno.
+
+**Un slot que se queda sin equipos ya no se descarta en silencio.** Si al terminar el reparto sobran
+dos o más equipos sin emparejar, `generateNext` lanza `ValidationError`. El umbral es dos porque con
+un número impar de equipos siempre sobra uno, y ese descansa.
+
+`computeMinimumHistoryMatching` ([`regularMatching.ts`](src/modules/jornada/regularMatching.ts)) **no
+crea aristas entre dos equipos fijados**: están clavados en slots distintos y no pueden jugar entre
+sí. Consecuencia medida: cada fijado necesita consumir un equipo libre como rival, así que si los
+fijados superan a los libres, los sobrantes se quedan sin pareja. Con los slots acotados a
+`ceil(equipos / 2)` y un fijado por slot eso no debería alcanzarse, pero es la razón de que exista la
+red de arriba.
+
+Lo cubre [`generateNext.pinned-slots.test.ts`](src/modules/jornada/__tests__/generateNext.pinned-slots.test.ts).
+
 ## Canchas: no chocar entre divisiones
 
 Las canchas (`LigaCancha`) son de la **liga**, y todas sus divisiones las comparten. No hay tabla de reservas: la ocupación se deriva de los `Partido` ya guardados, consultando por `ligaId`, así que es cross-división por construcción. Cuatro capas lo garantizan:

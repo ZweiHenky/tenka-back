@@ -78,6 +78,15 @@ export const resultSchema = z.object({
   allocations: z.array(allocationSchema).max(198),
   participaciones: z.array(participacionSchema).max(198).optional(),
   notas: notasSchema,
+  /**
+   * Autoriza alinear en eliminatorias a jugadores que no llegan al mínimo de partidos.
+   *
+   * Se declara **solo aquí**, no en `refereeResultSchema`: los dos esquemas son `.strict()`, así
+   * que la petición del árbitro se rechaza si intenta mandarlo. Y esta ruta ya pasó por
+   * `assertOwnerOrAdmin`, de modo que quien llega hasta el writer con la bandera puesta es el
+   * dueño de la liga o un administrador. La excepción no necesita un permiso propio.
+   */
+  permitirInelegibles: z.boolean().optional(),
 }).strict();
 
 export type CreateInput = z.output<typeof createSchema>;
