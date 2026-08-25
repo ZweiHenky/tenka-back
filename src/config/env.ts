@@ -80,6 +80,8 @@ const backendEnvSchema = z.object({
   UPLOAD_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(30),
   PLAYER_PHONE_LOOKUP_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(30),
   REFEREE_READ_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(40),
+  WAITLIST_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(5),
+  WAITLIST_RATE_WINDOW_MINUTES: z.coerce.number().int().min(1).max(1440).default(60),
   JORNADA_GENERATION_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(30),
   JORNADA_GENERATION_RATE_WINDOW_MINUTES: z.coerce.number().int().min(1).max(1440).default(10),
   PLAYOFF_GENERATION_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(15),

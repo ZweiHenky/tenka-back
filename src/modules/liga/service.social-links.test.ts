@@ -28,19 +28,18 @@ describe('redes sociales de liga', () => {
       nombre: 'Liga Social',
       descripcion: '',
       ubicacionId: 'ubicacion-1',
-      userId: owner.id,
       facebook: 'https://facebook.com/liga-social',
       x: 'https://x.com/liga_social',
       instagram: 'https://instagram.com/liga.social',
       tiktok: 'https://tiktok.com/@liga_social',
-    });
+    }, owner);
 
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
       facebook: 'https://facebook.com/liga-social',
       x: 'https://x.com/liga_social',
       instagram: 'https://instagram.com/liga.social',
       tiktok: 'https://tiktok.com/@liga_social',
-    }), undefined, undefined);
+    }), undefined, undefined, expect.anything());
   });
 
   it('actualiza un enlace y elimina otro con null', async () => {

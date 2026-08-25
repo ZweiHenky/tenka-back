@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { divisionEquipoService } from './service';
-import { createSchema, updateSchema } from './validator';
+import { createSchema, reemplazoSchema, updateSchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
 import { getTeamCode } from '../../utils/teamCode';
@@ -44,6 +44,29 @@ export const divisionEquipoController = {
         req.user!,
       );
       ok(res, result, 'Saldo pendiente actualizado');
+    } catch (e) { next(e); }
+  },
+
+  async reemplazo(req: Request, res: Response, next: NextFunction) {
+    try {
+      const parsed = reemplazoSchema.safeParse(req.body);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
+      const { equipo, ...result } = await divisionEquipoService.reemplazo(
+        req.params.divisionId,
+        req.params.equipoActualId,
+        parsed.data.equipoNuevoId,
+        req.user!,
+      );
+      ok(res, {
+        ...result,
+        equipo: {
+          id: equipo.id,
+          nombre: equipo.nombre,
+          logo: equipo.logo,
+          codigo: getTeamCode(equipo.id),
+          esPropio: req.user?.id === equipo.userId,
+        },
+      }, 'Equipo reemplazado exitosamente');
     } catch (e) { next(e); }
   },
 

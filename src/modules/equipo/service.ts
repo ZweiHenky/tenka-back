@@ -8,6 +8,7 @@ import { prisma } from '../../config/database';
 import { runInTransaction } from '../../utils/transaction';
 import type { Pagination } from '../../utils/pagination';
 import { signalBackgroundJob } from '../../workers/jobSignals';
+import { acquireAccountQuotaLock, assertAccountQuotaDelta } from '../../utils/accountQuota';
 
 const DUPLICATE_NAME_MESSAGE = 'Ya tienes un equipo con ese nombre';
 
@@ -34,20 +35,21 @@ export const equipoService = {
     return t;
   },
 
-  async create(data: { nombre: string; logoAssetId?: string | null; userId: string }): Promise<EquipoEntity> {
+  async create(data: { nombre: string; logoAssetId?: string | null }, actor: AuthenticatedUser): Promise<EquipoEntity> {
     const nombre = data.nombre.trim();
     const nombreNormalizado = nombre.toLowerCase();
-    if (await equipoRepository.findByNormalizedName(data.userId, nombreNormalizado)) {
-      throw new ConflictError(DUPLICATE_NAME_MESSAGE);
-    }
     try {
-      if (data.logoAssetId === undefined) return await equipoRepository.create({ nombre, nombreNormalizado, userId: data.userId });
       return await runInTransaction(async (tx) => {
-        const media = data.logoAssetId !== undefined ? await mediaService.prepareAttachment(tx, data.logoAssetId, data.userId, 'TEAM_LOGO') : undefined;
+        await acquireAccountQuotaLock(tx, actor.id);
+        await assertAccountQuotaDelta(tx, actor.id, { teams: 1 });
+        if (await tx.equipo.findFirst({ where: { userId: actor.id, nombreNormalizado } })) {
+          throw new ConflictError(DUPLICATE_NAME_MESSAGE);
+        }
+        const media = data.logoAssetId !== undefined ? await mediaService.prepareAttachment(tx, data.logoAssetId, actor.id, 'TEAM_LOGO') : undefined;
         return equipoRepository.create({
             nombre,
             nombreNormalizado,
-            userId: data.userId,
+            userId: actor.id,
             ...(media && { logo: media.url, logoPublicId: media.publicId }),
         }, tx);
       });
@@ -60,7 +62,7 @@ export const equipoService = {
   async update(id: string, data: Record<string, unknown>, actor: AuthenticatedUser): Promise<EquipoEntity> {
     const old = await this.getById(id);
     assertOwnerOrAdmin(actor, old.userId, 'Equipo');
-    const { logoAssetId, ...updateData } = data as { logoAssetId?: string | null; [key: string]: unknown };
+    const { logoAssetId, userId: _ignoredUserId, ...updateData } = data as { logoAssetId?: string | null; userId?: unknown; [key: string]: unknown };
     if (typeof data.nombre === 'string') {
       const nombre = data.nombre.trim();
       const nombreNormalizado = nombre.toLowerCase();

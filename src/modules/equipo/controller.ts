@@ -32,9 +32,9 @@ export const equipoController = {
 
   async create(req: Request, res: Response, next: NextFunction) {
     try {
-      const p = createSchema.safeParse({ ...req.body, userId: req.user!.id });
+      const p = createSchema.safeParse(req.body);
       if (!p.success) throw new ValidationError(firstIssueMessage(p.error));
-      created(res, toTeamResponse(await equipoService.create(p.data), req.user!.id), 'Equipo creado exitosamente');
+      created(res, toTeamResponse(await equipoService.create(p.data, req.user!), req.user!.id), 'Equipo creado exitosamente');
     } catch (e) { next(e); }
   },
 

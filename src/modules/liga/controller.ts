@@ -49,10 +49,7 @@ export const ligaController = {
     try {
       const parsed = createLigaSchema.safeParse(req.body);
       if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
-      const liga = await ligaService.create({
-        ...parsed.data,
-        userId: req.user!.id,
-      });
+      const liga = await ligaService.create(parsed.data, req.user!);
       created(res, publicLiga(liga), 'Liga creada exitosamente');
     } catch (err) {
       next(err);

@@ -1,6 +1,6 @@
-import { NotFoundError } from '../../utils/errors';
+import { NotFoundError, ValidationError } from '../../utils/errors';
 import { estadoLigaRepository } from './repository';
-import type { EstadoLigaEntity } from './entity';
+import { ESTADOS_LIGA, type EstadoLigaEntity } from './entity';
 
 export const estadoLigaService = {
   async list(): Promise<EstadoLigaEntity[]> {
@@ -17,13 +17,16 @@ export const estadoLigaService = {
     return estadoLigaRepository.create(data);
   },
 
-  async update(id: string, data: Record<string, unknown>): Promise<EstadoLigaEntity> {
+  async update(id: string, data: { nombre?: string }): Promise<EstadoLigaEntity> {
     await this.getById(id);
-    return estadoLigaRepository.update(id, data);
+    return estadoLigaRepository.update(id, { nombre: data.nombre });
   },
 
   async delete(id: string): Promise<void> {
-    await this.getById(id);
+    const estado = await this.getById(id);
+    if ((ESTADOS_LIGA as readonly string[]).includes(estado.codigo)) {
+      throw new ValidationError('No se puede eliminar un estado canónico de liga');
+    }
     await estadoLigaRepository.delete(id);
   },
 };

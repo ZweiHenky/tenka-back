@@ -8,6 +8,7 @@ router.get('/division/:divisionId', optionalAuth, divisionEquipoController.findB
 router.get('/equipo/:equipoId', optionalAuth, divisionEquipoController.findByEquipo);
 router.use(requireAuth);
 router.post('/', divisionEquipoController.create);
+router.post('/:divisionId/:equipoActualId/reemplazo', divisionEquipoController.reemplazo);
 router.patch('/:divisionId/:equipoId', divisionEquipoController.updateSaldoPendiente);
 router.delete('/:divisionId/:equipoId', divisionEquipoController.delete);
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { updateSchema } from './validator';
+import { reemplazoSchema, updateSchema } from './validator';
 
 describe('divisionEquipo updateSchema', () => {
   it.each([
@@ -24,5 +24,20 @@ describe('divisionEquipo updateSchema', () => {
     { saldoPendiente: '1.00', extra: true },
   ])('rejects invalid or non-strict payload %#', (payload) => {
     expect(updateSchema.safeParse(payload).success).toBe(false);
+  });
+});
+
+describe('divisionEquipo reemplazoSchema', () => {
+  it('accepts only a nonempty target id', () => {
+    expect(reemplazoSchema.parse({ equipoNuevoId: 'equipo-2' })).toEqual({ equipoNuevoId: 'equipo-2' });
+  });
+
+  it.each([
+    {},
+    { equipoNuevoId: '' },
+    { equipoNuevoId: 2 },
+    { equipoNuevoId: 'equipo-2', extra: true },
+  ])('rejects invalid or non-strict payload %#', (payload) => {
+    expect(reemplazoSchema.safeParse(payload).success).toBe(false);
   });
 });

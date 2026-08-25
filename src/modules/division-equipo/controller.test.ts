@@ -2,12 +2,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextFunction, Request, Response } from 'express';
 import type { AuthenticatedUser } from '../../types/auth';
 
-const mocks = vi.hoisted(() => ({ findByDivision: vi.fn(), updateSaldoPendiente: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  findByDivision: vi.fn(),
+  updateSaldoPendiente: vi.fn(),
+  reemplazo: vi.fn(),
+}));
 
 vi.mock('./service', () => ({
   divisionEquipoService: {
     findByDivision: mocks.findByDivision,
     updateSaldoPendiente: mocks.updateSaldoPendiente,
+    reemplazo: mocks.reemplazo,
   },
 }));
 
@@ -17,7 +22,7 @@ const owner: AuthenticatedUser = { id: 'owner-1', email: 'owner@test.com', rol: 
 
 function request(body: unknown) {
   return {
-    params: { divisionId: 'division-1', equipoId: 'equipo-1' },
+    params: { divisionId: 'division-1', equipoId: 'equipo-1', equipoActualId: 'equipo-1' },
     body,
     user: owner,
   } as unknown as Request;
@@ -69,6 +74,56 @@ describe('divisionEquipoController.updateSaldoPendiente', () => {
     await divisionEquipoController.updateSaldoPendiente(request({ saldoPendiente: '7.50' }), response(), next);
 
     expect(next).toHaveBeenCalledWith(error);
+  });
+});
+
+describe('divisionEquipoController.reemplazo', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns a sanitized public target summary with code and ownership', async () => {
+    mocks.reemplazo.mockResolvedValue({
+      divisionId: 'division-1',
+      equipoId: 'cm-target-xy99',
+      saldoPendiente: '12.50',
+      equipo: { id: 'cm-target-xy99', nombre: 'Tigres', logo: 'logo.png', userId: owner.id },
+      equipoReemplazadoId: 'equipo-1',
+      partidosActualizados: 4,
+    });
+    const res = response();
+    const next = vi.fn() as NextFunction;
+
+    await divisionEquipoController.reemplazo(request({ equipoNuevoId: 'cm-target-xy99' }), res, next);
+
+    expect(mocks.reemplazo).toHaveBeenCalledWith(
+      'division-1', 'equipo-1', 'cm-target-xy99', owner,
+    );
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: {
+        divisionId: 'division-1',
+        equipoId: 'cm-target-xy99',
+        saldoPendiente: '12.50',
+        equipo: {
+          id: 'cm-target-xy99', nombre: 'Tigres', logo: 'logo.png', codigo: 'XY99', esPropio: true,
+        },
+        equipoReemplazadoId: 'equipo-1',
+        partidosActualizados: 4,
+      },
+      message: 'Equipo reemplazado exitosamente',
+    });
+    expect(res.json).not.toHaveBeenCalledWith(expect.objectContaining({ userId: expect.anything() }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('rejects extra fields before calling the service', async () => {
+    const next = vi.fn() as NextFunction;
+
+    await divisionEquipoController.reemplazo(
+      request({ equipoNuevoId: 'equipo-2', extra: true }), response(), next,
+    );
+
+    expect(mocks.reemplazo).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 422 }));
   });
 });
 

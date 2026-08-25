@@ -57,4 +57,15 @@ describe('equipoController public DTO', () => {
       codigo: 'AB12', esPropio: false,
     }) });
   });
+
+  it('uses the authenticated actor and ignores body ownership on create', async () => {
+    mocks.create.mockResolvedValue(team);
+    const actor = { id: 'owner-1', email: 'owner@test.com', rol: 'CAPITAN' };
+    const req = { body: { nombre: 'Leones', userId: 'other-user' }, user: actor } as unknown as Request;
+    const res = response();
+
+    await equipoController.create(req, res, vi.fn());
+
+    expect(mocks.create).toHaveBeenCalledWith({ nombre: 'Leones' }, actor);
+  });
 });

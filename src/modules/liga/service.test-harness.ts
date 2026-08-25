@@ -33,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   executeRawUnsafe: vi.fn(),
   divisionCanchaHorarioCount: vi.fn(),
   divisionCanchaHorarioDeleteMany: vi.fn(),
+  acquireAccountQuotaLock: vi.fn(),
+  assertAccountQuotaDelta: vi.fn(),
 }));
 
 vi.mock('./repository', () => ({
@@ -94,6 +96,11 @@ vi.mock('../../config/database', () => ({
 
 vi.mock('../media/service', () => ({
   mediaService: { scheduleImageCleanup: vi.fn() },
+}));
+
+vi.mock('../../utils/accountQuota', () => ({
+  acquireAccountQuotaLock: mocks.acquireAccountQuotaLock,
+  assertAccountQuotaDelta: mocks.assertAccountQuotaDelta,
 }));
 
 export const owner: AuthenticatedUser = { id: 'user-1', email: 'owner@test.com', rol: 'LIGA' };

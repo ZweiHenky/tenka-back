@@ -41,6 +41,8 @@ describe('parseBackendEnv', () => {
       GLOBAL_RATE_LIMIT: 400,
       PLAYER_PHONE_LOOKUP_RATE_LIMIT: 30,
       REFEREE_READ_RATE_LIMIT: 40,
+      WAITLIST_RATE_LIMIT: 5,
+      WAITLIST_RATE_WINDOW_MINUTES: 60,
       JORNADA_GENERATION_RATE_LIMIT: 30,
       JORNADA_GENERATION_RATE_WINDOW_MINUTES: 10,
       PLAYOFF_GENERATION_RATE_LIMIT: 15,
@@ -66,6 +68,17 @@ describe('parseBackendEnv', () => {
       PLAYOFF_GENERATION_RATE_WINDOW_MINUTES: 20,
       DESTRUCTIVE_OPERATION_RATE_LIMIT: 25,
       DESTRUCTIVE_OPERATION_RATE_WINDOW_MINUTES: 90,
+    });
+  });
+
+  it('parses an independent waitlist rate limit and window', () => {
+    expect(parseBackendEnv({
+      ...validEnv,
+      WAITLIST_RATE_LIMIT: '8',
+      WAITLIST_RATE_WINDOW_MINUTES: '120',
+    })).toMatchObject({
+      WAITLIST_RATE_LIMIT: 8,
+      WAITLIST_RATE_WINDOW_MINUTES: 120,
     });
   });
 

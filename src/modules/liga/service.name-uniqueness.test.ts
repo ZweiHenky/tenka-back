@@ -27,18 +27,20 @@ describe('nombre global unico de liga', () => {
     mocks.findByNormalizedName.mockResolvedValue(existingLiga);
 
     await expect(ligaService.create({
-      nombre: '  LIGA CENTRO  ', descripcion: '', ubicacionId: 'ubicacion-1', userId,
-    })).rejects.toThrow('Ya existe una liga con ese nombre');
+      nombre: '  LIGA CENTRO  ', descripcion: '', ubicacionId: 'ubicacion-1',
+    }, { ...owner, id: userId })).rejects.toThrow('Ya existe una liga con ese nombre');
     expect(mocks.findByNormalizedName).toHaveBeenCalledWith('liga centro');
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it('normaliza el nombre al crear', async () => {
-    await ligaService.create({ nombre: '  Liga Norte  ', descripcion: '', ubicacionId: 'ubicacion-1', userId: 'user-2' });
+    await ligaService.create({ nombre: '  Liga Norte  ', descripcion: '', ubicacionId: 'ubicacion-1' }, { ...owner, id: 'user-2' });
 
     expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
       nombre: 'Liga Norte', nombreNormalizado: 'liga norte', userId: 'user-2',
-    }), undefined, undefined);
+    }), undefined, undefined, expect.anything());
+    expect(mocks.acquireAccountQuotaLock).toHaveBeenCalledWith(expect.anything(), 'user-2');
+    expect(mocks.assertAccountQuotaDelta).toHaveBeenCalledWith(expect.anything(), 'user-2', { leagues: 1 });
   });
 
   it('permite conservar el nombre propio al editar excluyendo la liga actual', async () => {
@@ -58,11 +60,16 @@ describe('nombre global unico de liga', () => {
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
+  it('never transfers ownership through update service input', async () => {
+    await ligaService.update('liga-1', { descripcion: 'Nueva', userId: 'other-user' } as any, owner);
+    expect(mocks.update).toHaveBeenCalledWith('liga-1', { descripcion: 'Nueva' }, [], undefined);
+  });
+
   it.each(['create', 'update'] as const)('convierte P2002 durante %s en ConflictError', async (operation) => {
     mocks[operation].mockRejectedValue({ code: 'P2002' });
 
     const result = operation === 'create'
-      ? ligaService.create({ nombre: 'Liga Norte', descripcion: '', ubicacionId: 'ubicacion-1', userId: 'user-1' })
+      ? ligaService.create({ nombre: 'Liga Norte', descripcion: '', ubicacionId: 'ubicacion-1' }, owner)
       : ligaService.update('liga-1', { nombre: 'Liga Norte' }, owner);
     await expect(result).rejects.toMatchObject({ statusCode: 409, message: 'Ya existe una liga con ese nombre' });
   });

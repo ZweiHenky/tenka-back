@@ -9,6 +9,8 @@ export function errorHandler(err: Error, req: Request, res: Response, next: Next
   }
   if (err instanceof AppError) {
     const body: ApiResponse = { success: false, error: err.message, requestId: req.requestId };
+    if (err.code !== undefined) body.code = err.code;
+    if (err.details !== undefined) body.details = err.details;
     res.status(err.statusCode).json(body);
     return;
   }

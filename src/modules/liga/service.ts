@@ -8,6 +8,7 @@ import type { AuthenticatedUser } from '../../types/auth';
 import { runInTransaction } from '../../utils/transaction';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
 import { signalBackgroundJob } from '../../workers/jobSignals';
+import { acquireAccountQuotaLock, assertAccountQuotaDelta } from '../../utils/accountQuota';
 
 const DUPLICATE_NAME_MESSAGE = 'Ya existe una liga con ese nombre';
 const DUPLICATE_COURT_MESSAGE = 'Ya existe una cancha con ese nombre en esta liga';
@@ -134,12 +135,8 @@ export const ligaService = {
     instagram?: string | null;
     tiktok?: string | null;
     ubicacionId: string;
-    userId: string;
-  }): Promise<LigaEntity> {
+  }, actor: AuthenticatedUser): Promise<LigaEntity> {
     const { canchas, arbitros, logoAssetId, coverAssetId, ...ligaData } = data;
-    const location = await prisma.ubicacion.findUnique({ where: { id: data.ubicacionId }, select: { timeZone: true } });
-    if (!location) throw new NotFoundError('Ubicación');
-    const authoritativeLigaData = { ...ligaData, timeZone: location.timeZone };
     validateCanchas(data.multiplesCanchas ?? false, canchas ?? []);
     validateArbitros(data.usaArbitros ?? false, arbitros ?? []);
     const nombre = data.nombre.trim();
@@ -153,14 +150,17 @@ export const ligaService = {
         nombreNormalizado: normalizeName(cancha.nombre),
         activa: data.multiplesCanchas === true,
       }));
-      if (logoAssetId === undefined && coverAssetId === undefined) {
-        return await ligaRepository.create({ ...authoritativeLigaData, nombre, nombreNormalizado }, courtWrites, arbitros);
-      }
       return await runInTransaction(async (tx) => {
-        const logo = logoAssetId !== undefined ? await mediaService.prepareAttachment(tx, logoAssetId, data.userId, 'LEAGUE_LOGO') : undefined;
-        const cover = coverAssetId !== undefined ? await mediaService.prepareAttachment(tx, coverAssetId, data.userId, 'LEAGUE_COVER') : undefined;
+        await acquireAccountQuotaLock(tx, actor.id);
+        await assertAccountQuotaDelta(tx, actor.id, { leagues: 1 });
+        const location = await tx.ubicacion.findUnique({ where: { id: data.ubicacionId }, select: { timeZone: true } });
+        if (!location) throw new NotFoundError('Ubicación');
+        const logo = logoAssetId !== undefined ? await mediaService.prepareAttachment(tx, logoAssetId, actor.id, 'LEAGUE_LOGO') : undefined;
+        const cover = coverAssetId !== undefined ? await mediaService.prepareAttachment(tx, coverAssetId, actor.id, 'LEAGUE_COVER') : undefined;
         return ligaRepository.create({
-          ...authoritativeLigaData,
+          ...ligaData,
+          userId: actor.id,
+          timeZone: location.timeZone,
           nombre,
           nombreNormalizado,
           ...(logo && { logo: logo.url, logoPublicId: logo.publicId }),
@@ -191,7 +191,7 @@ export const ligaService = {
   }, actor: AuthenticatedUser): Promise<LigaEntity> {
     const old = await ligaRepository.findUpdateContext(id, actor);
     if (!old) throw new NotFoundError('Liga');
-    const { canchas, arbitros, logoAssetId, coverAssetId, ...rawLigaData } = data;
+    const { canchas, arbitros, logoAssetId, coverAssetId, userId: _ignoredUserId, ...rawLigaData } = data as typeof data & { userId?: unknown };
     const ligaData: LigaWriteData = rawLigaData;
     if (data.ubicacionId) {
       const location = await prisma.ubicacion.findUnique({ where: { id: data.ubicacionId }, select: { timeZone: true } });

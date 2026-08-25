@@ -2,11 +2,12 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../config/database';
 import { ok, noContent } from '../../utils/response';
-import { ValidationError } from '../../utils/errors';
+import { ForbiddenError, ValidationError } from '../../utils/errors';
 import { mediaService } from '../media/service';
 import { userService } from './service';
 import { signalBackgroundJob } from '../../workers/jobSignals';
 import { firstIssueMessage } from '../../utils/validation';
+import { getAccountQuota } from '../../utils/accountQuota';
 
 const phoneVisibilitySchema = z.object({
   showPhoneInPublicLeague: z.boolean(),
@@ -22,6 +23,25 @@ const deleteAccountSchema = z.object({
 });
 
 export const userController = {
+  async quota(req: Request, res: Response, next: NextFunction) {
+    try {
+      ok(res, await getAccountQuota(req.user!.id));
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  async quotaByUser(req: Request, res: Response, next: NextFunction) {
+    try {
+      if (req.user!.id !== req.params.userId && req.user!.rol !== 'ADMINISTRADOR') {
+        throw new ForbiddenError();
+      }
+      ok(res, await getAccountQuota(req.params.userId));
+    } catch (err) {
+      next(err);
+    }
+  },
+
   async activateLeagueRole(req: Request, res: Response, next: NextFunction) {
     try {
       const user = await userService.activateLeagueRole(req.user!.id);

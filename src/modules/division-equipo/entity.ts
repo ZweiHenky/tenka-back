@@ -12,3 +12,9 @@ export interface DivisionEquipoEntity {
     userId: string;
   };
 }
+
+export interface ReemplazoDivisionEquipoEntity extends DivisionEquipoEntity {
+  equipo: NonNullable<DivisionEquipoEntity['equipo']>;
+  equipoReemplazadoId: string;
+  partidosActualizados: number;
+}

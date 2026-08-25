@@ -31,8 +31,8 @@ export const divisionRepository: DivisionRepository = {
     return prisma.division.findMany({ where: { ligaId }, orderBy: { createdAt: 'desc' } });
   },
 
-  async create(data: Record<string, unknown>): Promise<DivisionEntity> {
-    return prisma.division.create({ data: data as any, include: DIVISION_WRITE_INCLUDE });
+  async create(data: Record<string, unknown>, tx?: Prisma.TransactionClient): Promise<DivisionEntity> {
+    return (tx ?? prisma).division.create({ data: data as any, include: DIVISION_WRITE_INCLUDE });
   },
 
   async update(id: string, data: Record<string, unknown>, tx?: Prisma.TransactionClient): Promise<DivisionEntity> {

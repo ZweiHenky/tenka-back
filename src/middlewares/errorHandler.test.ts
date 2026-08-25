@@ -44,6 +44,20 @@ describe('errorHandler', () => {
     });
   });
 
+  it('includes optional stable code and details without changing ordinary AppErrors', async () => {
+    const response = await request(createTestApp(new AppError(422, 'Límite alcanzado', 'QUOTA_TEAMS_EXCEEDED', {
+      resource: 'teams', limit: 10, usage: 10, delta: 1,
+    }))).get('/').set('x-request-id', 'request-quota');
+
+    expect(response.body).toEqual({
+      success: false,
+      error: 'Límite alcanzado',
+      code: 'QUOTA_TEAMS_EXCEEDED',
+      details: { resource: 'teams', limit: 10, usage: 10, delta: 1 },
+      requestId: 'request-quota',
+    });
+  });
+
   it.each([
     [new UnauthorizedError(), 401],
     [new ForbiddenError(), 403],

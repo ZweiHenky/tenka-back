@@ -7,6 +7,8 @@ import { divisionService } from '../../modules/division/service';
 import { jornadaService } from '../../modules/jornada/service';
 import { ligaService } from '../../modules/liga/service';
 import { partidoService } from '../../modules/partido/service';
+import { equipoService } from '../../modules/equipo/service';
+import { acquireAccountQuotaLock } from '../../utils/accountQuota';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
 import type { AuthenticatedUser } from '../../types/auth';
 import { getIntegrationPgConnectionString, INTEGRATION_SCHEMA } from './database';
@@ -369,6 +371,117 @@ describe('transactional data integrity against PostgreSQL', () => {
     } finally {
       releaseFirst();
       await Promise.allSettled([clientA.$disconnect(), clientB.$disconnect()]);
+    }
+  });
+
+  test('account quota lock serializes concurrent team creates at the free-tier boundary', async () => {
+    const blocker = newPrismaClient('it-integrity-quota-blocker');
+    const extraIds = Array.from({ length: 5 }, (_, index) => `it-integrity-quota-existing-${index + 1}`);
+    let releaseBlocker!: () => void;
+    const holdBlocker = new Promise<void>((resolve) => { releaseBlocker = resolve; });
+    let blockerLocked!: () => void;
+    const hasBlockerLock = new Promise<void>((resolve) => { blockerLocked = resolve; });
+
+    await prisma.user.update({ where: { id: ids.user }, data: { rol: 'CAPITAN' } });
+    await prisma.equipo.createMany({
+      data: extraIds.map((id, index) => ({
+        id,
+        nombre: `Quota Existing ${index + 1}`,
+        nombreNormalizado: `quota-existing-${index + 1}`,
+        userId: ids.user,
+      })),
+    });
+
+    const blockerTransaction = blocker.$transaction(async (tx) => {
+      await acquireAccountQuotaLock(tx, ids.user);
+      blockerLocked();
+      await holdBlocker;
+    });
+
+    try {
+      await hasBlockerLock;
+      const competing = [
+        equipoService.create({ nombre: 'Quota Winner A' }, owner),
+        equipoService.create({ nombre: 'Quota Winner B' }, owner),
+      ];
+      await expect(waitForBlockedAdvisoryLock()).resolves.toBe(true);
+      releaseBlocker();
+      await blockerTransaction;
+
+      const results = await Promise.allSettled(competing);
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      expect(rejected?.reason).toMatchObject({ statusCode: 422, code: 'QUOTA_TEAMS_EXCEEDED' });
+      await expect(prisma.equipo.count({ where: { userId: ids.user } })).resolves.toBe(10);
+    } finally {
+      releaseBlocker();
+      await Promise.allSettled([blockerTransaction, blocker.$disconnect()]);
+    }
+  });
+
+  test('activation and reset cannot consume the same active-division slot', async () => {
+    const draftStateId = 'it-quota-draft-state';
+    const finalizedStateId = 'it-quota-finalized-state';
+    const draftDivisionId = 'it-quota-draft-division';
+    const blocker = newPrismaClient('it-quota-activation-blocker');
+    let releaseBlocker!: () => void;
+    const holdBlocker = new Promise<void>((resolve) => { releaseBlocker = resolve; });
+    let blockerLocked!: () => void;
+    const hasBlockerLock = new Promise<void>((resolve) => { blockerLocked = resolve; });
+
+    await prisma.estadoLiga.createMany({
+      data: [
+        { id: draftStateId, nombre: 'Borrador cuota', codigo: 'BORRADOR' },
+        { id: finalizedStateId, nombre: 'Finalizada cuota', codigo: 'FINALIZADA' },
+      ],
+    });
+    await prisma.division.update({ where: { id: ids.division }, data: { estadoLigaId: finalizedStateId } });
+    await prisma.division.create({
+      data: {
+        id: draftDivisionId,
+        nombre: 'Quota Draft Division',
+        maxEquipos: 4,
+        ligaId: ids.liga,
+        estadoLigaId: draftStateId,
+        categoriaId: ids.categoria,
+        tipoId: ids.tipo,
+        tipoCompetenciaId: ids.competencia,
+      },
+    });
+
+    const blockerTransaction = blocker.$transaction(async (tx) => {
+      await acquireAccountQuotaLock(tx, ids.user);
+      blockerLocked();
+      await holdBlocker;
+    });
+
+    try {
+      await hasBlockerLock;
+      const competing = [
+        divisionService.resetDivision(ids.division, owner),
+        divisionService.update(draftDivisionId, { estadoLigaId: ids.estado }, owner),
+      ];
+      await expect(waitForBlockedAdvisoryLock()).resolves.toBe(true);
+      releaseBlocker();
+      await blockerTransaction;
+
+      const results = await Promise.allSettled(competing);
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      const rejected = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      expect(rejected?.reason).toMatchObject({ statusCode: 422, code: 'QUOTA_ACTIVE_DIVISIONS_EXCEEDED' });
+      await expect(prisma.division.count({
+        where: { ligaId: ids.liga, estadoLiga: { codigo: { in: ['ABIERTA', 'EN_CURSO'] } } },
+      })).resolves.toBe(1);
+
+      if (results[0].status === 'rejected') {
+        await expect(prisma.jornada.count({ where: { id: ids.jornada } })).resolves.toBe(1);
+        await expect(prisma.rondaPlayoff.count({ where: { id: ids.ronda } })).resolves.toBe(1);
+      }
+    } finally {
+      releaseBlocker();
+      await Promise.allSettled([blockerTransaction, blocker.$disconnect()]);
+      await prisma.liga.deleteMany({ where: { id: ids.liga } });
+      await prisma.estadoLiga.deleteMany({ where: { id: { in: [draftStateId, finalizedStateId] } } });
     }
   });
 

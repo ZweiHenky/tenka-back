@@ -15,5 +15,10 @@ export const updateSchema = z.object({
     }),
 }).strict();
 
+export const reemplazoSchema = z.object({
+  equipoNuevoId: z.string().min(1),
+}).strict();
+
 export type CreateInput = z.output<typeof createSchema>;
 export type UpdateInput = z.output<typeof updateSchema>;
+export type ReemplazoInput = z.output<typeof reemplazoSchema>;

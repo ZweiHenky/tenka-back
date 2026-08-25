@@ -20,6 +20,7 @@ export const loggerOptions = {
       '*.token',
       '*.code',
       '*.otp',
+      '*.email',
       '*.phoneNumber',
       '*.telefono',
       '*.DATABASE_URL',

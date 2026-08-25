@@ -6,6 +6,8 @@ import { userController } from './controller';
 const router = Router();
 
 router.use(requireAuth);
+router.get('/me/quota', userController.quota);
+router.get('/:userId/quota', userController.quotaByUser);
 router.post('/me/activate-league-role', userController.activateLeagueRole);
 router.patch('/me', userController.updateMe);
 router.patch('/me/phone-visibility', userController.updatePhoneVisibility);

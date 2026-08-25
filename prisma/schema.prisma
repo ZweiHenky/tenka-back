@@ -13,6 +13,12 @@ enum UserRol {
   ADMINISTRADOR
 }
 
+enum WaitlistRole {
+  ORGANIZADOR
+  CAPITAN
+  AFICIONADO
+}
+
 enum TipoPartido {
   REGULAR
   AMISTOSO
@@ -160,6 +166,21 @@ model Verification {
   updatedAt  DateTime?
 
   @@index([identifier])
+}
+
+model WaitlistEntry {
+  id                   String        @id @default(cuid())
+  email                String
+  emailNormalized      String        @unique
+  role                 WaitlistRole?
+  source               String?
+  consentAt            DateTime
+  consentNoticeVersion String
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([createdAt])
+  @@map("waitlist_entries")
 }
 
 model Categoria {

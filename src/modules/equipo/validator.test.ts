@@ -10,4 +10,9 @@ describe('equipo nombre validator', () => {
   it('rechaza un nombre compuesto solo por espacios', () => {
     expect(createSchema.safeParse({ nombre: '   ', userId: 'user-1' }).success).toBe(false);
   });
+
+  it('does not expose ownership in create or update inputs', () => {
+    expect(createSchema.parse({ nombre: 'Halcones', userId: 'other-user' })).not.toHaveProperty('userId');
+    expect(updateSchema.parse({ nombre: 'Leones', userId: 'other-user' })).not.toHaveProperty('userId');
+  });
 });

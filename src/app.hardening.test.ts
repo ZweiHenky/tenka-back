@@ -1,10 +1,11 @@
 import express from 'express';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createApp } from './app';
 import { errorHandler } from './middlewares/errorHandler';
 import { createRateLimiter } from './middlewares/rateLimits';
 import { requestContext } from './middlewares/requestContext';
+import { waitlistRepository } from './modules/waitlist/repository';
 
 describe('API hardening', () => {
   const app = createApp();
@@ -50,6 +51,34 @@ describe('API hardening', () => {
 
     expect(response.status).toBe(200);
     expect(response.body[0].target.package_name).toBe('studio.tenka.app');
+  });
+
+  it('mounts the public waitlist endpoint with a generic idempotent response', async () => {
+    const create = vi.spyOn(waitlistRepository, 'create').mockResolvedValue(undefined);
+
+    const first = await request(app).post('/api/waitlist').send({
+      email: '  Person@Example.com ',
+      role: 'CAPITAN',
+      source: 'LANDING_HERO',
+      consent: true,
+    });
+    const duplicate = await request(app).post('/api/waitlist').send({
+      email: 'person@example.com',
+      consent: true,
+    });
+
+    expect(first.status).toBe(200);
+    expect(first.body).toEqual({ success: true, message: 'Solicitud aceptada' });
+    expect(duplicate.status).toBe(200);
+    expect(duplicate.body).toEqual(first.body);
+    expect(create).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      email: 'Person@Example.com',
+      emailNormalized: 'person@example.com',
+    }));
+    expect(create).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      emailNormalized: 'person@example.com',
+    }));
+    create.mockRestore();
   });
 
   it('returns a normalized 429 response', async () => {

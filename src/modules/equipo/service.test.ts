@@ -8,9 +8,17 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   delete: vi.fn(),
+  txFindFirst: vi.fn(),
+  acquireAccountQuotaLock: vi.fn(),
+  assertAccountQuotaDelta: vi.fn(),
 }));
 
 vi.mock('./repository', () => ({ equipoRepository: mocks }));
+vi.mock('../../config/database', () => ({ prisma: { equipo: { findFirst: mocks.txFindFirst } } }));
+vi.mock('../../utils/accountQuota', () => ({
+  acquireAccountQuotaLock: mocks.acquireAccountQuotaLock,
+  assertAccountQuotaDelta: mocks.assertAccountQuotaDelta,
+}));
 vi.mock('../media/service', () => ({
   mediaService: { scheduleImageCleanup: vi.fn() },
 }));
@@ -35,25 +43,28 @@ describe('equipoService nombre unico por usuario', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findByNormalizedName.mockResolvedValue(null);
+    mocks.txFindFirst.mockResolvedValue(null);
     mocks.findById.mockResolvedValue(existing);
     mocks.create.mockImplementation(async (data) => ({ id: 'new-team', logo: null, logoPublicId: null, ...data }));
     mocks.update.mockImplementation(async (_id, data) => ({ ...existing, ...data }));
   });
 
   it('rechaza un nombre duplicado para el mismo usuario ignorando mayusculas y espacios', async () => {
-    mocks.findByNormalizedName.mockResolvedValue(existing);
+    mocks.txFindFirst.mockResolvedValue(existing);
 
-    await expect(equipoService.create({ nombre: '  HALCONES  ', userId: 'user-1' }))
+    await expect(equipoService.create({ nombre: '  HALCONES  ' }, owner))
       .rejects.toThrow('Ya tienes un equipo con ese nombre');
-    expect(mocks.findByNormalizedName).toHaveBeenCalledWith('user-1', 'halcones');
+    expect(mocks.txFindFirst).toHaveBeenCalledWith({ where: { userId: 'user-1', nombreNormalizado: 'halcones' } });
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it('permite el mismo nombre a otro usuario', async () => {
-    await equipoService.create({ nombre: ' Halcones ', userId: 'user-2' });
+    await equipoService.create({ nombre: ' Halcones ' }, foreignUser);
 
-    expect(mocks.findByNormalizedName).toHaveBeenCalledWith('user-2', 'halcones');
-    expect(mocks.create).toHaveBeenCalledWith({ nombre: 'Halcones', nombreNormalizado: 'halcones', userId: 'user-2' });
+    expect(mocks.txFindFirst).toHaveBeenCalledWith({ where: { userId: 'user-2', nombreNormalizado: 'halcones' } });
+    expect(mocks.create).toHaveBeenCalledWith({ nombre: 'Halcones', nombreNormalizado: 'halcones', userId: 'user-2' }, expect.anything());
+    expect(mocks.acquireAccountQuotaLock).toHaveBeenCalledWith(expect.anything(), 'user-2');
+    expect(mocks.assertAccountQuotaDelta).toHaveBeenCalledWith(expect.anything(), 'user-2', { teams: 1 });
   });
 
   it('permite conservar el nombre propio al editar', async () => {
@@ -75,7 +86,7 @@ describe('equipoService nombre unico por usuario', () => {
   it('convierte P2002 durante create en ConflictError', async () => {
     mocks.create.mockRejectedValue({ code: 'P2002' });
 
-    await expect(equipoService.create({ nombre: 'Halcones', userId: 'user-1' }))
+    await expect(equipoService.create({ nombre: 'Halcones' }, owner))
       .rejects.toMatchObject({ statusCode: 409, message: 'Ya tienes un equipo con ese nombre' });
   });
 
@@ -84,6 +95,11 @@ describe('equipoService nombre unico por usuario', () => {
 
     await expect(equipoService.update('team-1', { nombre: 'Leones' }, owner))
       .rejects.toMatchObject({ statusCode: 409, message: 'Ya tienes un equipo con ese nombre' });
+  });
+
+  it('never transfers ownership through update service input', async () => {
+    await equipoService.update('team-1', { nombre: 'Leones', userId: 'user-2' }, owner);
+    expect(mocks.update).toHaveBeenCalledWith('team-1', { nombre: 'Leones', nombreNormalizado: 'leones' });
   });
 
   it.each([

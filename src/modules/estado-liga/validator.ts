@@ -12,7 +12,6 @@ export const createSchema = z.object({
 
 export const updateSchema = z.object({
   nombre: z.string().min(1).optional(),
-  codigo: z.enum(ESTADOS_LIGA).optional(),
 });
 
 export type CreateInput = z.output<typeof createSchema>;
