@@ -246,12 +246,26 @@ describe('consultas de lectura de liga', () => {
 
     const select = mocks.ligaFindMany.mock.calls[0][0].select;
     expect(select).toEqual(expect.objectContaining({ id: true, nombre: true, descripcion: true, logo: true, cancha: true, ubicacionId: true }));
+    expect(select.ubicacion).toEqual({ select: { nombreCompleto: true } });
     expect(select).not.toHaveProperty('user');
     expect(select).not.toHaveProperty('canchas');
     expect(select).not.toHaveProperty('arbitros');
     expect(select.divisiones.select).toEqual(expect.objectContaining({ id: true, nombre: true, maxEquipos: true, arbitraje: true }));
     // La tarjeta lo muestra junto al tipo, así que la proyección lo trae; el resto sigue liviano.
     expect(select.divisiones.select.tipoCompetencia).toEqual({ select: { id: true, nombre: true } });
+  });
+
+  it('usa un desempate estable por id sin coordenadas', async () => {
+    mocks.ligaFindMany.mockResolvedValue([]);
+    mocks.ligaCount.mockResolvedValue(0);
+
+    await ligaRepository.findAllPaginated({ page: 2, limit: 5 });
+
+    expect(mocks.ligaFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      skip: 5,
+      take: 5,
+    }));
   });
 
   it('usa la proyeccion minima de tarjetas para las ligas del propietario', async () => {

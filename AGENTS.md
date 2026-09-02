@@ -63,6 +63,19 @@ Uses **pnpm** (see `pnpm-lock.yaml`). Do not use npm/yarn. All scripts and comma
 - Seeds and ad hoc database scripts must run through `scripts/development-script.mjs`; direct execution is blocked.
 - Direct Prisma CLI commands are prohibited. Use the `pnpm db:*` scripts documented in `../DATABASE-SAFETY.md`.
 
+## Ligas cercanas
+
+`GET /api/ligas` acepta `latitude` y `longitude` opcionales, siempre juntas y solo en modo publico.
+El repositorio calcula Haversine en PostgreSQL antes de paginar, sin PostGIS, y ordena por distancia,
+`createdAt DESC`, `id ASC`. La consulta raw es parametrizada y corre en una transaccion despues de
+`configureRawQuerySchema`, porque integracion usa `tenka_integration` y el adapter no configura el
+`search_path` para SQL raw.
+
+La visibilidad y categoria/tipo/estado viven en el mismo `EXISTS` de division y la visibilidad se
+decide por `EstadoLiga.codigo <> 'BORRADOR'`. SQL devuelve IDs, distancia y total; Prisma hidrata la
+proyeccion publica y el repositorio reconstruye el orden. El DTO incluye
+`ubicacion.nombreCompleto` y `distanceKm?`. Sin coordenadas se conserva Prisma con desempate por ID.
+
 ## Data Model
 
 ```
@@ -80,7 +93,7 @@ TipoCompetencia ────────┘
 - **Equipo** es una entidad independiente: se puede crear sin relación alguna, y luego asignarse a una o más divisiones.
 - Cada **Liga** contiene una o más **Divisiones**.
 - Las **Divisiones** referencian `Categoria`, `Tipo`, `EstadoLiga`, `TipoCompetencia` como catálogos.
-- **Jugador** es una entidad ligada a un `User` vía `phoneNumber` (perfil "mi perfil"). Se relaciona con `Equipo` (`EquipoJugador`, con `dorsal`) y con `Division` (`DivisionJugador`) a través de pivotes.
+- **Jugador** es una entidad ligada a un `User` vía `phoneNumber` (perfil "mi perfil"). No tiene dorsal global: el dorsal actual pertenece a `EquipoJugador` y se resuelve siempre por `equipoId`. `DivisionJugador.dorsal` preserva la plantilla de la división y se sincroniza cuando el dueño cambia el dorsal del equipo; los dorsales de anotaciones y participaciones son snapshots históricos y no se reescriben.
 
 ## Horario por cancha (`DivisionCanchaHorario`)
 
@@ -146,21 +159,26 @@ Un partido de relleno para que un equipo atrasado alcance a los demás. Tiene do
 **"Puntos"** (`equipoLocalId`, el único que suma en la tabla — ver `tablaPosicion.recalcular`) y
 **"Sin puntos"** (`equipoVisitanteId`, que repite partido sin recibir nada).
 
-**Los dos lados pueden repetir**, y solo asignándolos a mano: el reparto automático nunca duplica a
-nadie. Lo que decide el efecto sobre los regulares es una sola línea, `usedTeamIds.add(localId)`,
-que es idempotente sobre un `Set`:
+**Los dos lados pueden repetir.** El efecto de Puntos sobre los regulares depende de la paridad del
+grupo que queda por emparejar:
 
 | Equipo de "Puntos" | Efecto |
 |---|---|
-| Sin slot regular | Queda reservado: absorbe al sobrante cuando los habilitados son impares y no juega regular. |
-| Con un regular asignado a mano | El `add` no hace nada: conserva su regular **y** juega el complemento. |
+| Sin slot regular y grupo impar | Queda reservado: absorbe al sobrante y no juega regular. |
+| Sin slot regular y grupo par | Conserva un regular automático y además juega el complemento. |
+| Con un regular asignado a mano | Conserva su regular **y** juega el complemento. |
 
-**Solo un slot regular libera al equipo de puntos.** Son los únicos que el servidor procesa antes y
-que alimentan `usedTeamIds` — el amistoso no reserva a nadie. El cliente replica exactamente esa
-regla en [`utils/descanso.ts`](../frontend/src/features/division/utils/descanso.ts) para saber
-cuántos equipos quedan disponibles: de ahí salen el aviso de "elige quién descansa" y
-`maxRegularSlots`, y los **tres** llamadores de `getActiveSlots` reciben ese conteo, no
-`habilitados.length`. Si divergen, la pantalla muestra un slot que la generación no puede llenar.
+**Solo un slot regular impide que Puntos absorba el descanso.** Son los únicos que el servidor
+procesa antes y que alimentan `usedTeamIds`; un amistoso no reserva a nadie. Entre los equipos de
+Puntos libres se reserva como máximo uno, y únicamente si el grupo regular es impar. El cliente
+replica esa regla en [`utils/descanso.ts`](../frontend/src/features/division/utils/descanso.ts): de
+ahí salen el aviso de "elige quién descansa" y `maxRegularSlots`, y los **tres** llamadores de
+`getActiveSlots` reciben ese conteo, no `habilitados.length`. Si divergen, la pantalla muestra un
+slot que la generación no puede llenar.
+
+Con habilitados impares, si todos los equipos de Puntos ya tienen regular, el complemento no cubre
+el descanso: el request debe incluir `descansoEquipoId`. Esa es la única combinación válida de
+complemento y descanso; si algún Puntos libre ya absorbe al sobrante, mandar ambos se rechaza.
 
 **Un complemento NO cuenta como que esa pareja ya se enfrentó**, y es deliberado.
 `buildHistoricalMatchCounts(existing, 'REGULAR')` descarta cualquier otro tipo, así que A vs B en un

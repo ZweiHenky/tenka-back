@@ -6,12 +6,16 @@ const mocks = vi.hoisted(() => ({
   equipoFindUnique: vi.fn(),
   jugadorFindFirst: vi.fn(),
   jugadorFindUnique: vi.fn(),
+  jugadorFindUniqueOrThrow: vi.fn(),
   membershipFindUnique: vi.fn(),
   membershipCreate: vi.fn(),
+  membershipUpdate: vi.fn(),
   divisionEquipoFindUnique: vi.fn(),
   divisionJugadorCreate: vi.fn(),
   divisionJugadorDelete: vi.fn(),
   divisionJugadorUpdateMany: vi.fn(),
+  mediaLock: vi.fn(),
+  mediaPrepare: vi.fn(),
   transaction: vi.fn(),
 }));
 
@@ -19,8 +23,8 @@ vi.mock('../../config/database', () => ({
   prisma: {
     division: { findFirst: mocks.divisionFindFirst },
     equipo: { findUnique: mocks.equipoFindUnique },
-    jugador: { findFirst: mocks.jugadorFindFirst, findUnique: mocks.jugadorFindUnique },
-    equipoJugador: { findUnique: mocks.membershipFindUnique, create: mocks.membershipCreate },
+    jugador: { findFirst: mocks.jugadorFindFirst, findUnique: mocks.jugadorFindUnique, findUniqueOrThrow: mocks.jugadorFindUniqueOrThrow },
+    equipoJugador: { findUnique: mocks.membershipFindUnique, create: mocks.membershipCreate, update: mocks.membershipUpdate },
     divisionEquipo: { findUnique: mocks.divisionEquipoFindUnique },
     divisionJugador: { create: mocks.divisionJugadorCreate, delete: mocks.divisionJugadorDelete, updateMany: mocks.divisionJugadorUpdateMany },
     $transaction: mocks.transaction,
@@ -28,7 +32,7 @@ vi.mock('../../config/database', () => ({
 }));
 
 vi.mock('../media/service', () => ({
-  mediaService: { scheduleImageCleanup: vi.fn() },
+  mediaService: { scheduleImageCleanup: vi.fn(), lockAttachmentTarget: mocks.mediaLock, prepareAttachment: mocks.mediaPrepare },
 }));
 
 import { jugadorController } from './controller';
@@ -269,6 +273,56 @@ describe('jugadorController.assignToTeam', () => {
       data: { dorsal: 10 },
     });
     expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe('jugadorController.update team dorsal', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.equipoFindUnique.mockResolvedValue({ userId: owner.id });
+    mocks.mediaPrepare.mockResolvedValue(null);
+    mocks.jugadorFindUniqueOrThrow
+      .mockResolvedValueOnce({ foto: null, fotoPublicId: null })
+      .mockResolvedValueOnce({ id: 'player-1', nombre: 'Player', equipos: [{ equipoId: 'team-1', dorsal: 12 }] });
+    mocks.membershipFindUnique.mockResolvedValue({ jugadorId: 'player-1' });
+    mocks.transaction.mockImplementation((work) => work({
+      jugador: { findUniqueOrThrow: mocks.jugadorFindUniqueOrThrow },
+      equipoJugador: { findUnique: mocks.membershipFindUnique, update: mocks.membershipUpdate },
+      divisionJugador: { updateMany: mocks.divisionJugadorUpdateMany },
+    }));
+  });
+
+  function updateRequest() {
+    return {
+      params: { id: 'player-1' },
+      body: { equipoId: 'team-1', dorsal: 12 },
+      user: owner,
+    } as unknown as Request;
+  }
+
+  it('updates the team membership and every preserved division roster', async () => {
+    const next = vi.fn() as NextFunction;
+
+    await jugadorController.update(updateRequest(), response(), next);
+
+    expect(mocks.membershipUpdate).toHaveBeenCalledWith({
+      where: { equipoId_jugadorId: { equipoId: 'team-1', jugadorId: 'player-1' } },
+      data: { dorsal: 12 },
+    });
+    expect(mocks.divisionJugadorUpdateMany).toHaveBeenCalledWith({
+      where: { equipoId: 'team-1', jugadorId: 'player-1' },
+      data: { dorsal: 12 },
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns a controlled conflict when the dorsal is occupied', async () => {
+    mocks.membershipUpdate.mockRejectedValue({ code: 'P2002' });
+    const next = vi.fn() as NextFunction;
+
+    await jugadorController.update(updateRequest(), response(), next);
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 409, message: 'Ese dorsal ya está usado en este equipo' }));
   });
 });
 

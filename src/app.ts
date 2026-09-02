@@ -79,6 +79,7 @@ export function createApp() {
         event: 'http.request.completed',
         method: req.method,
         route,
+        path: req.url?.split('?')[0],
         statusCode: res.statusCode,
         durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
       });

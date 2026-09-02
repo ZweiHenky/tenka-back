@@ -1,12 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '../../generated/prisma/client';
-import { env } from '../../config/env';
-
-function databaseSchema(): string {
-  const schema = new URL(env.DATABASE_URL).searchParams.get('schema') ?? 'public';
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(schema)) throw new Error('Invalid database schema');
-  return schema;
-}
+import { configureRawQuerySchema } from '../../utils/rawDatabaseSchema';
 
 export interface ScheduleParticipantWrite {
   id: string;
@@ -71,8 +65,7 @@ export async function enqueueScheduleChange(
   const partidoJson = JSON.stringify(input.changes.partidoIds);
   const url = `/(drawer)/(public)/liga/${input.ligaId}?divisionId=${input.divisionId}&tab=horario`;
 
-  // Prisma's adapter schema qualifies ORM queries but does not set search_path for raw SQL.
-  await tx.$queryRaw`SELECT set_config('search_path', ${databaseSchema()}, true)`;
+  await configureRawQuerySchema(tx);
 
   await tx.$executeRaw`
     INSERT INTO notification_outbox (

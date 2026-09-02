@@ -116,6 +116,8 @@ export interface PublicLeagueListDto extends UserLeagueListDto {
   descripcion: string;
   cancha: string | null;
   ubicacionId: string;
+  ubicacion?: { nombreCompleto: string };
+  distanceKm?: number;
   divisiones: Array<{
     id: string;
     nombre: string;

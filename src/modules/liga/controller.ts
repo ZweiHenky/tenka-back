@@ -1,9 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { ligaService } from './service';
-import { createLigaSchema, updateLigaSchema, createCanchaSchema, updateCanchaSchema, createArbitroSchema, updateArbitroSchema } from './validator';
+import { createLigaSchema, updateLigaSchema, createCanchaSchema, updateCanchaSchema, createArbitroSchema, updateArbitroSchema, listLigaQuerySchema } from './validator';
 import { ok, created, noContent } from '../../utils/response';
 import { ValidationError } from '../../utils/errors';
-import { parsePagination } from '../../utils/pagination';
 import { firstIssueMessage } from '../../utils/validation';
 
 function publicLiga<T extends object>(liga: T): Omit<T, 'logoPublicId' | 'canchaPublicId'> {
@@ -14,21 +13,24 @@ function publicLiga<T extends object>(liga: T): Omit<T, 'logoPublicId' | 'cancha
 export const ligaController = {
   async list(req: Request, res: Response, next: NextFunction) {
     try {
-      const { userId, page, limit, search, categoriaId, tipoId, estadoLigaId } = req.query;
+      const parsed = listLigaQuerySchema.safeParse(req.query);
+      if (!parsed.success) throw new ValidationError(firstIssueMessage(parsed.error));
+      const { userId, page, limit, search, categoriaId, tipoId, estadoLigaId, latitude, longitude } = parsed.data;
 
       if (!userId) {
-        const pagination = parsePagination(req.query);
         const result = await ligaService.listPaginated({
-          page: pagination.page,
-          limit: pagination.limit,
-          search: search as string | undefined,
-          categoriaId: categoriaId as string | undefined,
-          tipoId: tipoId as string | undefined,
-          estadoLigaId: estadoLigaId as string | undefined,
+          page: page!,
+          limit: limit!,
+          search,
+          categoriaId,
+          tipoId,
+          estadoLigaId,
+          latitude,
+          longitude,
         });
         ok(res, { ...result, rows: result.rows.map(publicLiga) });
       } else {
-        const ligas = await ligaService.listByUser(userId as string, req.user);
+        const ligas = await ligaService.listByUser(userId, req.user);
         ok(res, ligas.map(publicLiga));
       }
     } catch (err) {

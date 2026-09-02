@@ -2,7 +2,8 @@ import { prisma } from '../../config/database';
 import type { LigaEntity, ProgramacionRecienteLigaDto, PublicLeagueListDto, UserLeagueListDto } from './entity';
 import type { LigaRepository, LigaFilterParams, LigaCreateData, LigaCanchaWrite, LigaWriteData } from './repository.interface';
 import type { AuthenticatedUser } from '../../types/auth';
-import type { Prisma } from '../../generated/prisma/client';
+import { Prisma } from '../../generated/prisma/client';
+import { configureRawQuerySchema } from '../../utils/rawDatabaseSchema';
 
 const UBICACION_SELECT = {
   select: { id: true, nombreCompleto: true, estado: true, municipio: true, lat: true, lng: true, timeZone: true },
@@ -42,6 +43,7 @@ const PUBLIC_LEAGUE_LIST_SELECT = {
   descripcion: true,
   cancha: true,
   ubicacionId: true,
+  ubicacion: { select: { nombreCompleto: true } },
   divisiones: {
     where: PUBLIC_DIVISION_WHERE,
     select: {
@@ -63,6 +65,101 @@ const PUBLIC_LEAGUE_LIST_SELECT = {
     },
   },
 } as const;
+
+interface NearbyPageRow {
+  id: string;
+  distanceKm: number;
+}
+
+interface NearbyPageResult {
+  rows: unknown;
+  total: number | bigint;
+}
+
+function parseNearbyRows(value: unknown): NearbyPageRow[] {
+  if (!Array.isArray(value)) throw new Error('Invalid nearby leagues result');
+  return value.map((row) => {
+    if (typeof row !== 'object' || row === null) throw new Error('Invalid nearby league row');
+    const { id, distanceKm } = row as Record<string, unknown>;
+    if (typeof id !== 'string' || typeof distanceKm !== 'number' || !Number.isFinite(distanceKm)) {
+      throw new Error('Invalid nearby league row');
+    }
+    return { id, distanceKm };
+  });
+}
+
+async function findNearbyPage(params: LigaFilterParams) {
+  const { page, limit, search, categoriaId, tipoId, estadoLigaId, latitude, longitude } = params;
+  if (latitude === undefined || longitude === undefined) throw new Error('Nearby coordinates are required');
+
+  const divisionConditions = [Prisma.sql`e.codigo <> 'BORRADOR'`];
+  if (categoriaId) divisionConditions.push(Prisma.sql`d."categoriaId" = ${categoriaId}`);
+  if (tipoId) divisionConditions.push(Prisma.sql`d."tipoId" = ${tipoId}`);
+  if (estadoLigaId) divisionConditions.push(Prisma.sql`d."estadoLigaId" = ${estadoLigaId}`);
+
+  const leagueConditions = [Prisma.sql`
+    EXISTS (
+      SELECT 1
+      FROM divisiones d
+      JOIN estados_liga e ON e.id = d."estadoLigaId"
+      WHERE d."ligaId" = l.id
+        AND ${Prisma.join(divisionConditions, ' AND ')}
+    )
+  `];
+  if (search) leagueConditions.push(Prisma.sql`strpos(lower(l.nombre), lower(${search})) > 0`);
+
+  return prisma.$transaction(async (tx) => {
+    await configureRawQuerySchema(tx);
+    const result = await tx.$queryRaw<NearbyPageResult[]>(Prisma.sql`
+      WITH ranked AS (
+        SELECT
+          l.id,
+          l."createdAt",
+          2 * 6371.0088 * asin(sqrt(LEAST(1.0, GREATEST(0.0,
+            power(sin(radians(u.lat - ${latitude}) / 2), 2)
+            + cos(radians(${latitude})) * cos(radians(u.lat))
+            * power(sin(radians(u.lng - ${longitude}) / 2), 2)
+          )))) AS "distanceKm"
+        FROM ligas l
+        JOIN ubicaciones u ON u.id = l."ubicacionId"
+        WHERE ${Prisma.join(leagueConditions, ' AND ')}
+      ), paged AS (
+        SELECT id, "createdAt", "distanceKm"
+        FROM ranked
+        ORDER BY "distanceKm" ASC, "createdAt" DESC, id ASC
+        LIMIT ${limit}
+        OFFSET ${(page - 1) * limit}
+      )
+      SELECT
+        COALESCE(
+          jsonb_agg(
+            jsonb_build_object('id', p.id, 'distanceKm', p."distanceKm")
+            ORDER BY p."distanceKm" ASC, p."createdAt" DESC, p.id ASC
+          ),
+          '[]'::jsonb
+        ) AS rows,
+        (SELECT COUNT(*)::int FROM ranked) AS total
+      FROM paged p
+    `);
+    const rawPage = result[0];
+    if (!rawPage) throw new Error('Invalid nearby leagues result');
+    const rankedRows = parseNearbyRows(rawPage.rows);
+    if (rankedRows.length === 0) return { rows: [], total: Number(rawPage.total) };
+
+    const hydrated = await tx.liga.findMany({
+      where: { id: { in: rankedRows.map((row) => row.id) } },
+      select: PUBLIC_LEAGUE_LIST_SELECT,
+    });
+    const byId = new Map(hydrated.map((league) => [league.id, league]));
+    return {
+      rows: rankedRows.flatMap((ranked) => {
+        const league = byId.get(ranked.id);
+        return league ? [{ ...league, distanceKm: ranked.distanceKm }] : [];
+      }),
+      total: Number(rawPage.total),
+    };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+}
 
 const DIVISION_RELATIONS = {
   canchaHorarios: {
@@ -291,7 +388,11 @@ export const ligaRepository: LigaRepository = {
       });
   },
 
-  async findAllPaginated({ page, limit, search, categoriaId, tipoId, estadoLigaId }: LigaFilterParams) {
+  async findAllPaginated(params: LigaFilterParams) {
+    const { page, limit, search, categoriaId, tipoId, estadoLigaId, latitude, longitude } = params;
+    if ((latitude === undefined) !== (longitude === undefined)) throw new Error('Nearby coordinates must be provided together');
+    if (latitude !== undefined && longitude !== undefined) return findNearbyPage(params);
+
     const divisionFilters: Record<string, unknown>[] = [];
     if (categoriaId) divisionFilters.push({ categoriaId });
     if (tipoId) divisionFilters.push({ tipoId });
@@ -313,7 +414,7 @@ export const ligaRepository: LigaRepository = {
     const [rows, total] = await Promise.all([
       prisma.liga.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
         skip: (page - 1) * limit,
         take: limit,
         select: PUBLIC_LEAGUE_LIST_SELECT,

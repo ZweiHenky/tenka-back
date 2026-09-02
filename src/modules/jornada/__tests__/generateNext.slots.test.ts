@@ -60,11 +60,32 @@ describe('generateNext slots', () => {
     expect(regulars.every(([args]: any[]) => args.equipoLocalId !== 't4' && args.equipoVisitanteId !== 't4')).toBe(true);
   });
 
+  it('6 equipos + complemento completo → Puntos conserva su partido regular', async () => {
+    const enabledIds = TEAMS.slice(0, 6).map((team) => team.id);
+    mockDivision({ maxEquipos: 6 });
+    mockTeams(enabledIds);
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(4);
+
+    await jornadaService.generateNextWithSelection([
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't1' },
+      ...capacitySlots(3),
+    ], enabledIds);
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    const complementos = calls.filter(([args]: any[]) => args.tipoPartido === 'COMPLEMENTO');
+    const regulars = calls.filter(([args]: any[]) => args.tipoPartido === 'REGULAR');
+
+    expect(complementos).toHaveLength(1);
+    expect(regulars).toHaveLength(3);
+    expect(regulars.some(([args]: any[]) => args.equipoLocalId === 't4' || args.equipoVisitanteId === 't4')).toBe(true);
+  });
+
   /**
    * El complemento existe para que un equipo atrasado alcance a los demás, así que el equipo de
-   * puntos **puede repetir** — pero solo si lo asignan a mano en los dos sitios. El reparto
-   * automático nunca lo hace solo: cuando el equipo de puntos está libre queda reservado y no
-   * juega regular, que es lo que fija el test de arriba.
+   * puntos **puede repetir**. Con un grupo impar y Puntos libre absorbe el descanso, que es lo que
+   * fija el test de arriba; si ya está asignado a un regular, conserva ambos partidos.
    */
   it('el equipo Puntos también fijado en un regular juega los dos partidos', async () => {
     mockDivision();
@@ -85,6 +106,28 @@ describe('generateNext slots', () => {
 
     expect(enComplemento).toHaveLength(1);
     expect(enRegular).toHaveLength(1);
+  });
+
+  it('Puntos fijado en regular conserva el descanso explícito del grupo impar', async () => {
+    const enabledIds = TEAMS.map((team) => team.id);
+    mockDivision();
+    mockTeams();
+    mockNoPreviousJornadas();
+    mockJornadaCreated();
+    mockPartidosCreatedReturn(4);
+
+    await jornadaService.generateNextWithSelection([
+      { fecha: '2099-01-02', horaInicio: '18:00', horaFin: '19:30', equipoLocalId: 't4' },
+      { fecha: '2099-01-01', horaInicio: '18:00', horaFin: '19:30', tipo: 'complemento', equipoLocalId: 't4', equipoVisitanteId: 't1' },
+      ...capacitySlots(2),
+    ], enabledIds, 't7');
+
+    const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
+    const regulars = calls.filter(([args]: any[]) => args.tipoPartido === 'REGULAR');
+
+    expect(regulars).toHaveLength(3);
+    expect(regulars.some(([args]: any[]) => args.equipoLocalId === 't4' || args.equipoVisitanteId === 't4')).toBe(true);
+    expect(regulars.every(([args]: any[]) => args.equipoLocalId !== 't7' && args.equipoVisitanteId !== 't7')).toBe(true);
   });
 
   it('el mismo equipo puede ganar puntos en varios complementos', async () => {
@@ -399,7 +442,8 @@ describe('generateNext slots', () => {
     ]);
 
     const calls = (partidoRepository.create as ReturnType<typeof vi.fn>).mock.calls;
-    expect(calls.length).toBe(4);
+    expect(calls.length).toBe(5);
+    expect(calls.filter(([args]: any[]) => args.tipoPartido === 'REGULAR')).toHaveLength(3);
 
     const regular = calls.find(([args]: any[]) => args.equipoLocalId === 't1' && args.equipoVisitanteId === 't2');
     expect(regular).toBeDefined();

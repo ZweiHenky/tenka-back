@@ -1,4 +1,46 @@
 import { z } from 'zod';
+import { MAX_PAGE_SIZE } from '../../utils/pagination';
+
+const queryNumber = (min: number, max: number) => z.preprocess(
+  (value) => typeof value === 'string' && value.trim() !== '' ? Number(value) : value,
+  z.number().finite().min(min).max(max),
+);
+
+export const listLigaQuerySchema = z.object({
+  userId: z.string().trim().min(1).optional(),
+  page: queryNumber(1, 1_000_000).pipe(z.number().int()).optional(),
+  limit: queryNumber(1, MAX_PAGE_SIZE).pipe(z.number().int()).optional(),
+  search: z.string().trim().max(100).optional(),
+  categoriaId: z.string().trim().min(1).optional(),
+  tipoId: z.string().trim().min(1).optional(),
+  estadoLigaId: z.string().trim().min(1).optional(),
+  latitude: queryNumber(-90, 90).optional(),
+  longitude: queryNumber(-180, 180).optional(),
+}).superRefine((query, ctx) => {
+  const hasLatitude = query.latitude !== undefined;
+  const hasLongitude = query.longitude !== undefined;
+  if (hasLatitude !== hasLongitude) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: hasLatitude ? ['longitude'] : ['latitude'],
+      message: 'latitude y longitude deben enviarse juntas',
+    });
+  }
+  if (query.userId && (hasLatitude || hasLongitude)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['userId'],
+      message: 'La ubicación solo puede usarse en el listado público',
+    });
+  }
+  if (!query.userId && (query.page === undefined || query.limit === undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: query.page === undefined ? ['page'] : ['limit'],
+      message: `page y limit son obligatorios; deben ser enteros positivos y limit no puede superar ${MAX_PAGE_SIZE}`,
+    });
+  }
+});
 
 const nombreSchema = z.string().trim().min(1).max(20);
 const descripcionSchema = z.string().max(150);
@@ -174,3 +216,4 @@ export type CreateCanchaInput = z.output<typeof createCanchaSchema>;
 export type UpdateCanchaInput = z.output<typeof updateCanchaSchema>;
 export type CreateArbitroInput = z.output<typeof createArbitroSchema>;
 export type UpdateArbitroInput = z.output<typeof updateArbitroSchema>;
+export type ListLigaQuery = z.output<typeof listLigaQuerySchema>;

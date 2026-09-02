@@ -502,6 +502,10 @@ export const jornadaService = {
 
     if (!playoffMode) {
       const complementoSlots = (slots ?? []).filter((slot) => slot.tipo === 'complemento');
+      const regularTeamIds = new Set((slots ?? [])
+        .filter((slot) => !slot.tipo || slot.tipo === 'regular')
+        .flatMap((slot) => [slot.equipoLocalId, slot.equipoVisitanteId])
+        .filter((id): id is string => Boolean(id && id !== 'DESCANSO')));
       for (const slot of complementoSlots) {
         const hasLocal = Boolean(slot.equipoLocalId && slot.equipoLocalId !== 'DESCANSO');
         const hasVisitor = Boolean(slot.equipoVisitanteId && slot.equipoVisitanteId !== 'DESCANSO');
@@ -510,13 +514,16 @@ export const jornadaService = {
         if (!hasVisitor) throw new ValidationError('Asigna el equipo que repetirá partido sin puntos en el complemento');
         if (slot.equipoLocalId === slot.equipoVisitanteId) throw new ValidationError('Los equipos del partido de complemento deben ser diferentes');
       }
-      if (complementoSlots.length > 0 && descansoEquipoId) {
+      const complementoAbsorbeDescanso = complementoSlots.some((slot) =>
+        Boolean(slot.equipoLocalId && !regularTeamIds.has(slot.equipoLocalId))
+      );
+      if (complementoAbsorbeDescanso && descansoEquipoId) {
         throw new ValidationError('No se puede combinar un partido de complemento con un equipo que descansa');
       }
       if (teams.length % 2 === 0 && descansoEquipoId) {
         throw new ValidationError('No se permite seleccionar un equipo que descansa cuando la cantidad de equipos es par');
       }
-      if (equipoIds && teams.length % 2 !== 0 && complementoSlots.length === 0 && !descansoEquipoId) {
+      if (equipoIds && teams.length % 2 !== 0 && !complementoAbsorbeDescanso && !descansoEquipoId) {
         throw new ValidationError('Selecciona el equipo que descansará en esta jornada');
       }
     }
@@ -646,6 +653,7 @@ export const jornadaService = {
       // Structure: each entry can be assigned teams or empty
       type PartidoPlan = { localId?: string; visitaId?: string; fecha?: Date; tipo?: 'regular' | 'complemento' | 'amistoso'; canchaId?: string | null };
       const plan: PartidoPlan[] = [];
+      const complementoLocalIds: string[] = [];
 
       let usableSlots: SlotInput[] = [];
       if (slots && slots.length > 0) {
@@ -687,14 +695,7 @@ export const jornadaService = {
               if (!localId || !visitaId) throw new ValidationError('Asigna ambos equipos del partido de complemento antes de generar la jornada');
               if (!teamIds.has(localId)) throw new ValidationError('El equipo que gana puntos en el complemento no pertenece a esta división');
               if (!teamIds.has(visitaId)) throw new ValidationError('El equipo que repite sin puntos en el complemento no pertenece a esta división');
-              // El equipo de puntos **puede repetir**: a veces hace falta que juegue dos o tres veces
-              // en la semana para alcanzar a los que llevan más partidos. Solo pasa si lo asignan a
-              // mano en los dos sitios; el reparto automático nunca lo hace solo.
-              //
-              // El `add` se conserva y hace el trabajo fino, porque sobre un Set es idempotente:
-              //   - equipo libre  -> queda reservado, absorbe al sobrante y no juega regular
-              //   - equipo ya usado -> no-op, conserva su regular y además juega el complemento
-              usedTeamIds.add(localId);
+              if (!complementoLocalIds.includes(localId)) complementoLocalIds.push(localId);
               plan.push({ localId, visitaId, fecha, tipo: 'complemento', canchaId: slot.canchaId });
             } else if (slot.tipo === 'amistoso') {
               const localId = slot.equipoLocalId && slot.equipoLocalId !== 'DESCANSO' ? slot.equipoLocalId : undefined;
@@ -861,6 +862,8 @@ export const jornadaService = {
         .filter((partido) => partido.tipo !== 'amistoso' && partido.tipo !== 'complemento')
         .flatMap((partido) => [partido.localId, partido.visitaId])
         .filter((id): id is string => Boolean(id)));
+      const incompleteRegularSlots = plan.filter((p) => p.tipo !== 'amistoso' && p.tipo !== 'complemento' && (!p.localId || !p.visitaId));
+      const fixedTeamIds = new Set(incompleteRegularSlots.flatMap((p) => [p.localId, p.visitaId]).filter((id): id is string => Boolean(id)));
       const automaticRestCandidates = [...teams]
         .filter((team) => !assignedRegularIds.has(team.id))
         .sort((a, b) => a.id.localeCompare(b.id));
@@ -874,11 +877,21 @@ export const jornadaService = {
         usedTeamIds.add(effectiveRestId);
       }
 
+      // Puntos solo sustituye al equipo que naturalmente quedaría sin pareja. Si el pool ya es
+      // par, reservarlo eliminaría un regular y dejaría una cantidad impar imposible de emparejar.
+      const matchingCountBeforeComplemento = teams.filter((team) =>
+        fixedTeamIds.has(team.id) || !usedTeamIds.has(team.id)
+      ).length;
+      if (matchingCountBeforeComplemento % 2 !== 0) {
+        const absorbedLocalId = complementoLocalIds.find((id) =>
+          !assignedRegularIds.has(id) && !usedTeamIds.has(id)
+        );
+        if (absorbedLocalId) usedTeamIds.add(absorbedLocalId);
+      }
+
       // Build historical match counts from existing jornadas (regular-only)
       const matchCounts = buildHistoricalMatchCounts(existing, 'REGULAR');
 
-      const incompleteRegularSlots = plan.filter((p) => p.tipo !== 'amistoso' && p.tipo !== 'complemento' && (!p.localId || !p.visitaId));
-      const fixedTeamIds = new Set(incompleteRegularSlots.flatMap((p) => [p.localId, p.visitaId]).filter((id): id is string => Boolean(id)));
       const matchingTeams = playoffMode
         ? []
         : teams.filter((team) => fixedTeamIds.has(team.id) || !usedTeamIds.has(team.id));

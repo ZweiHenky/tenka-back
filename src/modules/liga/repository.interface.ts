@@ -10,6 +10,8 @@ export interface LigaFilterParams {
   categoriaId?: string;
   tipoId?: string;
   estadoLigaId?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface PaginatedResult<T> {

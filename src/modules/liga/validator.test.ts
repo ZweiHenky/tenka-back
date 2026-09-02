@@ -1,11 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { createLigaSchema, updateLigaSchema } from './validator';
+import { createLigaSchema, listLigaQuerySchema, updateLigaSchema } from './validator';
 
 const baseLiga = {
   nombre: 'Liga prueba',
   descripcion: '',
   ubicacionId: 'ubicacion-1',
 };
+
+describe('validacion del listado de ligas', () => {
+  it('convierte coordenadas y paginacion desde query strings', () => {
+    expect(listLigaQuerySchema.parse({
+      page: '1', limit: '20', latitude: '0', longitude: '-99.133',
+    })).toMatchObject({ page: 1, limit: 20, latitude: 0, longitude: -99.133 });
+  });
+
+  it.each([
+    { page: '1', limit: '20', latitude: '19.4' },
+    { page: '1', limit: '20', longitude: '-99.1' },
+    { page: '1', limit: '20', latitude: '91', longitude: '0' },
+    { page: '1', limit: '20', latitude: '0', longitude: '-181' },
+    { page: '1', limit: '20', latitude: ['19'], longitude: '-99' },
+    { page: '1', limit: '20', latitude: 'NaN', longitude: '-99' },
+  ])('rechaza coordenadas invalidas o incompletas: %o', (query) => {
+    expect(listLigaQuerySchema.safeParse(query).success).toBe(false);
+  });
+
+  it('rechaza coordenadas en el modo privado y permite omitir paginacion en ese modo', () => {
+    expect(listLigaQuerySchema.safeParse({ userId: 'owner' }).success).toBe(true);
+    expect(listLigaQuerySchema.safeParse({ userId: 'owner', latitude: '19', longitude: '-99' }).success).toBe(false);
+  });
+
+  it('exige page y limit en el listado publico', () => {
+    expect(listLigaQuerySchema.safeParse({}).success).toBe(false);
+  });
+});
 
 describe('validacion de canchas de liga', () => {
   it('recorta el nombre de la liga', () => {
