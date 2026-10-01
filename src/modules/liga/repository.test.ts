@@ -124,7 +124,7 @@ describe('consultas de lectura de liga', () => {
       arbitros: { where: { activo: true }, select: { nombre: true } },
     }],
     ['eliminacion', 'findDeleteContext', {
-      nombre: true, logo: true, logoPublicId: true, cancha: true, canchaPublicId: true,
+      userId: true, nombre: true, logo: true, logoPublicId: true, cancha: true, canchaPublicId: true,
     }],
     ['configuracion', 'findManagementContext', {
       multiplesCanchas: true, usaArbitros: true,

@@ -49,7 +49,7 @@ describe('nombre global unico de liga', () => {
     expect(mocks.findByNormalizedName).toHaveBeenCalledWith('liga centro', 'liga-1');
     expect(mocks.update).toHaveBeenCalledWith('liga-1', {
       nombre: 'LIGA CENTRO', nombreNormalizado: 'liga centro',
-    }, [], undefined);
+    }, [], undefined, false, expect.anything());
   });
 
   it('rechaza una colision al renombrar', async () => {
@@ -62,7 +62,7 @@ describe('nombre global unico de liga', () => {
 
   it('never transfers ownership through update service input', async () => {
     await ligaService.update('liga-1', { descripcion: 'Nueva', userId: 'other-user' } as any, owner);
-    expect(mocks.update).toHaveBeenCalledWith('liga-1', { descripcion: 'Nueva' }, [], undefined);
+    expect(mocks.update).toHaveBeenCalledWith('liga-1', { descripcion: 'Nueva' }, [], undefined, false, expect.anything());
   });
 
   it.each(['create', 'update'] as const)('convierte P2002 durante %s en ConflictError', async (operation) => {

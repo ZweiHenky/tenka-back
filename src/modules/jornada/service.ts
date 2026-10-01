@@ -6,6 +6,7 @@ import { prisma } from '../../config/database';
 import type { JornadaEntity } from './entity';
 import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow';
 import { assertDivisionWritable } from '../../utils/divisionState';
 import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 import { logger } from '../../config/logger';
@@ -361,6 +362,9 @@ export const jornadaService = {
     for (let attempt = 0; ; attempt += 1) {
       try {
         await prisma.$transaction(async (tx) => {
+          await observeResourceAccessShadowInTransaction(tx, {
+            operation: 'jornada.delete', capability: 'MANAGE_DIVISION', actor, divisionId: preflight.divisionId, resourceType: 'DIVISION',
+          });
           await acquireLeagueScheduleLock(tx, preflight.ligaId);
           const context = await jornadaRepository.findDeleteContext(id, actor, tx);
           if (!context) throw new NotFoundError('Jornada');
@@ -1038,6 +1042,9 @@ export const jornadaService = {
       for (let attempt = 0; ; attempt += 1) {
         try {
           jornada = await prisma.$transaction(async (tx) => {
+          await observeResourceAccessShadowInTransaction(tx, {
+            operation: 'jornada.generate', capability: 'MANAGE_DIVISION', actor, divisionId, resourceType: 'DIVISION',
+          });
           await acquireLeagueScheduleLock(tx, division.ligaId);
           const replay = await findGenerationReplay(tx as unknown as GenerationLookupClient, divisionId, generationKey, requestHash);
           if (replay) {
@@ -1059,10 +1066,10 @@ export const jornadaService = {
             throw new ValidationError('La división cambió mientras se generaba la jornada; vuelve a intentarlo');
           }
           const lockedHistory = await jornadaRepository.findGenerationHistory(divisionId, tx);
-          if (generationHistoryFingerprint(lockedHistory) !== preflightHistoryFingerprint) {
-            throw new StaleGenerationPlanError();
-          }
-          await validateLeagueCourtCapacity(tx as unknown as CourtValidationClient, {
+           if (generationHistoryFingerprint(lockedHistory) !== preflightHistoryFingerprint) {
+             throw new StaleGenerationPlanError();
+           }
+           await validateLeagueCourtCapacity(tx as unknown as CourtValidationClient, {
             ligaId: lockedDivision.ligaId,
             multiplesCanchas: lockedDivision.liga.multiplesCanchas,
             durationMinutes: lockedDivision.duracionPartido,

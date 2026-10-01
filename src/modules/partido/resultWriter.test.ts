@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ recalculate: vi.fn(), sync: vi.fn() }))
+const mocks = vi.hoisted(() => ({ observe: vi.fn(), recalculate: vi.fn(), sync: vi.fn() }))
+vi.mock('../billing/resourceAccessShadow', () => ({ observeResourceAccessShadowInTransaction: mocks.observe }))
 vi.mock('../tabla-posicion/service', () => ({ tablaPosicionService: { recalcular: mocks.recalculate } }))
 vi.mock('../ronda-playoff/service', () => ({ rondaPlayoffService: { syncAdvancement: mocks.sync } }))
 
@@ -85,6 +86,20 @@ function withPenaltiesEnabled(tx: any) {
 
 describe('writeResultInTransaction', () => {
   beforeEach(() => vi.clearAllMocks())
+
+  it('keeps the resource gate inside the result writer', async () => {
+    const tx = createTx()
+
+    await writeResultInTransaction(tx as any, 'match-1', {
+      expectedVersion: 3, estado: 'FINALIZADO', golesLocal: 2, golesVisitante: 1, allocations: [],
+    }, { id: 'owner-1', email: 'owner@test.com', rol: 'LIGA' })
+
+    expect(mocks.observe).toHaveBeenCalledWith(tx, expect.objectContaining({
+      operation: 'partido.result.update', capability: 'WRITE_RESULT', divisionId: 'division-1',
+    }))
+    expect(mocks.observe.mock.invocationCallOrder[0])
+      .toBeLessThan(tx.partido.updateMany.mock.invocationCallOrder[0])
+  })
 
   it('aplica la regla de empates configurada en la división', async () => {
     const withPenalties = withPenaltiesEnabled(createTx())

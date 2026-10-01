@@ -1,7 +1,8 @@
 import { prisma } from '../config/database';
 import type { Prisma } from '../generated/prisma/client';
 import type { UserRole } from '../types/auth';
-import { AppError, NotFoundError } from './errors';
+import { AppError } from './errors';
+import { acquireBillingAccountLock, acquireBillingOwnerBootstrapLock, resolveAccountAccessPolicy } from '../modules/billing/service';
 
 export const ACTIVE_DIVISION_CODES = ['ABIERTA', 'EN_CURSO'] as const;
 
@@ -20,12 +21,6 @@ export interface AccountQuota {
   usage: AccountQuotaUsage;
 }
 
-const LIMITS: Record<UserRole, AccountQuota['limits']> = {
-  CAPITAN: { teams: 10, leagues: 0, divisions: 0, activeDivisions: 0 },
-  LIGA: { teams: 40, leagues: 1, divisions: 1, activeDivisions: 1 },
-  ADMINISTRADOR: { teams: null, leagues: null, divisions: null, activeDivisions: null },
-};
-
 const QUOTA_ERRORS: Record<AccountQuotaResource, { code: string; message: string }> = {
   teams: { code: 'QUOTA_TEAMS_EXCEEDED', message: 'Has alcanzado el límite de equipos de tu cuenta' },
   leagues: { code: 'QUOTA_LEAGUES_EXCEEDED', message: 'Has alcanzado el límite de ligas de tu cuenta' },
@@ -33,15 +28,26 @@ const QUOTA_ERRORS: Record<AccountQuotaResource, { code: string; message: string
   activeDivisions: { code: 'QUOTA_ACTIVE_DIVISIONS_EXCEEDED', message: 'Has alcanzado el límite de divisiones activas de tu cuenta' },
 };
 
-type QuotaClient = Pick<Prisma.TransactionClient, 'user' | 'equipo' | 'liga' | 'division'>;
+type QuotaClient = Pick<Prisma.TransactionClient, 'user' | 'equipo' | 'liga' | 'division' | 'billingAccount'>;
 
 export async function acquireAccountQuotaLock(tx: Prisma.TransactionClient, userId: string): Promise<void> {
-  await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `account-quota:${userId}`);
+  const account = await tx.billingAccount.findUnique({ where: { userId }, select: { id: true } });
+  if (account) {
+    await acquireBillingAccountLock(tx, account.id);
+    return;
+  }
+  await acquireBillingOwnerBootstrapLock(tx, userId);
+  const accountCreatedWhileWaiting = await tx.billingAccount.findUnique({
+    where: { userId },
+    select: { id: true },
+  });
+  if (accountCreatedWhileWaiting) {
+    await acquireBillingAccountLock(tx, accountCreatedWhileWaiting.id);
+  }
 }
 
 export async function getAccountQuota(userId: string, client: QuotaClient = prisma): Promise<AccountQuota> {
-  const user = await client.user.findUnique({ where: { id: userId }, select: { rol: true } });
-  if (!user) throw new NotFoundError('Usuario');
+  const policy = await resolveAccountAccessPolicy(userId, client);
 
   const [teams, leagues, divisions, activeDivisions] = await Promise.all([
     client.equipo.count({ where: { userId } }),
@@ -53,8 +59,13 @@ export async function getAccountQuota(userId: string, client: QuotaClient = pris
   ]);
 
   return {
-    role: user.rol,
-    limits: LIMITS[user.rol],
+    role: policy.role,
+    limits: {
+      teams: policy.ownedTeamLimit,
+      leagues: policy.ownedLeagueLimit,
+      divisions: policy.ownedDivisionLimit,
+      activeDivisions: policy.activeDivisionLimit,
+    },
     usage: { teams, leagues, divisions, activeDivisions },
   };
 }

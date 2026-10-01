@@ -3,10 +3,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   findVisibleById: vi.fn(),
   findVisibleByDivision: vi.fn(),
+  findById: vi.fn(),
+  divisionFindUnique: vi.fn(),
+  divisionFindFirst: vi.fn(),
+  premioCreate: vi.fn(),
+  premioUpdate: vi.fn(),
+  premioDelete: vi.fn(),
+  transaction: vi.fn(),
+  observe: vi.fn(),
 }));
 
 vi.mock('./repository', () => ({ premioRepository: mocks }));
-vi.mock('../../config/database', () => ({ prisma: {} }));
+vi.mock('../../config/database', () => ({
+  prisma: {
+    division: { findUnique: mocks.divisionFindUnique, findFirst: mocks.divisionFindFirst },
+    $transaction: mocks.transaction,
+  },
+}));
+vi.mock('../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: mocks.observe,
+}));
 
 import { premioService } from './service';
 import type { AuthenticatedUser } from '../../types/auth';
@@ -46,5 +62,41 @@ describe('premioService public reads', () => {
       statusCode: 404,
       message: 'División no encontrado',
     });
+  });
+});
+
+describe('premioService writes', () => {
+  const tx = {
+    premio: { create: mocks.premioCreate, update: mocks.premioUpdate, delete: mocks.premioDelete },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.transaction.mockImplementation(async (callback) => callback(tx));
+    mocks.divisionFindUnique.mockResolvedValue({ liga: { userId: owner.id } });
+    mocks.divisionFindFirst.mockResolvedValue({ id: 'division-1' });
+    mocks.findById.mockResolvedValue({ id: 'premio-1', divisionId: 'division-1' });
+  });
+
+  it('gates create in the same transaction before writing and preserves the result', async () => {
+    const created = { id: 'premio-1', divisionId: 'division-1', posicion: 1, titulo: 'Campeón' };
+    mocks.premioCreate.mockResolvedValue(created);
+
+    await expect(premioService.create({ divisionId: 'division-1', posicion: 1, titulo: 'Campeón' }, owner)).resolves.toBe(created);
+
+    expect(mocks.observe).toHaveBeenCalledWith(tx, expect.objectContaining({ operation: 'prize.create', divisionId: 'division-1' }));
+    expect(mocks.observe.mock.invocationCallOrder[0]).toBeLessThan(mocks.premioCreate.mock.invocationCallOrder[0]);
+  });
+
+  it('gates update and delete before their writes', async () => {
+    mocks.premioUpdate.mockResolvedValue({ id: 'premio-1', divisionId: 'division-1' });
+
+    await premioService.update('premio-1', { titulo: 'Nuevo' }, owner);
+    expect(mocks.observe.mock.invocationCallOrder[0]).toBeLessThan(mocks.premioUpdate.mock.invocationCallOrder[0]);
+
+    mocks.observe.mockClear();
+    await premioService.delete('premio-1', owner);
+    expect(mocks.observe).toHaveBeenCalledWith(tx, expect.objectContaining({ operation: 'prize.delete', divisionId: 'division-1' }));
+    expect(mocks.observe.mock.invocationCallOrder[0]).toBeLessThan(mocks.premioDelete.mock.invocationCallOrder[0]);
   });
 });

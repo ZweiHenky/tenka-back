@@ -33,6 +33,11 @@ export const authLimiter = createRateLimiter({ name: 'auth', windowMs: 15 * 60 *
 export const otpSendLimiter = createRateLimiter({ name: 'otp-send', windowMs: 10 * 60 * 1000, limit: env.OTP_SEND_RATE_LIMIT });
 export const otpVerifyLimiter = createRateLimiter({ name: 'otp-verify', windowMs: 10 * 60 * 1000, limit: env.OTP_VERIFY_RATE_LIMIT });
 export const subscriptionLimiter = createRateLimiter({ name: 'subscription', windowMs: 15 * 60 * 1000, limit: env.SUBSCRIPTION_RATE_LIMIT });
+export const revenueCatWebhookLimiter = createRateLimiter({
+  name: 'revenuecat-webhook',
+  windowMs: 60 * 1000,
+  limit: env.REVENUECAT_WEBHOOK_RATE_LIMIT,
+});
 export const uploadLimiter = createRateLimiter({
   name: 'upload',
   windowMs: 15 * 60 * 1000,
@@ -68,5 +73,11 @@ export const destructiveOperationLimiter = createRateLimiter({
   name: 'destructive-operation',
   windowMs: env.DESTRUCTIVE_OPERATION_RATE_WINDOW_MINUTES * 60 * 1000,
   limit: env.DESTRUCTIVE_OPERATION_RATE_LIMIT,
+  keyGenerator: actorKey,
+});
+export const billingSyncLimiter = createRateLimiter({
+  name: 'billing-sync',
+  windowMs: env.BILLING_SYNC_RATE_WINDOW_MINUTES * 60 * 1000,
+  limit: env.BILLING_SYNC_RATE_LIMIT,
   keyGenerator: actorKey,
 });

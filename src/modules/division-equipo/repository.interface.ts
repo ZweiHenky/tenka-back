@@ -6,6 +6,6 @@ export interface DivisionEquipoRepository {
   findByDivision(divisionId: string, actor?: AuthenticatedUser): Promise<DivisionEquipoEntity[] | null>;
   findByEquipo(equipoId: string, actor?: AuthenticatedUser): Promise<DivisionEquipoEntity[]>;
   create(data: { divisionId: string; equipoId: string }, tx?: Prisma.TransactionClient): Promise<DivisionEquipoEntity>;
-  updateSaldoPendiente(divisionId: string, equipoId: string, saldoPendiente: string, actor: AuthenticatedUser): Promise<boolean>;
+  updateSaldoPendiente(divisionId: string, equipoId: string, saldoPendiente: string, actor: AuthenticatedUser, tx?: Prisma.TransactionClient): Promise<boolean>;
   delete(divisionId: string, equipoId: string, tx?: Prisma.TransactionClient): Promise<void>;
 }

@@ -26,4 +26,9 @@ export interface DivisionEntity {
    * `horarioPartido` son solo su resumen. Sin filas, la división usa los escalares.
    */
   canchaHorarios?: Array<{ canchaId: string; diasPartido: string; horarioPartido: string }>;
+  managementAccess?: 'FULL' | 'LIMITED_SETUP' | 'READ_ONLY' | 'BLOCKED';
+  managementReason?: string;
+  migrationOverlayActive?: boolean;
+  migrationDeadline?: Date;
+  migrationPaused?: boolean;
 }

@@ -7,6 +7,9 @@ const optionalString = (schema: z.ZodType<string>) => z.preprocess(
   schema.optional(),
 );
 const bodyLimit = z.string().trim().regex(/^\d+(kb|mb)$/i, 'must use a value such as 100kb or 1mb');
+const booleanFlag = z.enum(['true', 'false']).default('false').transform((value) => value === 'true');
+const revenueCatSecretApiKey = z.string().trim().regex(/^sk_[A-Za-z0-9_-]+$/, 'must be a RevenueCat secret API key beginning with sk_');
+const webhookSecret = z.string().trim().min(32, 'must contain at least 32 characters');
 const postgresUrl = z.url().refine((value) => ['postgres:', 'postgresql:'].includes(new URL(value).protocol), {
   message: 'must be a PostgreSQL URL',
 });
@@ -69,6 +72,29 @@ const backendEnvSchema = z.object({
   READINESS_TIMEOUT_MS: z.coerce.number().int().min(500).max(30000).default(5000),
   PROVIDER_TIMEOUT_MS: z.coerce.number().int().min(500).max(30000).default(5000),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(1000).max(30000).default(10000),
+  BILLING_REVENUECAT_ENABLED: booleanFlag,
+  BILLING_PERIODIC_RECONCILIATION_ENABLED: booleanFlag,
+  BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED: booleanFlag,
+  BILLING_PAID_ACCESS_SHADOW_ENABLED: booleanFlag,
+  BILLING_RESOURCE_ACCESS_SHADOW_ENABLED: booleanFlag,
+  BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED: booleanFlag,
+  BILLING_PURCHASES_ENABLED: booleanFlag,
+  BILLING_RECONCILIATION_ACTIVE_INTERVAL_MINUTES: z.coerce.number().int().min(60).max(10080).default(1440),
+  BILLING_RECONCILIATION_CRITICAL_INTERVAL_MINUTES: z.coerce.number().int().min(30).max(1440).default(360),
+  BILLING_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(1).max(20).default(5),
+  REVENUECAT_V2_SECRET_API_KEY: optionalString(revenueCatSecretApiKey),
+  REVENUECAT_PROJECT_ID: optionalString(z.string().trim().min(1).max(255)),
+  REVENUECAT_WEBHOOK_SECRET: optionalString(webhookSecret),
+  REVENUECAT_WEBHOOK_PREVIOUS_SECRET: optionalString(webhookSecret),
+  REVENUECAT_WEBHOOK_SIGNING_SECRET: optionalString(webhookSecret),
+  REVENUECAT_WEBHOOK_SIGNATURE_MODE: z.enum(['disabled', 'observe', 'enforce']).default('disabled'),
+  REVENUECAT_WEBHOOK_SIGNATURE_OBSERVE_UNTIL: optionalString(z.iso.datetime({ offset: true })),
+  REVENUECAT_WEBHOOK_BODY_LIMIT: bodyLimit.default('256kb'),
+  REVENUECAT_WEBHOOK_RATE_LIMIT: z.coerce.number().int().min(1).max(10000).default(300),
+  BILLING_WEBHOOK_PAYLOAD_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(90),
+  BILLING_SYNC_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(10),
+  BILLING_SYNC_RATE_WINDOW_MINUTES: z.coerce.number().int().min(1).max(1440).default(10),
+  BILLING_GRACE_DAYS: z.coerce.number().int().min(0).max(30).default(7),
   CORS_ALLOWED_ORIGINS: z.string().trim().default('http://localhost:8081,http://localhost:19006,http://localhost:3000'),
   JSON_BODY_LIMIT: bodyLimit.default('100kb'),
   URLENCODED_BODY_LIMIT: bodyLimit.default('100kb'),
@@ -126,6 +152,128 @@ const backendEnvSchema = z.object({
 
   if (values.APP_ENV !== 'local' && !values.SENTRY_DSN) {
     context.addIssue({ code: 'custom', path: ['SENTRY_DSN'], message: 'is required outside the local app environment' });
+  }
+
+  if (values.BILLING_REVENUECAT_ENABLED) {
+    if (!values.REVENUECAT_V2_SECRET_API_KEY) {
+      context.addIssue({ code: 'custom', path: ['REVENUECAT_V2_SECRET_API_KEY'], message: 'is required when BILLING_REVENUECAT_ENABLED is true' });
+    }
+    if (!values.REVENUECAT_PROJECT_ID) {
+      context.addIssue({ code: 'custom', path: ['REVENUECAT_PROJECT_ID'], message: 'is required when BILLING_REVENUECAT_ENABLED is true' });
+    }
+    if (!values.REVENUECAT_WEBHOOK_SECRET) {
+      context.addIssue({ code: 'custom', path: ['REVENUECAT_WEBHOOK_SECRET'], message: 'is required when BILLING_REVENUECAT_ENABLED is true' });
+    }
+  }
+  if (values.BILLING_PERIODIC_RECONCILIATION_ENABLED && !values.BILLING_REVENUECAT_ENABLED) {
+    context.addIssue({
+      code: 'custom',
+      path: ['BILLING_PERIODIC_RECONCILIATION_ENABLED'],
+      message: 'requires BILLING_REVENUECAT_ENABLED=true',
+    });
+  }
+  if (values.BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED && !values.BILLING_REVENUECAT_ENABLED) {
+    context.addIssue({
+      code: 'custom',
+      path: ['BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED'],
+      message: 'requires BILLING_REVENUECAT_ENABLED=true',
+    });
+  }
+  if (values.BILLING_PAID_ACCESS_SHADOW_ENABLED && !values.BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED) {
+    context.addIssue({
+      code: 'custom',
+      path: ['BILLING_PAID_ACCESS_SHADOW_ENABLED'],
+      message: 'requires BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED=true',
+    });
+  }
+  if (values.BILLING_RESOURCE_ACCESS_SHADOW_ENABLED && !values.BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED) {
+    context.addIssue({
+      code: 'custom',
+      path: ['BILLING_RESOURCE_ACCESS_SHADOW_ENABLED'],
+      message: 'requires BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED=true',
+    });
+  }
+  if (values.BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED
+    && (!values.BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED
+      || !values.BILLING_RESOURCE_ACCESS_SHADOW_ENABLED)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED'],
+      message: 'requires BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED=true and BILLING_RESOURCE_ACCESS_SHADOW_ENABLED=true',
+    });
+  }
+  if (values.BILLING_PURCHASES_ENABLED && !values.BILLING_REVENUECAT_ENABLED) {
+    context.addIssue({
+      code: 'custom',
+      path: ['BILLING_PURCHASES_ENABLED'],
+      message: 'requires BILLING_REVENUECAT_ENABLED=true',
+    });
+  }
+  if (values.BILLING_PURCHASES_ENABLED && !values.BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED) {
+    context.addIssue({
+      code: 'custom',
+      path: ['BILLING_PURCHASES_ENABLED'],
+      message: 'requires BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED=true',
+    });
+  }
+
+  if (values.REVENUECAT_WEBHOOK_SECRET
+    && values.REVENUECAT_WEBHOOK_SECRET === values.REVENUECAT_WEBHOOK_PREVIOUS_SECRET) {
+    context.addIssue({
+      code: 'custom',
+      path: ['REVENUECAT_WEBHOOK_PREVIOUS_SECRET'],
+      message: 'must differ from REVENUECAT_WEBHOOK_SECRET',
+    });
+  }
+  if (values.REVENUECAT_WEBHOOK_SIGNING_SECRET
+    && [values.REVENUECAT_WEBHOOK_SECRET, values.REVENUECAT_WEBHOOK_PREVIOUS_SECRET]
+      .includes(values.REVENUECAT_WEBHOOK_SIGNING_SECRET)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['REVENUECAT_WEBHOOK_SIGNING_SECRET'],
+      message: 'must differ from webhook authorization secrets',
+    });
+  }
+  if (values.REVENUECAT_WEBHOOK_SIGNATURE_MODE !== 'disabled'
+    && !values.REVENUECAT_WEBHOOK_SIGNING_SECRET) {
+    context.addIssue({
+      code: 'custom',
+      path: ['REVENUECAT_WEBHOOK_SIGNING_SECRET'],
+      message: `is required when REVENUECAT_WEBHOOK_SIGNATURE_MODE is ${values.REVENUECAT_WEBHOOK_SIGNATURE_MODE}`,
+    });
+  }
+  if (values.REVENUECAT_WEBHOOK_SIGNATURE_MODE === 'observe') {
+    if (!values.REVENUECAT_WEBHOOK_SIGNATURE_OBSERVE_UNTIL) {
+      context.addIssue({
+        code: 'custom',
+        path: ['REVENUECAT_WEBHOOK_SIGNATURE_OBSERVE_UNTIL'],
+        message: 'is required when REVENUECAT_WEBHOOK_SIGNATURE_MODE is observe',
+      });
+    } else {
+      const observeUntil = Date.parse(values.REVENUECAT_WEBHOOK_SIGNATURE_OBSERVE_UNTIL);
+      const remainingMs = observeUntil - Date.now();
+      if (remainingMs > 24 * 60 * 60_000) {
+        context.addIssue({
+          code: 'custom',
+          path: ['REVENUECAT_WEBHOOK_SIGNATURE_OBSERVE_UNTIL'],
+          message: 'must be no more than 24 hours in the future',
+        });
+      }
+    }
+  } else if (values.REVENUECAT_WEBHOOK_SIGNATURE_OBSERVE_UNTIL) {
+    context.addIssue({
+      code: 'custom',
+      path: ['REVENUECAT_WEBHOOK_SIGNATURE_OBSERVE_UNTIL'],
+      message: 'is only allowed when REVENUECAT_WEBHOOK_SIGNATURE_MODE is observe',
+    });
+  }
+  if (values.APP_ENV === 'production' && values.BILLING_REVENUECAT_ENABLED
+    && values.REVENUECAT_WEBHOOK_SIGNATURE_MODE === 'disabled') {
+    context.addIssue({
+      code: 'custom',
+      path: ['REVENUECAT_WEBHOOK_SIGNATURE_MODE'],
+      message: 'must be observe or enforce when RevenueCat billing is enabled in production',
+    });
   }
 
   if (values.APP_ENV === 'production') {

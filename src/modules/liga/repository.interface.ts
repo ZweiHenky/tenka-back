@@ -31,6 +31,7 @@ export interface LigaUpdateContext {
 }
 
 export interface LigaDeleteContext {
+  userId: string;
   nombre: string;
   logo: string | null;
   logoPublicId: string | null;

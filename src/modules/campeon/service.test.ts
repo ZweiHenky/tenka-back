@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   rondaFindFirst: vi.fn(),
   divisionEquipoFindUnique: vi.fn(),
   goleadores: vi.fn(),
+  transaction: vi.fn(),
+  deleteMany: vi.fn(),
+  observe: vi.fn(),
 }));
 
 vi.mock('./repository', () => ({ campeonRepository: mocks }));
@@ -17,7 +20,12 @@ vi.mock('../../config/database', () => ({
     division: { findUnique: mocks.divisionFindUnique },
     rondaPlayoff: { findFirst: mocks.rondaFindFirst },
     divisionEquipo: { findUnique: mocks.divisionEquipoFindUnique },
+    divisionCampeon: { deleteMany: mocks.deleteMany },
+    $transaction: mocks.transaction,
   },
+}));
+vi.mock('../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: mocks.observe,
 }));
 
 import { campeonService } from './service';
@@ -42,6 +50,7 @@ function cuadroTerminado() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.transaction.mockImplementation(async (callback) => callback({ divisionCampeon: { deleteMany: mocks.deleteMany } }));
   mocks.divisionFindUnique.mockResolvedValue(divisionBase());
   mocks.divisionEquipoFindUnique.mockResolvedValue({ equipo: { nombre: 'Cuauhtémoc', logo: 'logo.png' } });
   mocks.saveVigente.mockImplementation(async (divisionId: string, data: unknown) => ({ id: 'campeon-1', divisionId, ...(data as object) }));
@@ -103,6 +112,8 @@ describe('asignación', () => {
       jugadorNombre: null,
       jugadorGoles: null,
     });
+    expect(mocks.observe).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ operation: 'champion.assign', divisionId: 'division-1' }));
+    expect(mocks.observe.mock.invocationCallOrder[0]).toBeLessThan(mocks.saveVigente.mock.invocationCallOrder[0]);
   });
 
   it('rechaza un goleador que no tiene goles en la división', async () => {
@@ -135,7 +146,7 @@ describe('asignación', () => {
     await campeonService.assign('division-1', { equipoId: 'equipo-2' }, owner);
 
     expect(mocks.saveVigente).toHaveBeenCalledTimes(2);
-    expect(mocks.saveVigente).toHaveBeenLastCalledWith('division-1', expect.objectContaining({ equipoId: 'equipo-2', equipoNombre: 'Halcones' }));
+    expect(mocks.saveVigente).toHaveBeenLastCalledWith('division-1', expect.objectContaining({ equipoId: 'equipo-2', equipoNombre: 'Halcones' }), expect.any(Object));
   });
 
   it('exige ser dueño de la liga', async () => {
@@ -168,7 +179,8 @@ describe('asignación', () => {
 describe('quitar el título', () => {
   it('borra por división y es idempotente', async () => {
     await campeonService.remove('division-1', owner);
-    expect(mocks.deleteByDivision).toHaveBeenCalledWith('division-1');
+    expect(mocks.deleteMany).toHaveBeenCalledWith({ where: { divisionId: 'division-1', archivadoEn: null } });
+    expect(mocks.observe.mock.invocationCallOrder[0]).toBeLessThan(mocks.deleteMany.mock.invocationCallOrder[0]);
   });
 
   it('exige ser dueño de la liga', async () => {
@@ -194,6 +206,6 @@ describe('la división finalizada no bloquea al campeón', () => {
     mocks.divisionFindUnique.mockResolvedValue(divisionBase());
 
     await campeonService.remove('division-1', owner);
-    expect(mocks.deleteByDivision).toHaveBeenCalledWith('division-1');
+    expect(mocks.deleteMany).toHaveBeenCalledWith({ where: { divisionId: 'division-1', archivadoEn: null } });
   });
 });

@@ -13,7 +13,8 @@ async function runMaintenance(): Promise<void> {
   for (const job of definitions) {
     let processedCount = 0;
     let nextDueAt: Date | null = null;
-    for (let batch = 0; batch < MAX_BATCHES_PER_JOB; batch += 1) {
+    const maxBatches = job.maxMaintenanceBatches ?? MAX_BATCHES_PER_JOB;
+    for (let batch = 0; batch < maxBatches; batch += 1) {
       const result = await job.run();
       processedCount += result.processedCount;
       nextDueAt = result.nextDueAt;

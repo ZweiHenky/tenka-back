@@ -27,6 +27,12 @@ const mocks = vi.hoisted(() => ({
   estadoLigaFindUnique: vi.fn(),
   acquireAccountQuotaLock: vi.fn(),
   assertAccountQuotaDelta: vi.fn(),
+  assertMigrationAllowsResourceCreation: vi.fn(),
+  ensureInitialFreeManagementGrant: vi.fn(),
+  closeFreeManagementGrantForDeletedResource: vi.fn(),
+  resolveAccountAccessPolicy: vi.fn(),
+  observeResourceAccessShadowInTransaction: vi.fn(),
+  assignDivisionCapacityInTransaction: vi.fn(),
 }));
 
 vi.mock('../../config/database', () => ({
@@ -56,6 +62,21 @@ vi.mock('../../utils/accountQuota', () => ({
   acquireAccountQuotaLock: mocks.acquireAccountQuotaLock,
   assertAccountQuotaDelta: mocks.assertAccountQuotaDelta,
   isActiveDivisionCode: (code: string) => code === 'ABIERTA' || code === 'EN_CURSO',
+}));
+
+vi.mock('../billing/service', () => ({
+  assertMigrationAllowsResourceCreation: mocks.assertMigrationAllowsResourceCreation,
+  ensureInitialFreeManagementGrant: mocks.ensureInitialFreeManagementGrant,
+  closeFreeManagementGrantForDeletedResource: mocks.closeFreeManagementGrantForDeletedResource,
+  resolveAccountAccessPolicy: mocks.resolveAccountAccessPolicy,
+}));
+
+vi.mock('../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: mocks.observeResourceAccessShadowInTransaction,
+}));
+
+vi.mock('../billing/capacityAssignment', () => ({
+  assignDivisionCapacityInTransaction: mocks.assignDivisionCapacityInTransaction,
 }));
 
 import { divisionService } from './service';
@@ -117,6 +138,7 @@ describe('consultas privadas optimizadas de división', () => {
     mocks.divisionCreate.mockResolvedValue({ id: 'division-1' });
     mocks.estadoLigaFindUnique.mockResolvedValue({ id: 'estado-1', codigo: 'BORRADOR' });
     mocks.estadoLigaFindFirst.mockResolvedValue({ id: 'borrador-1', codigo: 'BORRADOR' });
+    mocks.resolveAccountAccessPolicy.mockResolvedValue({ effectiveAccess: 'FREE' });
   });
 
   describe('horarios por cancha', () => {
@@ -131,13 +153,19 @@ describe('consultas privadas optimizadas de división', () => {
       expect(mocks.acquireAccountQuotaLock).toHaveBeenCalledWith(tx, owner.id);
       expect(mocks.assertAccountQuotaDelta).toHaveBeenCalledWith(tx, owner.id, { divisions: 1, activeDivisions: 0 });
       expect(mocks.acquireLeagueScheduleLock).toHaveBeenCalledWith(tx, 'liga-1');
+      expect(mocks.ligaFindFirst.mock.invocationCallOrder[0])
+        .toBeLessThan(mocks.observeResourceAccessShadowInTransaction.mock.invocationCallOrder[0]);
       expect(mocks.acquireAccountQuotaLock.mock.invocationCallOrder[0])
+        .toBeLessThan(mocks.observeResourceAccessShadowInTransaction.mock.invocationCallOrder[0]);
+      expect(mocks.observeResourceAccessShadowInTransaction.mock.invocationCallOrder[0])
         .toBeLessThan(mocks.acquireLeagueScheduleLock.mock.invocationCallOrder[0]);
-      const payload = mocks.divisionCreate.mock.calls[0][0].data;
+      expect(mocks.acquireLeagueScheduleLock.mock.invocationCallOrder[0])
+        .toBeLessThan(mocks.create.mock.invocationCallOrder[0]);
+      const payload = mocks.divisionUpdate.mock.calls[0][0].data;
       // Summary is the union of both courts, for the public listing and older clients.
       expect(payload.diasPartido).toBe('lun, jue');
       expect(payload.horarioPartido).toBe('18:00 - 22:00');
-      expect(payload.canchaHorarios.create).toHaveLength(2);
+      expect(mocks.courtScheduleUpsert).toHaveBeenCalledTimes(2);
     });
 
     it('devuelve la división con sus horarios por cancha', async () => {
@@ -145,16 +173,19 @@ describe('consultas privadas optimizadas de división', () => {
       // tener configuración por cancha y la app mostraría todas las canchas de la liga.
       await divisionService.create({ ...createData, estadoLigaId: 'estado-1', horariosPorCancha }, owner);
 
-      expect(mocks.divisionCreate.mock.calls[0][0].include).toEqual({
+      expect(mocks.divisionUpdate.mock.calls[0][0].include).toEqual({
         canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } },
       });
     });
 
-    it('no abre transacción cuando la creación no trae filas', async () => {
+    it('mantiene la creación transaccional sin tomar el lock de horarios cuando no trae filas', async () => {
       await divisionService.create({ ...createData, estadoLigaId: 'estado-1' }, owner);
 
+      expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: 'Serializable', timeout: 30_000,
+      });
       expect(mocks.acquireLeagueScheduleLock).not.toHaveBeenCalled();
-      expect(mocks.create).toHaveBeenCalledTimes(1);
+      expect(mocks.create).toHaveBeenCalledWith({ ...createData, estadoLigaId: 'estado-1' }, tx);
     });
 
     it('al actualizar reemplaza las filas y reescribe el resumen', async () => {
@@ -257,8 +288,16 @@ describe('consultas privadas optimizadas de división', () => {
     expect(mocks.acquireLeagueScheduleLock).toHaveBeenCalledTimes(1);
     expect(mocks.acquireLeagueScheduleLock).toHaveBeenCalledWith(tx, 'liga-1');
     expect(mocks.divisionFindFirst).toHaveBeenCalledTimes(2);
+    expect(mocks.divisionFindFirst.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.observeResourceAccessShadowInTransaction.mock.invocationCallOrder[0]);
+    expect(mocks.acquireAccountQuotaLock.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.observeResourceAccessShadowInTransaction.mock.invocationCallOrder[0]);
+    expect(mocks.observeResourceAccessShadowInTransaction.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.acquireLeagueScheduleLock.mock.invocationCallOrder[0]);
     expect(mocks.acquireLeagueScheduleLock.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.divisionFindFirst.mock.invocationCallOrder[1]);
+    expect(mocks.acquireLeagueScheduleLock.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.update.mock.invocationCallOrder[0]);
     expect(mocks.update).toHaveBeenCalledWith('division-1', { registrarParticipaciones: true }, tx);
   });
 
@@ -308,9 +347,9 @@ describe('consultas privadas optimizadas de división', () => {
 
     await divisionService.update('division-1', { registrarGoleo: false }, owner);
 
-    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.transaction).toHaveBeenCalledOnce();
     expect(mocks.acquireLeagueScheduleLock).not.toHaveBeenCalled();
-    expect(mocks.update).toHaveBeenCalledWith('division-1', { registrarGoleo: false });
+    expect(mocks.update).toHaveBeenCalledWith('division-1', { registrarGoleo: false }, tx);
   });
 
   it('permite cambiar la regla de penales antes de finalizar partidos', async () => {
@@ -516,8 +555,14 @@ describe('divisiones de solo lectura', () => {
     expect(mocks.transaction).toHaveBeenCalledOnce();
     expect(mocks.acquireAccountQuotaLock).toHaveBeenCalledWith(tx, owner.id);
     expect(mocks.acquireLeagueScheduleLock).toHaveBeenCalledWith(tx, 'liga-1');
+    expect(mocks.divisionFindFirst.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.observeResourceAccessShadowInTransaction.mock.invocationCallOrder[0]);
     expect(mocks.acquireAccountQuotaLock.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.observeResourceAccessShadowInTransaction.mock.invocationCallOrder[0]);
+    expect(mocks.observeResourceAccessShadowInTransaction.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.acquireLeagueScheduleLock.mock.invocationCallOrder[0]);
+    expect(mocks.acquireLeagueScheduleLock.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.jornadaDeleteMany.mock.invocationCallOrder[0]);
     // Sin esto quedaría vacía pero todavía bloqueada, sin poder generar siquiera el cuadro nuevo.
     expect(mocks.divisionUpdate).toHaveBeenCalledWith({ where: { id: 'division-1' }, data: { estadoLigaId: 'en-curso-1' } });
     expect(mocks.assertAccountQuotaDelta).toHaveBeenCalledWith(tx, owner.id, { activeDivisions: 1 });

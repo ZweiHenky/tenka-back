@@ -7,6 +7,11 @@ function quotaClient(role: 'CAPITAN' | 'LIGA' | 'ADMINISTRADOR', usage: [number,
     .mockResolvedValueOnce(usage[3]);
   return {
     user: { findUnique: vi.fn().mockResolvedValue({ rol: role }) },
+    billingAccount: {
+      findUnique: vi.fn().mockResolvedValue(role === 'LIGA'
+        ? { id: 'billing-1', freeGrants: [] }
+        : null),
+    },
     equipo: { count: vi.fn().mockResolvedValue(usage[0]) },
     liga: { count: vi.fn().mockResolvedValue(usage[1]) },
     division: { count: divisionCount },
@@ -27,13 +32,36 @@ describe('account free-tier quotas', () => {
     });
   });
 
-  it('uses a namespaced account-scoped transaction advisory lock', async () => {
+  it('uses the billing owner bootstrap lock before an account exists', async () => {
     const tx = quotaClient('CAPITAN', [0, 0, 0, 0]);
     await acquireAccountQuotaLock(tx, 'user-1');
     expect(tx.$executeRawUnsafe).toHaveBeenCalledWith(
       'SELECT pg_advisory_xact_lock(hashtext($1))',
-      'account-quota:user-1',
+      'billing-owner:user-1',
     );
+  });
+
+  it('uses the stable billing account lock when an account exists', async () => {
+    const tx = quotaClient('LIGA', [0, 0, 0, 0]);
+    await acquireAccountQuotaLock(tx, 'user-1');
+    expect(tx.$executeRawUnsafe).toHaveBeenCalledWith(
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      'billing-account:billing-1',
+    );
+  });
+
+  it('hands off from the bootstrap lock to an account created while waiting', async () => {
+    const tx = quotaClient('CAPITAN', [0, 0, 0, 0]);
+    tx.billingAccount.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'billing-created' });
+
+    await acquireAccountQuotaLock(tx, 'user-1');
+
+    expect(tx.$executeRawUnsafe.mock.calls).toEqual([
+      ['SELECT pg_advisory_xact_lock(hashtext($1))', 'billing-owner:user-1'],
+      ['SELECT pg_advisory_xact_lock(hashtext($1))', 'billing-account:billing-created'],
+    ]);
   });
 
   it('returns a stable 422 error for a positive delta at the limit', async () => {

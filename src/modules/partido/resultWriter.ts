@@ -1,6 +1,8 @@
 import type { Prisma } from '../../generated/prisma/client'
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors'
 import { assertDivisionWritable } from '../../utils/divisionState'
+import type { AuthenticatedUser } from '../../types/auth'
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow'
 import { isCuadroCompleto } from '../../utils/bracketCompletion'
 import { tablaPosicionService } from '../tabla-posicion/service'
 import { rondaPlayoffService } from '../ronda-playoff/service'
@@ -66,12 +68,28 @@ export async function getResultContext(tx: Pick<Prisma.TransactionClient, 'parti
   return { partido, division }
 }
 
+export async function gateResultWriteInTransaction(
+  tx: Prisma.TransactionClient,
+  divisionId: string,
+  actor?: AuthenticatedUser,
+): Promise<void> {
+  await observeResourceAccessShadowInTransaction(tx, {
+    operation: actor ? 'partido.result.update' : 'referee.result.update',
+    capability: 'WRITE_RESULT',
+    actor,
+    divisionId,
+    resourceType: 'DIVISION',
+  })
+}
+
 export async function writeResultInTransaction(
   tx: Prisma.TransactionClient,
   partidoId: string,
   input: ResultInput,
+  actor?: AuthenticatedUser,
 ) {
   const { partido, division } = await getResultContext(tx, partidoId)
+  await gateResultWriteInTransaction(tx, division.id, actor)
   if (partido.version !== input.expectedVersion) {
     throw new ConflictError('El resultado cambió; actualiza los datos y vuelve a intentarlo')
   }

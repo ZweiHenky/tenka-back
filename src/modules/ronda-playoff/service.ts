@@ -1,6 +1,7 @@
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
 import { assertDivisionWritable } from '../../utils/divisionState';
 import { campeonRepository } from '../campeon/repository';
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow';
 import { prisma } from '../../config/database';
 import { rondaPlayoffRepository } from './repository';
 import type { RondaPlayoffEntity, RondaPlayoffReadEntity } from './entity';
@@ -181,9 +182,22 @@ async function deleteJornadasSinContenido(tx: Prisma.TransactionClient, division
   });
 }
 
-async function lockedDivision(tx: Prisma.TransactionClient, divisionId: string, actor: AuthenticatedUser) {
-  const lockTarget = await tx.division.findUnique({ where: { id: divisionId }, select: { ligaId: true } });
+async function lockedDivision(
+  tx: Prisma.TransactionClient,
+  divisionId: string,
+  actor: AuthenticatedUser,
+  operation: string,
+) {
+  const lockTarget = await tx.division.findUnique({
+    where: { id: divisionId },
+    select: { ligaId: true, estadoLiga: { select: { codigo: true } }, liga: { select: { userId: true } } },
+  });
   if (!lockTarget) throw new NotFoundError('División');
+  assertOwnerOrAdmin(actor, lockTarget.liga.userId, 'División');
+  assertDivisionWritable(lockTarget.estadoLiga);
+  await observeResourceAccessShadowInTransaction(tx, {
+    operation, capability: 'MANAGE_DIVISION', actor, divisionId, resourceType: 'DIVISION',
+  });
   await acquireLeagueScheduleLock(tx, lockTarget.ligaId);
   const division = await tx.division.findUnique({
     where: { id: divisionId },
@@ -220,22 +234,52 @@ export const rondaPlayoffService = {
 
   async create(data: { nombre: string; orden: number; divisionId: string }, actor: AuthenticatedUser): Promise<RondaPlayoffEntity> {
     await assertDivisionOwner(data.divisionId, actor);
-    return rondaPlayoffRepository.create(data);
+    return prisma.$transaction(async (tx) => {
+      const division = await tx.division.findUnique({
+        where: { id: data.divisionId },
+        select: { liga: { select: { userId: true } } },
+      });
+      if (!division) throw new NotFoundError('División');
+      assertOwnerOrAdmin(actor, division.liga.userId, 'División');
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'playoff.create', capability: 'MANAGE_DIVISION', actor, divisionId: data.divisionId, resourceType: 'DIVISION',
+      });
+      return tx.rondaPlayoff.create({ data });
+    });
   },
 
   async update(id: string, data: Record<string, unknown>, actor: AuthenticatedUser): Promise<RondaPlayoffEntity> {
     const ronda = await findForWrite(id, actor);
     await assertDivisionOwner(ronda.divisionId, actor);
-    return rondaPlayoffRepository.update(id, data);
+    return prisma.$transaction(async (tx) => {
+      const lockedRonda = await tx.rondaPlayoff.findUnique({
+        where: { id },
+        select: { divisionId: true, division: { select: { liga: { select: { userId: true } } } } },
+      });
+      if (!lockedRonda) throw new NotFoundError('Ronda de playoff');
+      if (lockedRonda.divisionId !== ronda.divisionId) {
+        throw new ConflictError('La ronda cambió de división durante la actualización; vuelve a intentarlo');
+      }
+      assertOwnerOrAdmin(actor, lockedRonda.division.liga.userId, 'División');
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'playoff.update', capability: 'MANAGE_DIVISION', actor, divisionId: lockedRonda.divisionId, resourceType: 'DIVISION',
+      });
+      return tx.rondaPlayoff.update({ where: { id }, data });
+    });
   },
 
   async delete(id: string, actor: AuthenticatedUser): Promise<void> {
     await serializablePlayoffWrite(async (tx) => {
       const lockTarget = await tx.rondaPlayoff.findUnique({
         where: { id },
-        select: { divisionId: true, division: { select: { ligaId: true } } },
+        select: { divisionId: true, division: { select: { ligaId: true, estadoLiga: { select: { codigo: true } }, liga: { select: { userId: true } } } } },
       });
       if (!lockTarget) throw new NotFoundError('Ronda de playoff');
+      assertOwnerOrAdmin(actor, lockTarget.division.liga.userId, 'División');
+      assertDivisionWritable(lockTarget.division.estadoLiga);
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'playoff.delete', capability: 'MANAGE_DIVISION', actor, divisionId: lockTarget.divisionId, resourceType: 'DIVISION',
+      });
       await acquireLeagueScheduleLock(tx, lockTarget.division.ligaId);
       const ronda = await tx.rondaPlayoff.findUnique({
         where: { id },
@@ -255,7 +299,7 @@ export const rondaPlayoffService = {
 
   async deleteByDivision(divisionId: string, actor: AuthenticatedUser): Promise<void> {
     await serializablePlayoffWrite(async (tx) => {
-      await lockedDivision(tx, divisionId, actor);
+      await lockedDivision(tx, divisionId, actor, 'playoff.delete-all');
       await tx.rondaPlayoff.deleteMany({ where: { divisionId } });
       await deleteJornadasSinContenido(tx, divisionId);
     }, 'Las rondas de playoff cambiaron durante la eliminación; vuelve a intentarlo');
@@ -275,8 +319,14 @@ export const rondaPlayoffService = {
       throw new ValidationError('La siembra manual necesita las llaves');
     }
     return serializablePlayoffWrite(async (tx) => {
-      const lockTarget = await tx.division.findUnique({ where: { id: divisionId }, select: { ligaId: true } });
+      const lockTarget = await tx.division.findFirst({
+        where: isAdmin(actor) ? { id: divisionId } : { id: divisionId, liga: { userId: actor.id } },
+        select: { ligaId: true },
+      });
       if (!lockTarget) throw new NotFoundError('División');
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'playoff.generate', capability: 'MANAGE_DIVISION', actor, divisionId, resourceType: 'DIVISION',
+      });
       await acquireLeagueScheduleLock(tx, lockTarget.ligaId);
       const division = await tx.division.findFirst({
         where: isAdmin(actor) ? { id: divisionId } : { id: divisionId, liga: { userId: actor.id } },

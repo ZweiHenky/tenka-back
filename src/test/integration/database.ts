@@ -7,7 +7,13 @@ let cachedUrl: string | undefined;
 
 function databaseIdentity(url: URL): string {
   const hostname = url.hostname.toLowerCase().replace('-pooler.', '.');
-  return `${hostname}:${url.port || '5432'}${url.pathname}`;
+  let databaseName: string;
+  try {
+    databaseName = decodeURIComponent(url.pathname);
+  } catch {
+    throw new Error('Database URL path must use valid percent encoding');
+  }
+  return `${hostname}:${url.port || '5432'}${databaseName}`;
 }
 
 export function getIntegrationDatabaseUrl(): string {
@@ -37,6 +43,9 @@ export function getIntegrationDatabaseUrl(): string {
   const applicationTargets = [
     ['DATABASE_URL', process.env.DATABASE_URL],
     ['DIRECT_DATABASE_URL', process.env.DIRECT_DATABASE_URL],
+    ['SHADOW_DATABASE_URL', process.env.SHADOW_DATABASE_URL],
+    ['PRISMA_DATABASE_URL', process.env.PRISMA_DATABASE_URL],
+    ['PRISMA_SHADOW_DATABASE_URL', process.env.PRISMA_SHADOW_DATABASE_URL],
   ] as const;
   for (const [name, value] of applicationTargets) {
     if (!value) continue;
@@ -65,6 +74,11 @@ export function getIntegrationDatabaseUrl(): string {
     throw new Error('TEST_DATABASE_URL must not override search_path');
   }
 
+  const existingOptions = parsed.searchParams.get('options')?.trim();
+  parsed.searchParams.set(
+    'options',
+    `${existingOptions ? `${existingOptions} ` : ''}-c search_path=${INTEGRATION_SCHEMA}`,
+  );
   parsed.searchParams.set('schema', INTEGRATION_SCHEMA);
   if (parsed.searchParams.get('schema') !== INTEGRATION_SCHEMA) {
     throw new Error(`Integration database URL must target ${INTEGRATION_SCHEMA}`);

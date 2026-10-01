@@ -95,6 +95,256 @@ enum OneSignalTagSyncStatus {
   DEAD
 }
 
+enum BillingProviderIdentityKind {
+  CANONICAL
+  ALIAS
+}
+
+enum BillingProviderIdentityStatus {
+  ACTIVE
+  RETIRED
+}
+
+enum FreeManagementGrantSource {
+  INITIAL_FREE
+  PAID_EXPIRATION
+  MIGRATION_SELECTION
+  MIGRATION_FALLBACK
+  SUPPORT
+}
+
+enum FreeManagementGrantEndReason {
+  DIVISION_DELETED
+  PAID_CONVERSION
+  ENTERPRISE_ACTIVATED
+  ACCOUNT_DELETED
+  ACCOUNT_RECOVERY_REPLACED
+  SUPPORT_REPLACED
+}
+
+enum BillingStore {
+  APPLE
+  GOOGLE
+}
+
+enum BillingInterval {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+enum BillingEnvironment {
+  PREVIEW
+  PRODUCTION
+}
+
+enum BillingOperationalMode {
+  ENABLED
+  PURCHASES_PAUSED
+}
+
+enum BillingStoreEnvironment {
+  SANDBOX
+  PRODUCTION
+}
+
+enum BillingProviderStatus {
+  ACTIVE
+  BILLING_RETRY
+  STORE_GRACE
+  ACCOUNT_HOLD
+  PAUSED
+  EXPIRED
+  REVOKED
+  UNKNOWN
+}
+
+enum BillingProviderEndReason {
+  VOLUNTARY
+  BILLING_FAILURE
+  PAUSE
+  REFUND
+  REVOCATION
+  CHARGEBACK
+  FRAUD
+  UNKNOWN
+}
+
+enum BillingOwnershipType {
+  PURCHASED
+  FAMILY_SHARED
+  UNKNOWN
+}
+
+enum BillingTransactionEventType {
+  INITIAL_PURCHASE
+  RENEWAL
+  PRODUCT_CHANGE
+  RECOVERY
+  UNKNOWN
+}
+
+enum BillingCatalogReleaseStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum BillingWebhookEventStatus {
+  PENDING
+  PROCESSING
+  RETRY
+  QUARANTINED
+  PROCESSED
+  DEAD_LETTER
+  CONFLICT
+}
+
+enum BillingReconciliationJobStatus {
+  SCHEDULED
+  PROCESSING
+  RETRY
+}
+
+enum BillingPeriodOrigin {
+  STORE
+}
+
+enum BillingPeriodEndReason {
+  SUPERSEDED
+  REFUND
+  REVOCATION
+  CHARGEBACK
+  FRAUD
+  PROVIDER_CORRECTION
+}
+
+enum BillingLocalGraceStatus {
+  ACTIVE
+  RECOVERED
+  EXPIRED
+  TERMINATED
+}
+
+enum BillingLocalGraceReason {
+  BILLING_FAILURE
+}
+
+enum BillingMigrationAccessStatus {
+  PREPARED
+  SELECTION_REQUIRED
+  SELECTED
+  PURCHASED
+  APPLIED
+  REPLACED
+}
+
+enum BillingMigrationActivationReviewStatus {
+  PENDING_REVIEW
+  APPROVED
+  BLOCKED
+  REJECTED
+  INVALIDATED
+  COMPLETED
+  EXPIRED
+}
+
+enum BillingMigrationActivationItemStatus {
+  ELIGIBLE
+  BLOCKED
+  ACTIVATED
+}
+
+enum BillingPurchaseSelectionStatus {
+  DRAFT
+  LOCKED
+  APPLIED
+  SUPERSEDED
+}
+
+enum BillingCheckoutAttemptStatus {
+  PREPARED
+  STORE_PENDING
+  VERIFICATION_PENDING
+  CANCEL_REPORTED
+  VERIFYING
+  VERIFIED
+  CANCELED
+  REJECTED
+  OWNERSHIP_CONFLICT
+  ABANDONED
+}
+
+enum BillingVerificationStatus {
+  PENDING
+  VERIFIED
+  OWNERSHIP_CONFLICT
+  REJECTED
+}
+
+enum DivisionCapacityAssignmentSource {
+  FREE_CONVERSION
+  PURCHASE_SELECTION
+  PURCHASE_FALLBACK
+  DIRECT
+  PERIOD_ROLLOVER
+  GRACE_RECOVERY
+  RENEWAL_SELECTION
+  RENEWAL_FALLBACK
+}
+
+enum BillingAuditAction {
+  WEBHOOK_QUEUE_VIEWED
+  WEBHOOK_EVENT_VIEWED
+  WEBHOOK_REPLAY_REQUESTED
+  BILLING_PERIOD_MATERIALIZED
+  BILLING_PERIOD_SUPERSEDED
+  BILLING_PERIOD_ENDED
+  BILLING_CAPACITY_GRANTED
+  BILLING_DIVISION_ASSIGNED
+  BILLING_MATERIALIZATION_BLOCKED
+  BILLING_MIGRATION_PREPARED
+  BILLING_MIGRATION_ACTIVATED
+  BILLING_MIGRATION_FREE_DIVISION_SELECTED
+  BILLING_MIGRATION_PURCHASED
+  BILLING_MIGRATION_APPLIED
+  BILLING_MIGRATION_PAUSE_OPENED
+  BILLING_MIGRATION_PAUSE_CLOSED
+  BILLING_MIGRATION_SUMMARY_VIEWED
+  BILLING_MIGRATION_QUEUE_VIEWED
+  BILLING_MIGRATION_DETAIL_VIEWED
+  BILLING_MIGRATION_ACTIVATION_REVIEW_CREATED
+  BILLING_MIGRATION_ACTIVATION_REVIEW_BLOCKED
+  BILLING_MIGRATION_ACTIVATION_REVIEW_VIEWED
+  BILLING_MIGRATION_ACTIVATION_REVIEW_APPROVED
+  BILLING_MIGRATION_ACTIVATION_REVIEW_REJECTED
+  BILLING_MIGRATION_ACTIVATION_REVIEW_EXPIRED
+  BILLING_MIGRATION_ACTIVATION_REVIEW_INVALIDATED
+  BILLING_MIGRATION_ACTIVATION_ATTEMPT_BLOCKED
+  BILLING_MIGRATION_ACTIVATION_REVIEW_COMPLETED
+  BILLING_FREE_FOUNDATION_RECONCILED
+  BILLING_OPERATIONAL_CONTROL_VIEWED
+  BILLING_OPERATIONAL_CONTROL_CHANGED
+  BILLING_PURCHASE_SELECTION_CREATED
+  BILLING_PURCHASE_SELECTION_UPDATED
+  BILLING_PURCHASE_SELECTION_SUPERSEDED
+  BILLING_CHECKOUT_ATTEMPT_STARTED
+  BILLING_CHECKOUT_OUTCOME_REPORTED
+  BILLING_CHECKOUT_ATTEMPT_COMPLETED
+  BILLING_VERIFICATION_REQUESTED
+  BILLING_VERIFICATION_COMPLETED
+  BILLING_LOCAL_GRACE_STARTED
+  BILLING_LOCAL_GRACE_RECOVERED
+  BILLING_LOCAL_GRACE_EXPIRED
+  BILLING_LOCAL_GRACE_TERMINATED
+}
+
+enum BillingAuditActorType {
+  USER
+  SYSTEM
+  PROVIDER
+}
+
 model User {
   id                      String   @id @default(cuid())
   email                   String   @unique
@@ -119,6 +369,717 @@ model User {
   partidoRefereeAccess      PartidoRefereeAccess[]
   mediaAssets               MediaAsset[]
   notificationSubscriptions DivisionNotificationSubscription[]
+  billingAccount            BillingAccount?
+  freeManagementGrants      FreeManagementGrant[]
+}
+
+model BillingAccount {
+  id                  String   @id @default(cuid())
+  userId              String?  @unique
+  ownerUserIdSnapshot String
+  detachedAt          DateTime?
+  detachReason        String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user               User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  providerIdentities BillingProviderIdentity[]
+  freeGrants         FreeManagementGrant[]
+  providerSubscriptionChains BillingProviderSubscriptionChain[]
+  billingTransactions BillingTransaction[]
+  providerPeriods BillingProviderPeriod[]
+  billingPeriods BillingPeriod[]
+  periodicReconciliation BillingRevenueCatReconciliation?
+  migrationAccess BillingMigrationAccess?
+  purchaseSelections BillingPurchaseSelection[]
+  checkoutAttempts BillingCheckoutAttempt[]
+  billingVerifications BillingVerification[]
+  localGraces BillingLocalGrace[]
+
+  @@index([ownerUserIdSnapshot])
+  @@map("billing_accounts")
+}
+
+model BillingOperationalControl {
+  id               String                 @id
+  environment      BillingEnvironment     @unique
+  mode             BillingOperationalMode @default(PURCHASES_PAUSED)
+  reason           String
+  changedByAdminId String
+  changedAt        DateTime               @db.Timestamptz(3)
+  version          Int                    @default(1)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  pauses BillingOperationalPause[]
+
+  @@unique([environment, version], map: "billing_operational_controls_environment_version_key")
+  @@map("billing_operational_controls")
+}
+
+model BillingMigrationAccess {
+  id                             String                       @id
+  billingAccountId               String                       @unique
+  status                         BillingMigrationAccessStatus @default(PREPARED)
+  preparedAt                     DateTime                     @db.Timestamptz(3)
+  preparedDivisionCount          Int
+  selectedFreeDivisionIdSnapshot String?
+  startedAt                      DateTime?                    @db.Timestamptz(3)
+  deadline                       DateTime?                    @db.Timestamptz(3)
+  activatedAt                    DateTime?                    @db.Timestamptz(3)
+  appliedAt                      DateTime?                    @db.Timestamptz(3)
+  activationReviewItemId         String?                      @unique
+  createdAt                      DateTime                     @default(now())
+  updatedAt                      DateTime                     @updatedAt
+
+  billingAccount BillingAccount             @relation(fields: [billingAccountId], references: [id], onDelete: Restrict, map: "billing_migration_accesses_account_fkey")
+  divisions      BillingMigrationDivision[]
+  pauseApplications BillingMigrationPauseApplication[]
+  sourceFreeGrant FreeManagementGrant?
+  activationReviewItems BillingMigrationActivationReviewItem[] @relation("ReviewedMigration")
+  activationReviewItem BillingMigrationActivationReviewItem? @relation("ActivatedMigrationReviewItem", fields: [activationReviewItemId], references: [id], onDelete: Restrict, map: "billing_migrations_activation_review_item_fkey")
+
+  @@index([status, preparedAt(sort: Desc), id(sort: Desc)], map: "billing_migration_accesses_status_prepared_id_idx")
+  @@map("billing_migration_accesses")
+}
+
+model BillingMigrationActivationReview {
+  id                         String                                 @id
+  environment                BillingEnvironment
+  status                     BillingMigrationActivationReviewStatus
+  cohortHash                 String
+  cohortCount                Int
+  reason                     String
+  requestedByAdminIdSnapshot String
+  approvedByAdminIdSnapshot  String?
+  requestedAt                DateTime                               @db.Timestamptz(3)
+  approvedAt                 DateTime?                              @db.Timestamptz(3)
+  expiresAt                  DateTime                               @db.Timestamptz(3)
+  operationalControlVersion  Int
+  version                    Int                                    @default(1)
+  createdAt                  DateTime                               @default(now())
+  updatedAt                  DateTime                               @updatedAt
+
+  items BillingMigrationActivationReviewItem[]
+
+  @@index([status, expiresAt, id], map: "billing_migration_activation_reviews_status_expiry_idx")
+  @@index([environment, status, requestedAt(sort: Desc), id(sort: Desc)], map: "billing_migration_reviews_env_status_requested_idx")
+  @@map("billing_migration_activation_reviews")
+}
+
+model BillingMigrationActivationReviewItem {
+  id                String                               @id
+  reviewId          String
+  billingAccountId  String
+  migrationAccessId String?
+  stateFingerprint  String
+  eligibilityStatus BillingMigrationActivationItemStatus
+  blockerCodes      Json
+  preparedDivisionCount Int
+  liveDivisionCount Int
+  activatedAt       DateTime?                            @db.Timestamptz(3)
+  createdAt         DateTime                             @default(now())
+  updatedAt         DateTime                             @updatedAt
+
+  review BillingMigrationActivationReview @relation(fields: [reviewId], references: [id], onDelete: Restrict, map: "billing_migration_review_items_review_fkey")
+  migrationAccess BillingMigrationAccess? @relation("ReviewedMigration", fields: [migrationAccessId], references: [id], onDelete: Restrict, map: "billing_migration_review_items_migration_fkey")
+  activatedMigration BillingMigrationAccess? @relation("ActivatedMigrationReviewItem")
+
+  @@unique([reviewId, billingAccountId], map: "billing_migration_review_items_review_account_key")
+  @@unique([reviewId, migrationAccessId], map: "billing_migration_review_items_review_migration_key")
+  @@index([reviewId, eligibilityStatus, id], map: "billing_migration_review_items_review_status_idx")
+  @@index([billingAccountId, reviewId], map: "billing_migration_review_items_account_review_idx")
+  @@map("billing_migration_activation_review_items")
+}
+
+model BillingOperationalPause {
+  id               String             @id
+  environment      BillingEnvironment
+  startedAt        DateTime           @db.Timestamptz(3)
+  endedAt          DateTime?          @db.Timestamptz(3)
+  startedByAdminId String
+  endedByAdminId   String?
+  reason           String
+  createdAt        DateTime           @default(now())
+
+  control      BillingOperationalControl          @relation(fields: [environment], references: [environment], onDelete: Restrict, map: "billing_operational_pauses_control_fkey")
+  applications BillingMigrationPauseApplication[]
+
+  @@index([environment, startedAt], map: "billing_operational_pauses_environment_started_idx")
+  @@map("billing_operational_pauses")
+}
+
+model BillingMigrationPauseApplication {
+  id                        String   @id
+  billingMigrationAccessId  String
+  billingOperationalPauseId String
+  extensionSeconds          Int
+  extensionMilliseconds     BigInt?
+  appliedAt                 DateTime @db.Timestamptz(3)
+  createdAt                 DateTime @default(now())
+
+  migrationAccess BillingMigrationAccess @relation(fields: [billingMigrationAccessId], references: [id], onDelete: Restrict, map: "billing_migration_pause_applications_access_fkey")
+  operationalPause BillingOperationalPause @relation(fields: [billingOperationalPauseId], references: [id], onDelete: Restrict, map: "billing_migration_pause_applications_pause_fkey")
+
+  @@unique([billingMigrationAccessId, billingOperationalPauseId], map: "billing_migration_pause_applications_access_pause_key")
+  @@map("billing_migration_pause_applications")
+}
+
+model BillingMigrationDivision {
+  id                        String   @id
+  migrationAccessId         String
+  divisionId                String?
+  divisionIdSnapshot        String
+  divisionCreatedAtSnapshot DateTime
+  leagueIdSnapshot          String
+  createdAt                 DateTime @default(now())
+
+  migrationAccess BillingMigrationAccess @relation(fields: [migrationAccessId], references: [id], onDelete: Restrict, map: "billing_migration_divisions_access_fkey")
+  division        Division?              @relation(fields: [divisionId], references: [id], onDelete: SetNull, map: "billing_migration_divisions_division_fkey")
+
+  @@unique([migrationAccessId, divisionIdSnapshot], map: "billing_migration_divisions_access_snapshot_key")
+  @@index([divisionId], map: "billing_migration_divisions_division_idx")
+  @@index([migrationAccessId, divisionCreatedAtSnapshot, divisionIdSnapshot], map: "billing_migration_divisions_fallback_idx")
+  @@map("billing_migration_divisions")
+}
+
+model BillingPurchaseSelection {
+  id                   String                         @id @default(cuid())
+  billingAccountId     String
+  logicalProductId     String
+  billingInterval      BillingInterval
+  targetCapacity       Int
+  status               BillingPurchaseSelectionStatus @default(DRAFT)
+  version              Int                            @default(1)
+  lockedAt             DateTime?                      @db.Timestamptz(3)
+  checkoutAttemptId    String?                        @unique(map: "billing_purchase_selections_checkout_attempt_key")
+  consumedByPeriodId   String?                        @unique(map: "billing_purchase_selections_consumed_period_key")
+  createdAt            DateTime                       @default(now())
+  updatedAt            DateTime                       @updatedAt
+
+  billingAccount   BillingAccount                 @relation(fields: [billingAccountId], references: [id], onDelete: Restrict, map: "billing_purchase_selections_account_fkey")
+  consumedByPeriod BillingPeriod?                  @relation("BillingPeriodPurchaseSelection", fields: [consumedByPeriodId], references: [id], onDelete: Restrict, map: "billing_purchase_selections_consumed_period_fkey")
+  checkoutAttempt  BillingCheckoutAttempt?          @relation("ActiveCheckoutAttempt", fields: [checkoutAttemptId], references: [id], onDelete: Restrict, map: "billing_purchase_selections_checkout_attempt_fkey")
+  checkoutAttempts BillingCheckoutAttempt[]         @relation("CheckoutAttemptSelection")
+  items            BillingPurchaseSelectionItem[]
+
+  @@index([billingAccountId, status], map: "billing_purchase_selections_account_status_idx")
+  @@map("billing_purchase_selections")
+}
+
+model BillingCheckoutAttempt {
+  id                         String                       @id @default(cuid())
+  billingAccountId           String
+  purchaseSelectionId        String
+  store                      BillingStore
+  catalogReleaseIdSnapshot   String
+  logicalProductIdSnapshot   String
+  billingIntervalSnapshot    BillingInterval
+  targetCapacitySnapshot     Int
+  offeringIdSnapshot         String
+  packageIdSnapshot          String
+  storeProductIdSnapshot     String
+  basePlanIdSnapshot         String?
+  status                     BillingCheckoutAttemptStatus @default(PREPARED)
+  version                    Int                          @default(1)
+  idempotencyKey             String
+  requestFingerprint         String
+  startedAt                  DateTime                     @db.Timestamptz(3)
+  sdkOutcomeAt               DateTime?                    @db.Timestamptz(3)
+  nextVerificationAt         DateTime?                    @db.Timestamptz(3)
+  lastVerificationAt         DateTime?                    @db.Timestamptz(3)
+  verificationAttempts       Int                          @default(0)
+  leaseUntil                 DateTime?                    @db.Timestamptz(3)
+  lockedBy                   String?
+  terminalAt                 DateTime?                    @db.Timestamptz(3)
+  lastErrorCode              String?
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime                     @updatedAt
+
+  billingAccount    BillingAccount             @relation(fields: [billingAccountId], references: [id], onDelete: Restrict, map: "billing_checkout_attempts_account_fkey")
+  purchaseSelection BillingPurchaseSelection   @relation("CheckoutAttemptSelection", fields: [purchaseSelectionId], references: [id], onDelete: Restrict, map: "billing_checkout_attempts_selection_fkey")
+  activeForSelection BillingPurchaseSelection? @relation("ActiveCheckoutAttempt")
+  verification      BillingVerification?
+
+  @@unique([billingAccountId, idempotencyKey], map: "billing_checkout_attempts_account_idempotency_key")
+  @@index([status, nextVerificationAt, leaseUntil], map: "billing_checkout_attempts_due_idx")
+  @@index([purchaseSelectionId, createdAt], map: "billing_checkout_attempts_selection_created_idx")
+  @@map("billing_checkout_attempts")
+}
+
+model BillingVerification {
+  id                          String                    @id @default(cuid())
+  billingAccountId            String
+  checkoutAttemptId           String                    @unique(map: "billing_verifications_checkout_attempt_key")
+  store                       BillingStore
+  idempotencyKey              String
+  requestFingerprint          String
+  providerSubscriptionChainId String?
+  providerTransactionId       String?
+  status                      BillingVerificationStatus @default(PENDING)
+  requestedAt                 DateTime                  @db.Timestamptz(3)
+  lastAttemptAt               DateTime?                 @db.Timestamptz(3)
+  verifiedAt                  DateTime?                 @db.Timestamptz(3)
+  attemptCount                Int                       @default(0)
+  lastErrorCode               String?
+  createdAt                   DateTime                  @default(now())
+  updatedAt                   DateTime                  @updatedAt
+
+  billingAccount BillingAccount                   @relation(fields: [billingAccountId], references: [id], onDelete: Restrict, map: "billing_verifications_account_fkey")
+  checkoutAttempt BillingCheckoutAttempt           @relation(fields: [checkoutAttemptId], references: [id], onDelete: Restrict, map: "billing_verifications_checkout_attempt_fkey")
+  providerSubscriptionChain BillingProviderSubscriptionChain? @relation(fields: [providerSubscriptionChainId], references: [id], onDelete: Restrict, map: "billing_verifications_chain_fkey")
+
+  @@unique([billingAccountId, idempotencyKey], map: "billing_verifications_account_idempotency_key")
+  @@index([status, requestedAt], map: "billing_verifications_status_requested_idx")
+  @@index([providerSubscriptionChainId], map: "billing_verifications_chain_idx")
+  @@map("billing_verifications")
+}
+
+model BillingPurchaseSelectionItem {
+  id                     String   @id @default(cuid())
+  purchaseSelectionId    String
+  slotNumber             Int
+  divisionIdSnapshot     String
+  createdAt              DateTime @default(now())
+
+  purchaseSelection BillingPurchaseSelection @relation(fields: [purchaseSelectionId], references: [id], onDelete: Restrict, map: "billing_purchase_selection_items_selection_fkey")
+
+  @@unique([purchaseSelectionId, slotNumber], map: "billing_purchase_selection_items_selection_slot_key")
+  @@unique([purchaseSelectionId, divisionIdSnapshot], map: "billing_purchase_selection_items_selection_division_key")
+  @@index([divisionIdSnapshot], map: "billing_purchase_selection_items_division_idx")
+  @@map("billing_purchase_selection_items")
+}
+
+model BillingProviderIdentity {
+  id                       String                        @id @default(cuid())
+  billingAccountId         String
+  revenueCatAppUserId      String                        @unique
+  kind                     BillingProviderIdentityKind
+  status                   BillingProviderIdentityStatus @default(ACTIVE)
+  observedAsOriginal       Boolean                       @default(false)
+  linkedAt                 DateTime                      @default(now())
+  retiredAt                DateTime?
+  createdAt                DateTime                      @default(now())
+
+  billingAccount BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Restrict)
+
+  @@index([billingAccountId, status])
+  @@map("billing_provider_identities")
+}
+
+model FreeManagementGrant {
+  id                            String                       @id @default(cuid())
+  userId                        String?
+  billingAccountId              String?
+  divisionId                    String?
+  divisionIdSnapshot            String
+  divisionNameSnapshot          String
+  leagueId                      String?
+  leagueIdSnapshot              String
+  leagueNameSnapshot            String
+  source                        FreeManagementGrantSource
+  grantedAt                     DateTime                     @default(now())
+  endedAt                       DateTime?
+  endReason                     FreeManagementGrantEndReason?
+  convertedToBillingPeriodId    String?
+  convertedToAssignmentId       String?
+  sourceLocalGraceId            String?                      @unique(map: "free_management_grants_source_local_grace_key")
+  sourceBillingMigrationAccessId String?                     @unique(map: "free_management_grants_source_migration_key")
+  createdAt                     DateTime                     @default(now())
+
+  user           User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  billingAccount BillingAccount? @relation(fields: [billingAccountId], references: [id], onDelete: SetNull)
+  division       Division?       @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+  league         Liga?           @relation(fields: [leagueId], references: [id], onDelete: SetNull)
+  convertedToBillingPeriod BillingPeriod? @relation(fields: [convertedToBillingPeriodId], references: [id], onDelete: Restrict, map: "free_grants_converted_period_fkey")
+  convertedToAssignment DivisionCapacityAssignment? @relation(fields: [convertedToAssignmentId], references: [id], onDelete: Restrict, map: "free_grants_converted_assignment_fkey")
+  sourceLocalGrace BillingLocalGrace? @relation(fields: [sourceLocalGraceId], references: [id], onDelete: Restrict, map: "free_management_grants_source_local_grace_fkey")
+  sourceBillingMigrationAccess BillingMigrationAccess? @relation(fields: [sourceBillingMigrationAccessId], references: [id], onDelete: Restrict, map: "free_management_grants_source_migration_fkey")
+
+  @@index([userId, endedAt])
+  @@index([billingAccountId, endedAt])
+  @@index([divisionId])
+  @@index([leagueId])
+  @@map("free_management_grants")
+}
+
+model BillingCatalogRelease {
+  id          String                      @id @default(cuid())
+  version     String
+  environment BillingEnvironment
+  status      BillingCatalogReleaseStatus @default(DRAFT)
+  approvedAt  DateTime?
+  activatedAt DateTime?
+  createdAt   DateTime                    @default(now())
+
+  products BillingProductCatalog[]
+
+  @@unique([environment, version])
+  @@index([environment, status])
+  @@map("billing_catalog_releases")
+}
+
+model BillingProductCatalog {
+  id                           String          @id @default(cuid())
+  catalogReleaseId             String
+  logicalProductId             String
+  store                        BillingStore
+  storeProductId               String
+  basePlanId                   String?
+  revenueCatOfferingId         String
+  revenueCatPackageId          String
+  revenueCatProductIdentifier  String
+  capacity                     Int
+  billingInterval              BillingInterval
+  intervalMonths               Int
+  active                       Boolean         @default(true)
+  createdAt                    DateTime        @default(now())
+
+  catalogRelease BillingCatalogRelease @relation(fields: [catalogReleaseId], references: [id], onDelete: Restrict)
+
+  @@unique([catalogReleaseId, revenueCatOfferingId, revenueCatPackageId, store], map: "billing_product_catalog_offering_package_store_key")
+  @@index([catalogReleaseId, store, storeProductId, basePlanId], map: "billing_product_catalog_release_store_product_plan_idx")
+  @@index([catalogReleaseId, logicalProductId, billingInterval, store], map: "billing_product_catalog_release_logical_interval_store_idx")
+  @@map("billing_product_catalog")
+}
+
+model BillingWebhookEvent {
+  id                String                    @id @default(cuid())
+  providerEventId   String                    @unique
+  eventType         String
+  payloadRedacted   Json?
+  payloadHash       String
+  status            BillingWebhookEventStatus @default(PENDING)
+  attempts          Int                       @default(0)
+  nextAttemptAt     DateTime                  @default(now())
+  leaseUntil        DateTime?
+  lockedBy          String?
+  lastError         String?
+  receivedAt        DateTime                  @default(now())
+  processedAt       DateTime?
+  payloadPurgedAt   DateTime?
+  quarantineStartedAt DateTime?
+  replayCount       Int                       @default(0)
+  lastReplayAt      DateTime?
+  updatedAt         DateTime                  @updatedAt
+
+  observations BillingWebhookObservation[]
+
+  @@index([status, nextAttemptAt, leaseUntil])
+  @@map("billing_webhook_events")
+}
+
+model BillingRevenueCatReconciliation {
+  billingAccountId    String                         @id
+  status              BillingReconciliationJobStatus @default(SCHEDULED)
+  nextAttemptAt       DateTime                       @default(now())
+  requestedNextAttemptAt DateTime?
+  leaseUntil          DateTime?
+  lockedBy            String?
+  consecutiveFailures Int                            @default(0)
+  lastAttemptAt       DateTime?
+  lastSucceededAt     DateTime?
+  lastErrorCode       String?
+  lastIssueSummary    Json?
+  createdAt           DateTime                       @default(now())
+  updatedAt           DateTime                       @updatedAt
+
+  billingAccount BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Restrict, map: "billing_revenuecat_reconciliations_account_fkey")
+
+  @@index([status, nextAttemptAt, leaseUntil], map: "billing_revenuecat_reconciliations_status_due_lease_idx")
+  @@map("billing_revenuecat_reconciliations")
+}
+
+model BillingAuditLog {
+  id                      String                @id @default(cuid())
+  action                  BillingAuditAction
+  actorType               BillingAuditActorType
+  actorUserId             String?
+  actorUserIdSnapshot     String
+  billingWebhookEventId   String?
+  targetType              String
+  targetId                String
+  reason                  String?
+  requestId               String
+  idempotencyKey          String?
+  requestFingerprint      String?
+  metadataRedacted        Json
+  createdAt               DateTime              @default(now())
+
+  @@index([billingWebhookEventId, createdAt])
+  @@index([actorUserIdSnapshot, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId, createdAt(sort: Desc), id(sort: Desc)], map: "billing_audit_logs_target_created_id_idx")
+  @@map("billing_audit_logs")
+}
+
+model BillingWebhookObservation {
+  id                    String   @id @default(cuid())
+  billingWebhookEventId String
+  payloadHash           String
+  payloadRedacted       Json?
+  receivedAt            DateTime @default(now())
+  payloadPurgedAt       DateTime?
+  conflictReason        String
+
+  billingWebhookEvent BillingWebhookEvent @relation(fields: [billingWebhookEventId], references: [id], onDelete: Restrict, map: "billing_webhook_observations_event_fkey")
+
+  @@unique([billingWebhookEventId, payloadHash], map: "billing_webhook_observations_event_hash_key")
+  @@index([receivedAt])
+  @@map("billing_webhook_observations")
+}
+
+model BillingProviderSubscriptionChain {
+  id                     String       @id @default(cuid())
+  billingAccountId       String
+  store                  BillingStore
+  providerChainReference String
+  createdAt              DateTime     @default(now())
+
+  billingAccount BillingAccount               @relation(fields: [billingAccountId], references: [id], onDelete: Restrict)
+  subscriptions  BillingProviderSubscription[]
+  verifications BillingVerification[]
+
+  @@unique([store, providerChainReference])
+  @@index([billingAccountId, store])
+  @@map("billing_provider_subscription_chains")
+}
+
+model BillingProviderSubscription {
+  id                          String                   @id @default(cuid())
+  providerSubscriptionChainId String
+  store                       BillingStore
+  storeEnvironment            BillingStoreEnvironment
+  providerSubscriptionKey     String
+  replacesProviderSubscriptionId String?
+  providerStatus              BillingProviderStatus
+  providerStatusUpdatedAt     DateTime                 @db.Timestamptz(3)
+  entitlementActive           Boolean
+  providerEndReason           BillingProviderEndReason?
+  canonicalEvidenceReference  String?
+  providerAccessEndsAt        DateTime?                @db.Timestamptz(3)
+  providerEventId             String?
+  willRenew                   Boolean?
+  canceledAt                  DateTime?                @db.Timestamptz(3)
+  currentLogicalProductId     String?
+  currentStoreProductId       String?
+  currentBasePlanId           String?
+  currentCapacity             Int?
+  currentBillingInterval      BillingInterval?
+  pendingLogicalProductId     String?
+  pendingStoreProductId       String?
+  pendingBasePlanId           String?
+  pendingCapacity             Int?
+  pendingBillingInterval      BillingInterval?
+  pendingEffectiveAt          DateTime?                @db.Timestamptz(3)
+  ownershipType               BillingOwnershipType
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
+
+  chain      BillingProviderSubscriptionChain @relation(fields: [providerSubscriptionChainId], references: [id], onDelete: Restrict)
+  replaces   BillingProviderSubscription?      @relation("BillingSubscriptionReplacement", fields: [replacesProviderSubscriptionId], references: [id], onDelete: Restrict)
+  replacedBy BillingProviderSubscription[]     @relation("BillingSubscriptionReplacement")
+  transactions BillingTransaction[]
+  providerPeriods BillingProviderPeriod[]
+
+  @@unique([store, providerSubscriptionKey])
+  @@index([providerSubscriptionChainId])
+  @@index([replacesProviderSubscriptionId])
+  @@map("billing_provider_subscriptions")
+}
+
+model BillingTransaction {
+  id                       String                      @id @default(cuid())
+  billingAccountId         String
+  providerSubscriptionId   String?
+  store                    BillingStore
+  storeEnvironment         BillingStoreEnvironment
+  providerTransactionId    String
+  eventType                BillingTransactionEventType
+  logicalProductId         String
+  storeProductId           String
+  basePlanId               String?
+  capacity                 Int
+  billingInterval          BillingInterval
+  purchasedAt              DateTime                    @db.Timestamptz(3)
+  createdAt                DateTime                    @default(now())
+
+  billingAccount BillingAccount              @relation(fields: [billingAccountId], references: [id], onDelete: Restrict)
+  subscription  BillingProviderSubscription? @relation(fields: [providerSubscriptionId], references: [id], onDelete: Restrict)
+  providerPeriods BillingProviderPeriod[]
+  capacityGrant BillingCapacityGrant?
+
+  @@unique([store, providerTransactionId])
+  @@index([billingAccountId, purchasedAt])
+  @@index([providerSubscriptionId])
+  @@map("billing_transactions")
+}
+
+model BillingProviderPeriod {
+  id                         String                    @id @default(cuid())
+  billingAccountId           String
+  providerSubscriptionId     String
+  billingTransactionId       String?
+  store                      BillingStore
+  storeEnvironment           BillingStoreEnvironment
+  providerPeriodKey          String?
+  revision                   Int                       @default(1)
+  supersedesProviderPeriodId String?
+  dedupeKey                  String
+  logicalProductId           String
+  storeProductId             String
+  basePlanId                 String?
+  capacity                   Int
+  billingInterval            BillingInterval
+  providerPeriodStart        DateTime                  @db.Timestamptz(3)
+  providerPeriodEnd          DateTime                  @db.Timestamptz(3)
+  providerStatus             BillingProviderStatus
+  entitlementActive          Boolean
+  providerEndReason          BillingProviderEndReason?
+  canonicalEvidenceReference String?
+  createdAt                  DateTime                  @default(now())
+
+  billingAccount BillingAccount             @relation(fields: [billingAccountId], references: [id], onDelete: Restrict)
+  subscription  BillingProviderSubscription @relation(fields: [providerSubscriptionId], references: [id], onDelete: Restrict)
+  transaction   BillingTransaction?         @relation(fields: [billingTransactionId], references: [id], onDelete: Restrict)
+  supersedes    BillingProviderPeriod?       @relation("BillingProviderPeriodRevision", fields: [supersedesProviderPeriodId], references: [id], onDelete: Restrict)
+  supersededBy  BillingProviderPeriod[]      @relation("BillingProviderPeriodRevision")
+  primaryForBillingPeriods BillingPeriod[]   @relation("BillingPeriodPrimaryProvider")
+  effectivePeriodSources BillingPeriodSource[]
+
+  @@unique([providerSubscriptionId, dedupeKey])
+  @@unique([providerSubscriptionId, providerPeriodKey, revision])
+  @@index([billingAccountId, providerPeriodEnd])
+  @@index([billingTransactionId])
+  @@index([supersedesProviderPeriodId])
+  @@map("billing_provider_periods")
+}
+
+model BillingPeriod {
+  id                       String                 @id @default(cuid())
+  billingAccountId         String
+  source                   BillingPeriodOrigin    @default(STORE)
+  materializationKey       String
+  logicalProductIdSnapshot String
+  capacityAtStart          Int
+  billingIntervalAtStart   BillingInterval
+  effectiveStart           DateTime               @db.Timestamptz(3)
+  effectiveEnd             DateTime               @db.Timestamptz(3)
+  providerStartedAt        DateTime?              @db.Timestamptz(3)
+  primaryProviderPeriodId  String
+  renewalOfPeriodId        String?
+  endedEarlyAt             DateTime?              @db.Timestamptz(3)
+  endReason                BillingPeriodEndReason?
+  replacedByPeriodId       String?
+  providerEndedAt          DateTime?              @db.Timestamptz(3)
+  enforcedAt               DateTime?              @db.Timestamptz(3)
+  createdAt                DateTime               @default(now())
+
+  billingAccount BillingAccount       @relation(fields: [billingAccountId], references: [id], onDelete: Restrict, map: "billing_periods_account_fkey")
+  primaryProviderPeriod BillingProviderPeriod @relation("BillingPeriodPrimaryProvider", fields: [primaryProviderPeriodId], references: [id], onDelete: Restrict, map: "billing_periods_primary_provider_fkey")
+  renewalOf BillingPeriod?             @relation("BillingPeriodRenewal", fields: [renewalOfPeriodId], references: [id], onDelete: Restrict, map: "billing_periods_renewal_fkey")
+  renewals BillingPeriod[]             @relation("BillingPeriodRenewal")
+  replacedBy BillingPeriod?            @relation("BillingPeriodReplacement", fields: [replacedByPeriodId], references: [id], onDelete: Restrict, map: "billing_periods_replacement_fkey")
+  replaces BillingPeriod[]             @relation("BillingPeriodReplacement")
+  providerSources BillingPeriodSource[]
+  capacityGrants BillingCapacityGrant[]
+  assignments DivisionCapacityAssignment[]
+  convertedFreeGrants FreeManagementGrant[]
+  consumedPurchaseSelection BillingPurchaseSelection? @relation("BillingPeriodPurchaseSelection")
+  sourceForLocalGrace BillingLocalGrace? @relation("BillingLocalGraceSourcePeriod")
+  recoveryForLocalGrace BillingLocalGrace? @relation("BillingLocalGraceRecoveryPeriod")
+
+  @@unique([billingAccountId, materializationKey], map: "billing_periods_account_materialization_key")
+  @@index([billingAccountId, effectiveStart, effectiveEnd], map: "billing_periods_account_window_idx")
+  @@index([primaryProviderPeriodId], map: "billing_periods_primary_provider_idx")
+  @@index([renewalOfPeriodId], map: "billing_periods_renewal_idx")
+  @@index([replacedByPeriodId], map: "billing_periods_replacement_idx")
+  @@map("billing_periods")
+}
+
+model BillingLocalGrace {
+  id                      String                  @id @default(cuid())
+  billingAccountId        String
+  incidentKey             String
+  status                  BillingLocalGraceStatus @default(ACTIVE)
+  reason                  BillingLocalGraceReason
+  sourceBillingPeriodId   String                  @unique(map: "billing_local_graces_source_period_key")
+  recoveryBillingPeriodId String?                 @unique(map: "billing_local_graces_recovery_period_key")
+  startedAt               DateTime                @db.Timestamptz(3)
+  endsAt                  DateTime                @db.Timestamptz(3)
+  recoveredAt             DateTime?               @db.Timestamptz(3)
+  expiredAt               DateTime?               @db.Timestamptz(3)
+  terminatedAt            DateTime?               @db.Timestamptz(3)
+  createdAt               DateTime                @default(now())
+
+  billingAccount BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Restrict, map: "billing_local_graces_account_fkey")
+  sourceBillingPeriod BillingPeriod @relation("BillingLocalGraceSourcePeriod", fields: [sourceBillingPeriodId], references: [id], onDelete: Restrict, map: "billing_local_graces_source_period_fkey")
+  recoveryBillingPeriod BillingPeriod? @relation("BillingLocalGraceRecoveryPeriod", fields: [recoveryBillingPeriodId], references: [id], onDelete: Restrict, map: "billing_local_graces_recovery_period_fkey")
+  freeManagementGrant FreeManagementGrant?
+
+  @@unique([billingAccountId, incidentKey], map: "billing_local_graces_account_incident_key")
+  @@index([billingAccountId, status], map: "billing_local_graces_account_status_idx")
+  @@index([status, endsAt], map: "billing_local_graces_status_ends_idx")
+  @@map("billing_local_graces")
+}
+
+model BillingPeriodSource {
+  id                      String   @id @default(cuid())
+  billingPeriodId         String
+  billingProviderPeriodId String
+  isPrimary               Boolean  @default(false)
+  linkedAt                DateTime @default(now())
+
+  billingPeriod BillingPeriod         @relation(fields: [billingPeriodId], references: [id], onDelete: Restrict, map: "billing_period_sources_period_fkey")
+  providerPeriod BillingProviderPeriod @relation(fields: [billingProviderPeriodId], references: [id], onDelete: Restrict, map: "billing_period_sources_provider_fkey")
+
+  @@unique([billingPeriodId, billingProviderPeriodId], map: "billing_period_sources_period_provider_key")
+  @@index([billingProviderPeriodId], map: "billing_period_sources_provider_idx")
+  @@map("billing_period_sources")
+}
+
+model BillingCapacityGrant {
+  id                       String   @id @default(cuid())
+  billingPeriodId          String
+  billingTransactionId     String   @unique
+  previousCapacity         Int
+  newCapacity              Int
+  logicalProductIdSnapshot String
+  effectiveAt              DateTime @db.Timestamptz(3)
+  sequence                 Int
+  createdAt                DateTime @default(now())
+
+  billingPeriod BillingPeriod     @relation(fields: [billingPeriodId], references: [id], onDelete: Restrict, map: "billing_capacity_grants_period_fkey")
+  billingTransaction BillingTransaction @relation(fields: [billingTransactionId], references: [id], onDelete: Restrict, map: "billing_capacity_grants_transaction_fkey")
+
+  @@unique([billingPeriodId, sequence], map: "billing_capacity_grants_period_sequence_key")
+  @@index([billingPeriodId, effectiveAt, sequence, id], map: "billing_capacity_grants_effective_idx")
+  @@map("billing_capacity_grants")
+}
+
+model DivisionCapacityAssignment {
+  id                  String                           @id @default(cuid())
+  billingPeriodId     String
+  slotNumber          Int
+  divisionId          String?
+  divisionIdSnapshot  String
+  divisionNameSnapshot String
+  leagueIdSnapshot    String
+  leagueNameSnapshot  String
+  ownerUserIdSnapshot String
+  assignedAt          DateTime                         @default(now()) @db.Timestamptz(3)
+  assignmentSource    DivisionCapacityAssignmentSource
+  createdAt           DateTime                         @default(now())
+
+  billingPeriod BillingPeriod @relation(fields: [billingPeriodId], references: [id], onDelete: Restrict, map: "division_capacity_assignments_period_fkey")
+  division Division?           @relation(fields: [divisionId], references: [id], onDelete: SetNull, map: "division_capacity_assignments_division_fkey")
+  convertedFreeGrants FreeManagementGrant[]
+
+  @@unique([billingPeriodId, slotNumber], map: "division_capacity_assignments_period_slot_key")
+  @@unique([billingPeriodId, divisionIdSnapshot], map: "division_capacity_assignments_period_division_key")
+  @@index([divisionId], map: "division_capacity_assignments_division_idx")
+  @@index([divisionIdSnapshot, assignedAt], map: "division_capacity_assignments_snapshot_idx")
+  @@map("division_capacity_assignments")
 }
 
 model Account {
@@ -272,6 +1233,7 @@ model Liga {
   canchas          LigaCancha[]
   arbitros         LigaArbitro[]
   tandasArbitrales TandaArbitral[]
+  freeManagementGrants FreeManagementGrant[]
 
   @@index([createdAt])
   @@index([userId, createdAt])
@@ -383,6 +1345,9 @@ model Division {
   notificationOutbox        NotificationOutbox[]
   canchaHorarios            DivisionCanchaHorario[]
   campeones                 DivisionCampeon[]
+  freeManagementGrants      FreeManagementGrant[]
+  capacityAssignments       DivisionCapacityAssignment[]
+  billingMigrationDivisions BillingMigrationDivision[]
 
   @@index([ligaId, createdAt])
   @@map("divisiones")

@@ -15,9 +15,13 @@ const mocks = vi.hoisted(() => ({
   cleanupUpsert: vi.fn(),
   mediaAssetFindMany: vi.fn(),
   userDelete: vi.fn(),
+  userUpdateMany: vi.fn(),
+  txUserFindUnique: vi.fn(),
   scheduleImageCleanup: vi.fn(),
   scheduleDeletion: vi.fn(),
   signalBackgroundJob: vi.fn(),
+  detachBillingAccount: vi.fn(),
+  ensureBillingAccount: vi.fn(),
 }));
 
 vi.mock('../../config/database', () => ({
@@ -33,6 +37,11 @@ vi.mock('../media/service', () => ({
 
 vi.mock('../../workers/jobSignals', () => ({ signalBackgroundJob: mocks.signalBackgroundJob }));
 
+vi.mock('../billing/service', () => ({
+  detachBillingAccount: mocks.detachBillingAccount,
+  ensureBillingAccount: mocks.ensureBillingAccount,
+}));
+
 import { userService } from './service';
 import { ValidationError, NotFoundError } from '../../utils/errors';
 
@@ -44,7 +53,7 @@ const tx = {
   divisionNotificationSubscription: { findMany: mocks.subscriptionsFindMany, deleteMany: mocks.subscriptionsDeleteMany },
   oneSignalTagCleanupJob: { upsert: mocks.cleanupUpsert },
   mediaAsset: { findMany: mocks.mediaAssetFindMany },
-  user: { delete: mocks.userDelete },
+  user: { delete: mocks.userDelete, updateMany: mocks.userUpdateMany, findUnique: mocks.txUserFindUnique },
 };
 
 describe('userService.deleteAccount', () => {
@@ -79,6 +88,7 @@ describe('userService.deleteAccount', () => {
     await userService.deleteAccount('user-1', 'user@test.com');
 
     expect(mocks.transaction).toHaveBeenCalledOnce();
+    expect(mocks.detachBillingAccount).toHaveBeenCalledWith(tx, 'user-1');
     expect(mocks.ligaFindMany).toHaveBeenCalledWith({ where: { userId: 'user-1' }, select: expect.anything() });
     expect(mocks.ligaDeleteMany).toHaveBeenCalledWith({ where: { userId: 'user-1' } });
     expect(mocks.equipoDeleteMany).toHaveBeenCalledWith({ where: { userId: 'user-1' } });
@@ -86,6 +96,18 @@ describe('userService.deleteAccount', () => {
     expect(mocks.refereeAccessDeleteMany).toHaveBeenCalledWith({ where: { createdById: 'user-1' } });
     expect(mocks.subscriptionsDeleteMany).toHaveBeenCalledWith({ where: { userId: 'user-1' } });
     expect(mocks.userDelete).toHaveBeenCalledWith({ where: { id: 'user-1' } });
+  });
+
+  it('creates the billing identity when activating the LIGA role', async () => {
+    mocks.txUserFindUnique.mockResolvedValue({ id: 'user-1', rol: 'LIGA' });
+
+    await expect(userService.activateLeagueRole('user-1')).resolves.toMatchObject({ rol: 'LIGA' });
+
+    expect(mocks.userUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'user-1', rol: 'CAPITAN' },
+      data: { rol: 'LIGA' },
+    });
+    expect(mocks.ensureBillingAccount).toHaveBeenCalledWith(tx, 'user-1');
   });
 
   it('schedules Cloudinary cleanup for league, team, player and account images', async () => {

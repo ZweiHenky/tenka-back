@@ -59,8 +59,12 @@ describe('partidoService private query budgets', () => {
       where: { divisionId: 'division-1' },
     }));
     expect(prisma.jornada.findUnique).not.toHaveBeenCalled();
-    expect(prisma.$executeRawUnsafe).toHaveBeenCalledOnce();
-    expect(vi.mocked(prisma.$executeRawUnsafe).mock.invocationCallOrder[0])
+    const raw = vi.mocked(prisma.$executeRawUnsafe).mock;
+    const scheduleLockIndexes = raw.calls
+      .map(([, lockKey], index) => lockKey === 'liga-1' ? index : -1)
+      .filter((index) => index >= 0);
+    expect(scheduleLockIndexes).toHaveLength(1);
+    expect(raw.invocationCallOrder[scheduleLockIndexes[0]])
       .toBeLessThan(vi.mocked(partidoRepository.findAuthorizationContext).mock.invocationCallOrder[1]);
     expect(prisma.partido.updateMany).toHaveBeenCalledTimes(2);
     expect(prisma.partido.findUnique).toHaveBeenCalledOnce();

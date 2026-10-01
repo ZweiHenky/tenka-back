@@ -9,6 +9,7 @@ import {
   mockNoPreviousJornadas,
   mockPartidosCreatedReturn,
   mockTeams,
+  observeResourceAccess,
   partidoRepository,
   prisma,
   resetGenerateNextHarness,
@@ -50,6 +51,12 @@ describe('generateNext observability', () => {
     expect(prisma.partido.findMany).not.toHaveBeenCalled();
     expect(prisma.$transaction).toHaveBeenCalledOnce();
     expect(prisma.$executeRawUnsafe).toHaveBeenCalledWith('SELECT pg_advisory_xact_lock(hashtext($1))', 'liga-1');
+    expect(observeResourceAccess).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      operation: 'jornada.generate',
+      divisionId,
+    }));
+    expect(vi.mocked(observeResourceAccess).mock.invocationCallOrder[0])
+      .toBeLessThan((prisma.$executeRawUnsafe as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]);
     expect(prisma.partido.createMany).toHaveBeenCalledOnce();
     expect(partidoRepository.findById).not.toHaveBeenCalled();
     expect(partidoRepository.create).toHaveBeenCalledTimes(3);

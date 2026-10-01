@@ -104,6 +104,11 @@ export interface LigaEntity {
   divisiones?: DivisionConRelaciones[];
   canchas?: LigaCanchaEntity[];
   arbitros?: LigaArbitroEntity[];
+  managementAccess?: 'FULL' | 'LIMITED_SETUP' | 'READ_ONLY' | 'BLOCKED';
+  managementReason?: string;
+  migrationOverlayActive?: boolean;
+  migrationDeadline?: Date;
+  migrationPaused?: boolean;
 }
 
 export interface UserLeagueListDto {

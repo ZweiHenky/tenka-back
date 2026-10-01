@@ -9,6 +9,7 @@ import { visibleDivisionWhere } from '../../utils/divisionVisibility';
 import { parsePagination } from '../../utils/pagination';
 import { signalBackgroundJob } from '../../workers/jobSignals';
 import { firstIssueMessage } from '../../utils/validation';
+import { jugadorService } from './service';
 
 function sanitizePublic(jugador: any) {
   return {
@@ -23,19 +24,6 @@ async function assertTeamOwner(equipoId: string, req: Request) {
   const equipo = await prisma.equipo.findUnique({ where: { id: equipoId }, select: { userId: true } });
   if (!equipo) throw new NotFoundError('Equipo');
   assertOwnerOrAdmin(req.user!, equipo.userId, 'Equipo');
-}
-
-async function assertCanManageDivisionRoster(divisionId: string, equipoId: string, req: Request) {
-  const membership = await prisma.divisionEquipo.findUnique({
-    where: { divisionId_equipoId: { divisionId, equipoId } },
-    select: {
-      division: { select: { liga: { select: { userId: true } } } },
-    },
-  });
-  if (!membership) throw new NotFoundError('Equipo en división');
-  if (!isAdmin(req.user!) && membership.division.liga.userId !== req.user!.id) {
-    throw new NotFoundError('Equipo en división');
-  }
 }
 
 const jugadorInclude = {
@@ -303,13 +291,7 @@ export const jugadorController = {
     try {
       const p = divisionJugadorSchema.safeParse(req.body);
       if (!p.success) throw new ValidationError(firstIssueMessage(p.error));
-      await assertCanManageDivisionRoster(p.data.divisionId, p.data.equipoId, req);
-      const teamPlayer = await prisma.equipoJugador.findUnique({
-        where: { equipoId_jugadorId: { equipoId: p.data.equipoId, jugadorId: p.data.jugadorId } },
-        select: { jugadorId: true, dorsal: true },
-      });
-      if (!teamPlayer) throw new ValidationError('El jugador debe pertenecer al equipo');
-      const result = await prisma.divisionJugador.create({ data: { ...p.data, dorsal: teamPlayer.dorsal }, include: { jugador: true } });
+      const result = await jugadorService.assignToDivision(p.data, req.user!);
       created(res, { ...result, jugador: sanitizePublic(result.jugador) }, 'Jugador habilitado en división');
     } catch (e: any) {
       if (e?.code === 'P2002') next(new ConflictError('Ese jugador ya está habilitado en esta división'));
@@ -320,10 +302,12 @@ export const jugadorController = {
 
   async removeFromDivision(req: Request, res: Response, next: NextFunction) {
     try {
-      await assertCanManageDivisionRoster(req.params.divisionId, req.params.equipoId, req);
-      await prisma.divisionJugador.delete({
-        where: { divisionId_equipoId_jugadorId: { divisionId: req.params.divisionId, equipoId: req.params.equipoId, jugadorId: req.params.jugadorId } },
-      });
+      await jugadorService.removeFromDivision(
+        req.params.divisionId,
+        req.params.equipoId,
+        req.params.jugadorId,
+        req.user!,
+      );
       noContent(res);
     } catch (e) { next(e); }
   },

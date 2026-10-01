@@ -6,6 +6,7 @@ import { errorHandler } from './middlewares/errorHandler';
 import { createRateLimiter } from './middlewares/rateLimits';
 import { requestContext } from './middlewares/requestContext';
 import { waitlistRepository } from './modules/waitlist/repository';
+import { env } from './config/env';
 
 describe('API hardening', () => {
   const app = createApp();
@@ -44,6 +45,15 @@ describe('API hardening', () => {
     const missing = await request(app).get('/api/does-not-exist').set('x-request-id', 'request-404');
     expect(missing.status).toBe(404);
     expect(missing.body).toEqual({ success: false, error: 'Ruta no encontrado', requestId: 'request-404' });
+  });
+
+  it('mounts the webhook before the global JSON parser', async () => {
+    const response = await request(app)
+      .post('/api/webhooks/revenuecat')
+      .set('Content-Type', 'application/json')
+      .send('{');
+    expect(response.status).toBe(env.BILLING_REVENUECAT_ENABLED ? 401 : 503);
+    expect(response.body.error).toBe(env.BILLING_REVENUECAT_ENABLED ? 'No autorizado' : 'Webhook no disponible');
   });
 
   it('mounts Digital Asset Links outside the API namespace', async () => {

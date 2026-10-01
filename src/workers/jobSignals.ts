@@ -1,4 +1,6 @@
-export type BackgroundJob = 'media-deletion' | 'media-intents' | 'tag-cleanup' | 'notification-outbox';
+export type BackgroundJob = 'media-deletion' | 'media-intents' | 'tag-cleanup' | 'notification-outbox'
+  | 'billing-webhook' | 'billing-webhook-retention' | 'billing-reconciliation' | 'billing-checkout'
+  | 'billing-grace-expiry' | 'billing-migration-expiry';
 
 type Signal = (dueAt?: Date) => void;
 

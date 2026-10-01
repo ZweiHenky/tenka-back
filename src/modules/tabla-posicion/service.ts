@@ -3,6 +3,7 @@ import { prisma } from '../../config/database';
 import { tablaPosicionRepository } from './repository';
 import type { TablaPosicionEntity } from './entity';
 import type { AuthenticatedUser } from '../../types/auth';
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
 import type { Prisma } from '../../generated/prisma/client';
 
@@ -163,11 +164,21 @@ export const tablaPosicionService = {
 
   async upsert(divisionId: string, equipoId: string, data: Record<string, unknown>, actor: AuthenticatedUser): Promise<TablaPosicionEntity> {
     await assertDivisionOwner(divisionId, actor);
-    return tablaPosicionRepository.upsert(divisionId, equipoId, data);
+    return prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, { operation: 'standings.upsert', capability: 'MANAGE_DIVISION', actor, divisionId, resourceType: 'DIVISION' });
+      return tx.tablaPosicion.upsert({
+        where: { divisionId_equipoId: { divisionId, equipoId } },
+        create: { divisionId, equipoId, ...data } as any,
+        update: data,
+      });
+    });
   },
 
   async delete(divisionId: string, equipoId: string, actor: AuthenticatedUser): Promise<void> {
     await assertDivisionOwner(divisionId, actor);
-    await tablaPosicionRepository.delete(divisionId, equipoId);
+    await prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, { operation: 'standings.delete', capability: 'MANAGE_DIVISION', actor, divisionId, resourceType: 'DIVISION' });
+      await tx.tablaPosicion.delete({ where: { divisionId_equipoId: { divisionId, equipoId } } });
+    });
   },
 };

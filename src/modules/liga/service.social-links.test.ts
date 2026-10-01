@@ -51,6 +51,6 @@ describe('redes sociales de liga', () => {
     expect(mocks.update).toHaveBeenCalledWith('liga-1', {
       instagram: 'https://instagram.com/nueva_liga',
       tiktok: null,
-    }, [], undefined);
+    }, [], undefined, false, expect.anything());
   });
 });

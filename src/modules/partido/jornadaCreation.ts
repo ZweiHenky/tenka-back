@@ -13,6 +13,7 @@ import type { CreateInJornadaInput } from './validator';
 import { addCivilDays, civilToInstant, dateKeyInTimeZone, timeInTimeZone } from '../../utils/timeZone';
 import { signalBackgroundJob } from '../../workers/jobSignals';
 import { parseConfiguredRanges } from '../../utils/timeRanges';
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow';
 
 export { parseConfiguredRanges } from '../../utils/timeRanges';
 
@@ -259,8 +260,26 @@ export const jornadaPartidoCreationService = {
 
     try {
       const partido = await prisma.$transaction(async (tx) => {
-        const jornada = await tx.jornada.findUnique({ where: { id: jornadaId }, select: { division: { select: { ligaId: true, id: true, liga: { select: { timeZone: true } } } } } });
+        const jornada = await tx.jornada.findUnique({
+          where: { id: jornadaId },
+          select: {
+            division: {
+              select: {
+                ligaId: true,
+                id: true,
+                estadoLiga: { select: { codigo: true } },
+                liga: { select: { userId: true, timeZone: true } },
+              },
+            },
+          },
+        });
         if (!jornada) throw new NotFoundError('Jornada');
+        assertOwnerOrAdmin(actor, jornada.division.liga.userId, 'Jornada');
+        assertDivisionWritable(jornada.division.estadoLiga);
+        await observeResourceAccessShadowInTransaction(tx, {
+          operation: 'match.create-in-round', capability: 'MANAGE_DIVISION', actor,
+          divisionId: jornada.division.id, resourceType: 'DIVISION',
+        });
         await acquireLeagueScheduleLock(tx, jornada.division.ligaId);
 
         const lockedReplay = await tx.partido.findUnique({ where: { manualCreationKey: idempotencyKey }, include: PARTIDO_READ_INCLUDE });

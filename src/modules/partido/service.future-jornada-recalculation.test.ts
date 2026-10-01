@@ -146,7 +146,8 @@ describe('partidoService future jornada recalculation', () => {
     await expect(partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, owner)).resolves.toBeDefined();
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(prisma.$executeRawUnsafe).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(prisma.$executeRawUnsafe).mock.calls
+      .filter(([, lockKey]) => lockKey === 'liga-1')).toHaveLength(2);
     expect(partidoRepository.findAuthorizationContext).toHaveBeenCalledTimes(3);
   });
 
@@ -164,6 +165,7 @@ describe('partidoService future jornada recalculation', () => {
     await expect(partidoService.update('partido-1', { equipoLocalId: 'equipo-3' }, owner))
       .rejects.toMatchObject({ statusCode: 409 });
     expect(prisma.$transaction).toHaveBeenCalledTimes(3);
-    expect(prisma.$executeRawUnsafe).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(prisma.$executeRawUnsafe).mock.calls
+      .filter(([, lockKey]) => lockKey === 'liga-1')).toHaveLength(3);
   });
 });

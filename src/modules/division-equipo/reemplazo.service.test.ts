@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   tablaFindUnique: vi.fn(),
   tablaUpdateMany: vi.fn(),
   campeonUpdateMany: vi.fn(),
+  resourceGate: vi.fn(),
 }));
 
 vi.mock('./repository', () => ({
@@ -40,6 +41,9 @@ vi.mock('../../config/database', () => ({
 }));
 
 vi.mock('../../utils/leagueScheduleLock', () => ({ acquireLeagueScheduleLock: mocks.lock }));
+vi.mock('../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: mocks.resourceGate,
+}));
 
 import { divisionEquipoService } from './service';
 
@@ -114,7 +118,10 @@ describe('divisionEquipoService.reemplazo', () => {
     expect(mocks.lock).toHaveBeenCalledWith(tx, 'liga-1');
     expect(mocks.divisionReread).toHaveBeenCalledWith({ where: authorizationWhere, select: { ligaId: true } });
     expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
+    expect(mocks.preflight.mock.invocationCallOrder[0]).toBeLessThan(mocks.resourceGate.mock.invocationCallOrder[0]);
+    expect(mocks.resourceGate.mock.invocationCallOrder[0]).toBeLessThan(mocks.lock.mock.invocationCallOrder[0]);
     expect(mocks.lock.mock.invocationCallOrder[0]).toBeLessThan(mocks.divisionReread.mock.invocationCallOrder[0]);
+    expect(mocks.lock.mock.invocationCallOrder[0]).toBeLessThan(mocks.pivotCreate.mock.invocationCallOrder[0]);
     expect(mocks.pivotCreate).toHaveBeenCalledWith({
       data: { divisionId: 'division-1', equipoId: 'target-1', saldoPendiente: saldo },
     });

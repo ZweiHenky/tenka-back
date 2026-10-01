@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
+import { AppError, ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
 import { assertDivisionWritable, isDivisionWritable } from '../../utils/divisionState';
 import { campeonRepository } from '../campeon/repository';
 import { divisionRepository } from './repository';
@@ -13,6 +13,16 @@ import type { Prisma } from '../../generated/prisma/client';
 import type { Pagination } from '../../utils/pagination';
 import { signalBackgroundJob } from '../../workers/jobSignals';
 import { acquireAccountQuotaLock, assertAccountQuotaDelta, isActiveDivisionCode } from '../../utils/accountQuota';
+import {
+  assertMigrationAllowsResourceCreation,
+  closeFreeManagementGrantForDeletedResource,
+  ensureInitialFreeManagementGrant,
+  resolveAccountAccessPolicy,
+} from '../billing/service';
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow';
+import { assignDivisionCapacityInTransaction } from '../billing/capacityAssignment';
+import { env } from '../../config/env';
+import { resolveDivisionAccessShadowInTransaction } from '../billing/resourceAccessResolver';
 
 async function assertLigaOwner(ligaId: string, actor: AuthenticatedUser): Promise<{ id: string; userId: string }> {
   const liga = await prisma.liga.findFirst({
@@ -118,11 +128,43 @@ export const divisionService = {
       },
     }) as DivisionEntity | null;
     if (!division) throw new NotFoundError('Division');
+    const exposesManagement = env.BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED && actor
+      && (actor.rol === 'ADMINISTRADOR' || actor.id === (await prisma.liga.findUnique({
+        where: { id: division.ligaId }, select: { userId: true },
+      }))?.userId);
+    if (exposesManagement && actor) {
+      const decision = await prisma.$transaction((tx) => resolveDivisionAccessShadowInTransaction(tx, {
+        divisionId: id,
+        actor,
+      }));
+      return {
+        ...division, managementAccess: decision.access, managementReason: decision.reason,
+        migrationOverlayActive: decision.migrationOverlayActive,
+        migrationDeadline: decision.migrationDeadline,
+        migrationPaused: decision.migrationPaused,
+      };
+    }
     return division;
   },
 
   async listByLiga(ligaId: string, actor?: AuthenticatedUser): Promise<DivisionEntity[]> {
-    return prisma.division.findMany({ where: { ligaId, ...visibleDivisionWhere(actor) }, orderBy: { createdAt: 'desc' } });
+    const divisions = await prisma.division.findMany({ where: { ligaId, ...visibleDivisionWhere(actor) }, orderBy: { createdAt: 'desc' } }) as DivisionEntity[];
+    if (!env.BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED || !actor) return divisions;
+    const league = await prisma.liga.findUnique({ where: { id: ligaId }, select: { userId: true } });
+    if (!league || (actor.rol !== 'ADMINISTRADOR' && actor.id !== league.userId)) return divisions;
+    return prisma.$transaction(async (tx) => {
+      const result: DivisionEntity[] = [];
+      for (const division of divisions) {
+        const decision = await resolveDivisionAccessShadowInTransaction(tx, { divisionId: division.id, actor });
+        result.push({
+          ...division, managementAccess: decision.access, managementReason: decision.reason,
+          migrationOverlayActive: decision.migrationOverlayActive,
+          migrationDeadline: decision.migrationDeadline,
+          migrationPaused: decision.migrationPaused,
+        });
+      }
+      return result;
+    });
   },
 
   async create(data: {
@@ -146,34 +188,94 @@ export const divisionService = {
   }, actor: AuthenticatedUser): Promise<DivisionEntity> {
     const league = await assertLigaOwner(data.ligaId, actor);
     const { horariosPorCancha, ...divisionData } = data;
-    return prisma.$transaction(async (tx) => {
-      await acquireAccountQuotaLock(tx, league.userId);
-      const lockedLeague = await tx.liga.findFirst({
-        where: isAdmin(actor) ? { id: data.ligaId, userId: league.userId } : { id: data.ligaId, userId: actor.id },
-        select: { id: true, userId: true },
-      });
-      if (!lockedLeague) throw new NotFoundError('Liga');
-      const estado = data.estadoLigaId
-        ? await tx.estadoLiga.findUnique({ where: { id: data.estadoLigaId }, select: { id: true, codigo: true } })
-        : await tx.estadoLiga.findFirst({ where: { codigo: 'BORRADOR' }, select: { id: true, codigo: true } });
-      if (!estado) throw new NotFoundError('Estado de liga');
-      await assertAccountQuotaDelta(tx, lockedLeague.userId, {
-        divisions: 1,
-        activeDivisions: isActiveDivisionCode(estado.codigo) ? 1 : 0,
-      });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await prisma.$transaction(async (tx) => {
+          await acquireAccountQuotaLock(tx, league.userId);
+          await assertMigrationAllowsResourceCreation(tx, league.userId);
+          const lockedLeague = await tx.liga.findFirst({
+            where: isAdmin(actor) ? { id: data.ligaId, userId: league.userId } : { id: data.ligaId, userId: actor.id },
+            select: { id: true, userId: true },
+          });
+          if (!lockedLeague) throw new NotFoundError('Liga');
+          const estado = data.estadoLigaId
+            ? await tx.estadoLiga.findUnique({ where: { id: data.estadoLigaId }, select: { id: true, codigo: true } })
+            : await tx.estadoLiga.findFirst({ where: { codigo: 'BORRADOR' }, select: { id: true, codigo: true } });
+          if (!estado) throw new NotFoundError('Estado de liga');
+          await observeResourceAccessShadowInTransaction(tx, {
+            operation: 'division.create', capability: 'CREATE_DIVISION', actor,
+            leagueId: lockedLeague.id, resourceType: 'LEAGUE',
+          });
+          await assertAccountQuotaDelta(tx, lockedLeague.userId, {
+            divisions: 1,
+            activeDivisions: isActiveDivisionCode(estado.codigo) ? 1 : 0,
+          });
 
-      if (!horariosPorCancha?.length) {
-        return divisionRepository.create({ ...divisionData, estadoLigaId: estado.id }, tx);
+          const policy = await resolveAccountAccessPolicy(lockedLeague.userId, tx);
+          let paidPeriodId: string | null = null;
+          if (policy.effectiveAccess === 'LOCAL_GRACE') {
+            throw new AppError(
+              403,
+              'No se pueden consumir slots nuevos durante la gracia local',
+              'BILLING_LOCAL_GRACE_READ_ONLY',
+            );
+          }
+          if (policy.effectiveAccess === 'PAID') {
+            if (!policy.canConsumePaidSlot || !policy.billingAccountId) {
+              throw new AppError(422, 'No hay un slot disponible para la división', 'BILLING_CAPACITY_REQUIRED');
+            }
+            const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT NOW() AS now`;
+            const period = await tx.billingPeriod.findFirst({
+              where: {
+                billingAccountId: policy.billingAccountId,
+                effectiveStart: { lte: now },
+                effectiveEnd: { gt: now },
+                OR: [{ endedEarlyAt: null }, { endedEarlyAt: { gt: now } }],
+              },
+              orderBy: [{ effectiveStart: 'desc' }, { id: 'desc' }],
+              select: { id: true },
+            });
+            if (!period) {
+              throw new AppError(409, 'No existe un periodo pagado vigente', 'BILLING_EVIDENCE_INVALID');
+            }
+            await tx.$queryRaw`SELECT "id" FROM billing_periods WHERE "id" = ${period.id} FOR UPDATE`;
+            paidPeriodId = period.id;
+          }
+
+          if (horariosPorCancha?.length) {
+            await acquireLeagueScheduleLock(tx, data.ligaId);
+          }
+
+          let created = await divisionRepository.create({ ...divisionData, estadoLigaId: estado.id }, tx);
+          if (paidPeriodId) {
+            await assignDivisionCapacityInTransaction(tx, {
+              billingPeriodId: paidPeriodId,
+              divisionId: created.id,
+              assignmentSource: 'DIRECT',
+            });
+          } else {
+            await ensureInitialFreeManagementGrant(tx, lockedLeague.userId, created.id);
+          }
+
+          if (horariosPorCancha?.length) {
+            const summary = await replaceCourtSchedules(tx, created.id, data.ligaId, horariosPorCancha);
+            created = await tx.division.update({
+              where: { id: created.id },
+              data: summary ?? {},
+              include: { canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } } },
+            }) as DivisionEntity;
+          }
+          return created;
+        }, { isolationLevel: 'Serializable', timeout: 30_000 });
+      } catch (error) {
+        if ((error as { code?: unknown })?.code === 'P2034' && attempt < 2) continue;
+        if ((error as { code?: unknown })?.code === 'P2034') {
+          throw new ConflictError('La capacidad cambió durante la creación; vuelve a intentarlo');
+        }
+        throw error;
       }
-      // Account quota lock always precedes the existing schedule lock.
-      await acquireLeagueScheduleLock(tx, data.ligaId);
-      await assertCourtsUsable(tx, data.ligaId, horariosPorCancha);
-      const summary = summarizeDivisionSchedule(horariosPorCancha);
-      return tx.division.create({
-        data: { ...divisionData, estadoLigaId: estado.id, ...summary, canchaHorarios: { create: horariosPorCancha } },
-        include: { canchaHorarios: { select: { canchaId: true, diasPartido: true, horarioPartido: true } } },
-      }) as Promise<DivisionEntity>;
-    }, { isolationLevel: 'ReadCommitted' });
+    }
+    throw new ConflictError('La capacidad cambió durante la creación; vuelve a intentarlo');
   },
 
   async update(
@@ -196,6 +298,9 @@ export const divisionService = {
     if (needsLock) {
       return prisma.$transaction(async (tx) => {
         await acquireAccountQuotaLock(tx, division.liga.userId);
+        await observeResourceAccessShadowInTransaction(tx, {
+          operation: 'division.update', capability: 'MANAGE_DIVISION', actor, divisionId: id, resourceType: 'DIVISION',
+        });
         const leagueIds = [...new Set([division.ligaId, ligaId])].sort();
         for (const lockedLeagueId of leagueIds) await acquireLeagueScheduleLock(tx, lockedLeagueId);
 
@@ -218,7 +323,6 @@ export const divisionService = {
         if (lockedDivision.liga.userId !== division.liga.userId) {
           throw new ConflictError('El propietario de la división cambió durante la actualización; vuelve a intentarlo');
         }
-
         if (data.ligaId) {
           const targetLeague = await tx.liga.findFirst({
             where: { id: data.ligaId },
@@ -269,11 +373,16 @@ export const divisionService = {
       }, { isolationLevel: 'ReadCommitted' });
     }
 
-    return divisionRepository.update(id, updateData);
+    return prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'division.update', capability: 'MANAGE_DIVISION', actor, divisionId: id, resourceType: 'DIVISION',
+      });
+      return divisionRepository.update(id, updateData, tx);
+    });
   },
 
   async delete(id: string, actor: AuthenticatedUser, confirmName?: string): Promise<void> {
-    await assertDivisionOwner(id, actor);
+    const preflight = await assertDivisionOwner(id, actor);
     if (confirmName !== undefined) {
       const division = await prisma.division.findFirst({
         where: isAdmin(actor) ? { id } : { id, liga: { userId: actor.id } },
@@ -285,6 +394,11 @@ export const divisionService = {
     }
 
     await prisma.$transaction(async (tx) => {
+      await acquireAccountQuotaLock(tx, preflight.ownerId);
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'division.delete', capability: 'DELETE_RESOURCE', actor, divisionId: id, resourceType: 'DIVISION',
+      });
+      await closeFreeManagementGrantForDeletedResource(tx, preflight.ownerId, { divisionId: id });
       const subscriptions = await tx.divisionNotificationSubscription.findMany({
         where: { divisionId: id },
         select: { oneSignalId: true },
@@ -316,6 +430,9 @@ export const divisionService = {
 
     await prisma.$transaction(async (tx) => {
       await acquireAccountQuotaLock(tx, preflight.ownerId);
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'division.reset', capability: 'MANAGE_DIVISION', actor, divisionId, resourceType: 'DIVISION',
+      });
       await acquireLeagueScheduleLock(tx, preflight.ligaId);
       const lockedDivision = await tx.division.findFirst({
         where: isAdmin(actor) ? { id: divisionId } : { id: divisionId, liga: { userId: actor.id } },

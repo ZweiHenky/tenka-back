@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => {
     participacionPartido: { deleteMany: vi.fn() },
     jornada: { delete: vi.fn() },
   };
-  return { tx, transaction: vi.fn() };
+  return { tx, transaction: vi.fn(), observeResourceAccess: vi.fn() };
 });
 
 vi.mock('../../../config/database', () => ({
@@ -31,6 +31,9 @@ vi.mock('../../tabla-posicion/service', () => ({
 }));
 vi.mock('../../notification/service', () => ({
   notificationService: { notifyJornadaGenerated: vi.fn() },
+}));
+vi.mock('../../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: mocks.observeResourceAccess,
 }));
 
 import { jornadaService } from '../service';
@@ -63,6 +66,7 @@ const deleteContext = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.tx.jornada.delete.mockReset().mockResolvedValue(undefined);
+  mocks.observeResourceAccess.mockResolvedValue(undefined);
   vi.mocked(tablaPosicionService.recalcular).mockReset().mockResolvedValue(undefined);
   mocks.transaction.mockImplementation(async (callback) => callback(mocks.tx));
   (jornadaRepository.findDeleteContext as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -107,6 +111,12 @@ describe('jornadaService.delete playoff rollback', () => {
       'SELECT pg_advisory_xact_lock(hashtext($1))',
       'liga-1',
     );
+    expect(mocks.observeResourceAccess).toHaveBeenCalledWith(mocks.tx, expect.objectContaining({
+      operation: 'jornada.delete',
+      divisionId: 'div-1',
+    }));
+    expect(mocks.observeResourceAccess.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.tx.$executeRawUnsafe.mock.invocationCallOrder[0]);
     expect(jornadaRepository.findDeleteContext).toHaveBeenNthCalledWith(1, 'j-semis', owner);
     expect(jornadaRepository.findDeleteContext).toHaveBeenNthCalledWith(2, 'j-semis', owner, mocks.tx);
     expect(mocks.tx.$executeRawUnsafe.mock.invocationCallOrder[0])

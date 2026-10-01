@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ findByDivision: vi.fn(), findTeamsByDivision: vi.fn(), findOne: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  findByDivision: vi.fn(), findTeamsByDivision: vi.fn(), findOne: vi.fn(),
+  divisionFindUnique: vi.fn(), transaction: vi.fn(), upsert: vi.fn(), delete: vi.fn(), observe: vi.fn(),
+}));
 
 vi.mock('./repository', () => ({
   tablaPosicionRepository: {
@@ -10,7 +13,12 @@ vi.mock('./repository', () => ({
   },
 }));
 
-vi.mock('../../config/database', () => ({ prisma: {} }));
+vi.mock('../../config/database', () => ({
+  prisma: { division: { findUnique: mocks.divisionFindUnique }, $transaction: mocks.transaction },
+}));
+vi.mock('../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: mocks.observe,
+}));
 
 import { tablaPosicionService } from './service';
 
@@ -75,5 +83,29 @@ describe('tablaPosicionService public reads', () => {
     mocks.findOne.mockResolvedValue({ tablaPosiciones: [row] });
     await expect(tablaPosicionService.findOne('division-1', 'team-1')).resolves.toBe(row);
     expect(mocks.findOne).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('tablaPosicionService writes', () => {
+  const owner = { id: 'owner-1', email: 'owner@test.com', rol: 'LIGA' as const };
+  const tx = { tablaPosicion: { upsert: mocks.upsert, delete: mocks.delete } };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.divisionFindUnique.mockResolvedValue({ liga: { userId: owner.id } });
+    mocks.transaction.mockImplementation(async (callback) => callback(tx));
+  });
+
+  it('gates upsert in its transaction before writing and returns its result', async () => {
+    mocks.upsert.mockResolvedValue(row);
+    await expect(tablaPosicionService.upsert('division-1', 'team-1', { puntos: 3 }, owner)).resolves.toBe(row);
+    expect(mocks.observe).toHaveBeenCalledWith(tx, expect.objectContaining({ operation: 'standings.upsert', divisionId: 'division-1' }));
+    expect(mocks.observe.mock.invocationCallOrder[0]).toBeLessThan(mocks.upsert.mock.invocationCallOrder[0]);
+  });
+
+  it('gates delete in its transaction before writing', async () => {
+    await tablaPosicionService.delete('division-1', 'team-1', owner);
+    expect(mocks.observe).toHaveBeenCalledWith(tx, expect.objectContaining({ operation: 'standings.delete', divisionId: 'division-1' }));
+    expect(mocks.observe.mock.invocationCallOrder[0]).toBeLessThan(mocks.delete.mock.invocationCallOrder[0]);
   });
 });

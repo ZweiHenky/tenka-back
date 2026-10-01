@@ -6,6 +6,7 @@ import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
 import { assertVisibleDivision, visibleDivisionWhere } from '../../utils/divisionVisibility';
 import type { Pagination } from '../../utils/pagination';
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow';
 
 async function assertDivisionOwner(divisionId: string, actor: AuthenticatedUser): Promise<void> {
   const division = await prisma.division.findUnique({
@@ -47,18 +48,27 @@ export const premioService = {
 
   async create(data: { posicion: number; titulo: string; monto?: number; descripcion?: string; divisionId: string }, actor: AuthenticatedUser): Promise<PremioEntity> {
     await assertDivisionOwner(data.divisionId, actor);
-    return premioRepository.create(data);
+    return prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, { operation: 'prize.create', capability: 'MANAGE_DIVISION', actor, divisionId: data.divisionId, resourceType: 'DIVISION' });
+      return tx.premio.create({ data });
+    });
   },
 
   async update(id: string, data: Record<string, unknown>, actor: AuthenticatedUser): Promise<PremioEntity> {
     const premio = await findForWrite(id, actor);
     await assertDivisionOwner(premio.divisionId, actor);
-    return premioRepository.update(id, data);
+    return prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, { operation: 'prize.update', capability: 'MANAGE_DIVISION', actor, divisionId: premio.divisionId, resourceType: 'DIVISION' });
+      return tx.premio.update({ where: { id }, data });
+    });
   },
 
   async delete(id: string, actor: AuthenticatedUser): Promise<void> {
     const premio = await findForWrite(id, actor);
     await assertDivisionOwner(premio.divisionId, actor);
-    await premioRepository.delete(id);
+    await prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, { operation: 'prize.delete', capability: 'MANAGE_DIVISION', actor, divisionId: premio.divisionId, resourceType: 'DIVISION' });
+      await tx.premio.delete({ where: { id } });
+    });
   },
 };

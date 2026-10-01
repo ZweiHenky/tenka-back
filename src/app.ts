@@ -38,6 +38,8 @@ import { disponibilidadCanchaRouter } from './modules/disponibilidad-cancha/rout
 import { goleadoresRouter } from './modules/goleadores/routes';
 import { elegibilidadRouter } from './modules/elegibilidad/routes';
 import { waitlistRouter } from './modules/waitlist/routes';
+import { billingRouter } from './modules/billing/routes';
+import { revenueCatWebhookRouter } from './modules/billing/webhookRoutes';
 
 export function createApp() {
   const app = express();
@@ -86,6 +88,7 @@ export function createApp() {
     });
     next();
   });
+  app.use('/api/webhooks/revenuecat', revenueCatWebhookRouter);
   app.use(express.json({ limit: env.JSON_BODY_LIMIT }));
   app.use(express.urlencoded({ extended: false, limit: env.URLENCODED_BODY_LIMIT }));
   app.use(createAssetLinksRouter());
@@ -121,6 +124,7 @@ export function createApp() {
   app.use('/api/partidos', partidoRouter);
   app.use('/api/tabla-posiciones', tablaPosicionRouter);
   app.use('/api/users', userRouter);
+  app.use('/api/billing', billingRouter);
   app.use('/api/jugadores', jugadorRouter);
   app.use('/api/media', mediaRouter);
   app.use('/api/notification-subscriptions', notificationSubscriptionRouter);

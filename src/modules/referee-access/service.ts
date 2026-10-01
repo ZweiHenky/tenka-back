@@ -7,7 +7,8 @@ import { refereeAccessRepository } from './repository'
 import { exposeAnotacionRead, exposeParticipacionRead, partidoRepository } from '../partido/repository'
 import type { RefereeResultInput } from './validator'
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock'
-import { getResultContext, writeResultInTransaction } from '../partido/resultWriter'
+import { gateResultWriteInTransaction, getResultContext, writeResultInTransaction } from '../partido/resultWriter'
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow'
 
 const LINK_EXPIRY_MS = 4 * 60 * 60 * 1000
 const TOKEN_BYTES = 32
@@ -39,12 +40,22 @@ export const refereeAccessService = {
     const partido = await partidoRepository.findAuthorizationContext(partidoId)
     if (!partido) throw new NotFoundError('Partido')
     assertOwnerOrAdmin(actor, partido.ligaUserId, 'Partido')
-
     const token = generateToken()
     const tokenHash = hashToken(token)
     const expiresAt = new Date(Date.now() + LINK_EXPIRY_MS)
 
-    await refereeAccessRepository.upsert({ tokenHash, partidoId, createdById: actor.id, expiresAt })
+    await prisma.$transaction(async (tx) => {
+      if (partido.divisionId) {
+        await observeResourceAccessShadowInTransaction(tx, {
+          operation: 'referee-access.create', capability: 'MANAGE_DIVISION', actor, divisionId: partido.divisionId, resourceType: 'DIVISION',
+        })
+      }
+      await tx.partidoRefereeAccess.upsert({
+        where: { partidoId },
+        update: { tokenHash, createdById: actor.id, expiresAt, usedAt: null },
+        create: { tokenHash, partidoId, createdById: actor.id, expiresAt },
+      })
+    })
     const url = `https://tenka.studio/arbitro#token=${token}`
     return { token, url, expiresAt }
   },
@@ -53,11 +64,15 @@ export const refereeAccessService = {
     const partido = await partidoRepository.findAuthorizationContext(partidoId)
     if (!partido) throw new NotFoundError('Partido')
     assertOwnerOrAdmin(actor, partido.ligaUserId, 'Partido')
-
-    const existing = await refereeAccessRepository.findByPartidoId(partidoId)
-    if (existing) {
-      await refereeAccessRepository.delete(existing.id)
-    }
+    await prisma.$transaction(async (tx) => {
+      if (partido.divisionId) {
+        await observeResourceAccessShadowInTransaction(tx, {
+          operation: 'referee-access.revoke', capability: 'MANAGE_DIVISION', actor, divisionId: partido.divisionId, resourceType: 'DIVISION',
+        })
+      }
+      const existing = await tx.partidoRefereeAccess.findFirst({ where: { partidoId } })
+      if (existing) await tx.partidoRefereeAccess.delete({ where: { id: existing.id } })
+    })
   },
 
   async getLinkStatus(partidoId: string, actor: AuthenticatedUser): Promise<{ exists: boolean; expiresAt: Date | null }> {
@@ -133,6 +148,11 @@ export const refereeAccessService = {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         return await prisma.$transaction(async (tx) => {
+          const authorizedAccess = await tx.partidoRefereeAccess.findUnique({ where: { tokenHash } })
+          if (!authorizedAccess || authorizedAccess.usedAt || authorizedAccess.expiresAt < new Date()) {
+            throw new ValidationError('Enlace no válido o expirado')
+          }
+          await gateResultWriteInTransaction(tx, initial.division.id)
           await acquireLeagueScheduleLock(tx, initial.division.liga.id)
 
           const lockedAccess = await tx.partidoRefereeAccess.findUnique({ where: { tokenHash } })
@@ -146,7 +166,7 @@ export const refereeAccessService = {
           const updated = await writeResultInTransaction(tx, lockedAccess.partidoId, data)
           await tx.partidoRefereeAccess.update({ where: { id: lockedAccess.id }, data: { usedAt: new Date() } })
           return updated
-        }, { isolationLevel: 'ReadCommitted' })
+        }, { isolationLevel: 'ReadCommitted', timeout: 30_000 })
       } catch (error: any) {
         if (error?.code === 'P2034' && attempt < 2) continue
         if (error?.code === 'P2034') throw new ConflictError('El resultado cambió durante la actualización; vuelve a intentarlo')

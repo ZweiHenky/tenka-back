@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026-09-mx-v1",
+  "status": "APPROVED",
+  "approvedOn": "2026-09-13",
+  "currency": "MXN",
+  "territories": ["MX"],
+  "priceBasis": {
+    "monthlyCustomerPricePerDivision": 129,
+    "quarterlyDiscountPercent": 10,
+    "annualDiscountPercent": 20,
+    "googleAssumedTaxPercent": 16,
+    "googleConfiguredPricesExcludeTax": true,
+    "appleCustomerPricesIncludeApplicableTax": true
+  },
+  "source": {
+    "apple": "MANUAL_APP_STORE_CONNECT_TRANSCRIPTION",
+    "google": "MANUAL_GOOGLE_PLAY_CONSOLE_TRANSCRIPTION",
+    "recordedOn": "2026-09-13"
+  },
+  "unresolvedIssues": [],
+  "capacities": [
+    {
+      "capacity": 2,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 258, "appleCustomerPriceMxn": 259, "googleConfiguredPriceBeforeTaxMxn": 222.41, "googleExpectedCustomerPriceMxn": 258 },
+        "quarterly": { "targetCustomerPriceMxn": 696.6, "appleCustomerPriceMxn": 699, "googleConfiguredPriceBeforeTaxMxn": 600.52, "googleExpectedCustomerPriceMxn": 696.6 },
+        "annual": { "targetCustomerPriceMxn": 2476.8, "appleCustomerPriceMxn": 2499, "googleConfiguredPriceBeforeTaxMxn": 2135.17, "googleExpectedCustomerPriceMxn": 2476.8 }
+      }
+    },
+    {
+      "capacity": 3,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 387, "appleCustomerPriceMxn": 389, "googleConfiguredPriceBeforeTaxMxn": 333.62, "googleExpectedCustomerPriceMxn": 387 },
+        "quarterly": { "targetCustomerPriceMxn": 1044.9, "appleCustomerPriceMxn": 1049, "googleConfiguredPriceBeforeTaxMxn": 900.78, "googleExpectedCustomerPriceMxn": 1044.9 },
+        "annual": { "targetCustomerPriceMxn": 3715.2, "appleCustomerPriceMxn": 3700, "googleConfiguredPriceBeforeTaxMxn": 3202.76, "googleExpectedCustomerPriceMxn": 3715.2 }
+      }
+    },
+    {
+      "capacity": 4,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 516, "appleCustomerPriceMxn": 519, "googleConfiguredPriceBeforeTaxMxn": 444.83, "googleExpectedCustomerPriceMxn": 516 },
+        "quarterly": { "targetCustomerPriceMxn": 1393.2, "appleCustomerPriceMxn": 1390, "googleConfiguredPriceBeforeTaxMxn": 1201.03, "googleExpectedCustomerPriceMxn": 1393.2 },
+        "annual": { "targetCustomerPriceMxn": 4953.6, "appleCustomerPriceMxn": 4949, "googleConfiguredPriceBeforeTaxMxn": 4270.34, "googleExpectedCustomerPriceMxn": 4953.6 }
+      }
+    },
+    {
+      "capacity": 5,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 645, "appleCustomerPriceMxn": 649, "googleConfiguredPriceBeforeTaxMxn": 556.03, "googleExpectedCustomerPriceMxn": 645 },
+        "quarterly": { "targetCustomerPriceMxn": 1741.5, "appleCustomerPriceMxn": 1740, "googleConfiguredPriceBeforeTaxMxn": 1501.29, "googleExpectedCustomerPriceMxn": 1741.5 },
+        "annual": { "targetCustomerPriceMxn": 6192, "appleCustomerPriceMxn": 6199, "googleConfiguredPriceBeforeTaxMxn": 5337.93, "googleExpectedCustomerPriceMxn": 6192 }
+      }
+    },
+    {
+      "capacity": 6,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 774, "appleCustomerPriceMxn": 770, "googleConfiguredPriceBeforeTaxMxn": 667.24, "googleExpectedCustomerPriceMxn": 774 },
+        "quarterly": { "targetCustomerPriceMxn": 2089.8, "appleCustomerPriceMxn": 2099, "googleConfiguredPriceBeforeTaxMxn": 1801.55, "googleExpectedCustomerPriceMxn": 2089.8 },
+        "annual": { "targetCustomerPriceMxn": 7430.4, "appleCustomerPriceMxn": 7499, "googleConfiguredPriceBeforeTaxMxn": 6405.52, "googleExpectedCustomerPriceMxn": 7430.4 }
+      }
+    },
+    {
+      "capacity": 7,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 903, "appleCustomerPriceMxn": 900, "googleConfiguredPriceBeforeTaxMxn": 778.45, "googleExpectedCustomerPriceMxn": 903 },
+        "quarterly": { "targetCustomerPriceMxn": 2438.1, "appleCustomerPriceMxn": 2449, "googleConfiguredPriceBeforeTaxMxn": 2101.81, "googleExpectedCustomerPriceMxn": 2438.1 },
+        "annual": { "targetCustomerPriceMxn": 8668.8, "appleCustomerPriceMxn": 8699, "googleConfiguredPriceBeforeTaxMxn": 7473.1, "googleExpectedCustomerPriceMxn": 8668.8 }
+      }
+    },
+    {
+      "capacity": 8,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 1032, "appleCustomerPriceMxn": 1030, "googleConfiguredPriceBeforeTaxMxn": 889.66, "googleExpectedCustomerPriceMxn": 1032 },
+        "quarterly": { "targetCustomerPriceMxn": 2786.4, "appleCustomerPriceMxn": 2749, "googleConfiguredPriceBeforeTaxMxn": 2402.07, "googleExpectedCustomerPriceMxn": 2786.4 },
+        "annual": { "targetCustomerPriceMxn": 9907.2, "appleCustomerPriceMxn": 9899, "googleConfiguredPriceBeforeTaxMxn": 8540.69, "googleExpectedCustomerPriceMxn": 9907.2 }
+      }
+    },
+    {
+      "capacity": 9,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 1161, "appleCustomerPriceMxn": 1160, "googleConfiguredPriceBeforeTaxMxn": 1000.86, "googleExpectedCustomerPriceMxn": 1161 },
+        "quarterly": { "targetCustomerPriceMxn": 3134.7, "appleCustomerPriceMxn": 3149, "googleConfiguredPriceBeforeTaxMxn": 2702.33, "googleExpectedCustomerPriceMxn": 3134.7 },
+        "annual": { "targetCustomerPriceMxn": 11145.6, "appleCustomerPriceMxn": 11000, "googleConfiguredPriceBeforeTaxMxn": 9608.28, "googleExpectedCustomerPriceMxn": 11145.6 }
+      }
+    },
+    {
+      "capacity": 10,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 1290, "appleCustomerPriceMxn": 1299, "googleConfiguredPriceBeforeTaxMxn": 1112.07, "googleExpectedCustomerPriceMxn": 1290 },
+        "quarterly": { "targetCustomerPriceMxn": 3483, "appleCustomerPriceMxn": 3499, "googleConfiguredPriceBeforeTaxMxn": 3002.59, "googleExpectedCustomerPriceMxn": 3483 },
+        "annual": { "targetCustomerPriceMxn": 12384, "appleCustomerPriceMxn": 12499, "googleConfiguredPriceBeforeTaxMxn": 10675.86, "googleExpectedCustomerPriceMxn": 12384 }
+      }
+    },
+    {
+      "capacity": 11,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 1419, "appleCustomerPriceMxn": 1410, "googleConfiguredPriceBeforeTaxMxn": 1223.28, "googleExpectedCustomerPriceMxn": 1419 },
+        "quarterly": { "targetCustomerPriceMxn": 3831.3, "appleCustomerPriceMxn": 3849, "googleConfiguredPriceBeforeTaxMxn": 3302.84, "googleExpectedCustomerPriceMxn": 3831.3 },
+        "annual": { "targetCustomerPriceMxn": 13622.4, "appleCustomerPriceMxn": 13500, "googleConfiguredPriceBeforeTaxMxn": 11743.45, "googleExpectedCustomerPriceMxn": 13622.4 }
+      }
+    },
+    {
+      "capacity": 12,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 1548, "appleCustomerPriceMxn": 1560, "googleConfiguredPriceBeforeTaxMxn": 1334.48, "googleExpectedCustomerPriceMxn": 1548 },
+        "quarterly": { "targetCustomerPriceMxn": 4179.6, "appleCustomerPriceMxn": 4199, "googleConfiguredPriceBeforeTaxMxn": 3603.1, "googleExpectedCustomerPriceMxn": 4179.6 },
+        "annual": { "targetCustomerPriceMxn": 14860.8, "appleCustomerPriceMxn": 14999, "googleConfiguredPriceBeforeTaxMxn": 12811.03, "googleExpectedCustomerPriceMxn": 14860.8 }
+      }
+    },
+    {
+      "capacity": 13,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 1677, "appleCustomerPriceMxn": 1679, "googleConfiguredPriceBeforeTaxMxn": 1445.69, "googleExpectedCustomerPriceMxn": 1677 },
+        "quarterly": { "targetCustomerPriceMxn": 4527.9, "appleCustomerPriceMxn": 4500, "googleConfiguredPriceBeforeTaxMxn": 3903.36, "googleExpectedCustomerPriceMxn": 4527.9 },
+        "annual": { "targetCustomerPriceMxn": 16099.2, "appleCustomerPriceMxn": 16000, "googleConfiguredPriceBeforeTaxMxn": 13878.62, "googleExpectedCustomerPriceMxn": 16099.2 }
+      }
+    },
+    {
+      "capacity": 14,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 1806, "appleCustomerPriceMxn": 1809, "googleConfiguredPriceBeforeTaxMxn": 1556.9, "googleExpectedCustomerPriceMxn": 1806 },
+        "quarterly": { "targetCustomerPriceMxn": 4876.2, "appleCustomerPriceMxn": 4849, "googleConfiguredPriceBeforeTaxMxn": 4203.62, "googleExpectedCustomerPriceMxn": 4876.2 },
+        "annual": { "targetCustomerPriceMxn": 17337.6, "appleCustomerPriceMxn": 17000, "googleConfiguredPriceBeforeTaxMxn": 14946.21, "googleExpectedCustomerPriceMxn": 17337.6 }
+      }
+    },
+    {
+      "capacity": 15,
+      "prices": {
+        "monthly": { "targetCustomerPriceMxn": 1935, "appleCustomerPriceMxn": 1930, "googleConfiguredPriceBeforeTaxMxn": 1668.1, "googleExpectedCustomerPriceMxn": 1935 },
+        "quarterly": { "targetCustomerPriceMxn": 5224.5, "appleCustomerPriceMxn": 5199, "googleConfiguredPriceBeforeTaxMxn": 4503.88, "googleExpectedCustomerPriceMxn": 5224.5 },
+        "annual": { "targetCustomerPriceMxn": 18576, "appleCustomerPriceMxn": 18499, "googleConfiguredPriceBeforeTaxMxn": 16013.79, "googleExpectedCustomerPriceMxn": 18576 }
+      }
+    }
+  ]
+}

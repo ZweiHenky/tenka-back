@@ -2,6 +2,7 @@ import { prisma } from '../../config/database';
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
 import type { AuthenticatedUser } from '../../types/auth';
 import { assertOwnerOrAdmin } from '../../utils/authorization';
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow';
 
 type DirectAssignment = { partidoId: string; arbitroIds: string[] };
 type DivisionMatches = { id: string; partidos: Array<{ id: string; fecha: Date | null; fechaFin: Date | null }> };
@@ -145,12 +146,15 @@ export const arbitrajeService = {
   },
   async removeAssignment(ligaId: string, assignmentId: string, actor: AuthenticatedUser) {
     await ownBatch(ligaId, assignmentId, actor);
-    const links = await prisma.tandaArbitralPartido.findMany({ where: { tandaId: assignmentId }, select: { partidoId: true } });
-    const partidoIds = links.map((link) => link.partidoId);
-    await prisma.$transaction([
-      prisma.partidoArbitro.deleteMany({ where: { partidoId: { in: partidoIds } } }),
-      prisma.tandaArbitral.delete({ where: { id: assignmentId } }),
-    ]);
+    await prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'referee-batch.delete', capability: 'MANAGE_SHARED_RESOURCE', actor, leagueId: ligaId, resourceType: 'SHARED_RESOURCE',
+      });
+      const links = await tx.tandaArbitralPartido.findMany({ where: { tandaId: assignmentId }, select: { partidoId: true } });
+      const partidoIds = links.map((link) => link.partidoId);
+      await tx.partidoArbitro.deleteMany({ where: { partidoId: { in: partidoIds } } });
+      await tx.tandaArbitral.delete({ where: { id: assignmentId } });
+    });
   },
   async replaceLeagueAssignments(ligaId: string, actor: AuthenticatedUser, data: { asignacionId?: string; divisionIds: string[]; asignaciones: DirectAssignment[] }) {
     const partidoIds = data.asignaciones.map((assignment) => assignment.partidoId);
@@ -194,6 +198,10 @@ export const arbitrajeService = {
     let asignacionId = data.asignacionId;
     try {
       await prisma.$transaction(async (tx) => {
+        await observeResourceAccessShadowInTransaction(tx, {
+          operation: 'referee-batch.replace', capability: 'MANAGE_SHARED_RESOURCE', actor, leagueId: ligaId,
+          resourceType: 'SHARED_RESOURCE', affectedDivisionIds: data.divisionIds,
+        });
         if (!asignacionId) {
           const alreadyLinked = await tx.tandaArbitralPartido.findMany({ where: { partidoId: { in: partidoIds } }, select: { partidoId: true } });
           if (alreadyLinked.length) throw new ConflictError('Uno o más partidos ya pertenecen a una asignación arbitral');

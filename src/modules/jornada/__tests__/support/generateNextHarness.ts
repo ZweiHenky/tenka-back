@@ -37,16 +37,22 @@ vi.mock('../../../../config/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn() },
 }));
 
+vi.mock('../../../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: vi.fn(),
+}));
+
 import { prisma as importedPrisma } from '../../../../config/database';
 import { jornadaRepository as importedJornadaRepository } from '../../repository';
 import { partidoRepository as importedPartidoRepository } from '../../../partido/repository';
 import { logger as importedLogger } from '../../../../config/logger';
+import { observeResourceAccessShadowInTransaction as importedObserveResourceAccess } from '../../../billing/resourceAccessShadow';
 import type { AuthenticatedUser } from '../../../../types/auth';
 
 export const prisma = importedPrisma;
 export const jornadaRepository = importedJornadaRepository;
 export const partidoRepository = importedPartidoRepository;
 export const logger = importedLogger;
+export const observeResourceAccess = importedObserveResourceAccess;
 
 export const divisionId = 'div-test-1';
 export const owner: AuthenticatedUser = { id: 'user-1', email: 'owner@test.com', rol: 'LIGA' };

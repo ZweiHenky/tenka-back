@@ -2,6 +2,7 @@ import { prisma } from '../../config/database';
 import { NotFoundError, ValidationError } from '../../utils/errors';
 import { mediaService } from '../media/service';
 import { signalBackgroundJob } from '../../workers/jobSignals';
+import { detachBillingAccount, ensureBillingAccount } from '../billing/service';
 
 const sanitizedUserSelect = {
   id: true,
@@ -19,18 +20,21 @@ const sanitizedUserSelect = {
 
 export const userService = {
   async activateLeagueRole(userId: string) {
-    await prisma.user.updateMany({
-      where: { id: userId, rol: 'CAPITAN' },
-      data: { rol: 'LIGA' },
-    });
+    return prisma.$transaction(async (tx) => {
+      await tx.user.updateMany({
+        where: { id: userId, rol: 'CAPITAN' },
+        data: { rol: 'LIGA' },
+      });
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: sanitizedUserSelect,
-    });
-    if (!user) throw new NotFoundError('Usuario');
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: sanitizedUserSelect,
+      });
+      if (!user) throw new NotFoundError('Usuario');
+      if (user.rol === 'LIGA') await ensureBillingAccount(tx, userId);
 
-    return user;
+      return user;
+    });
   },
 
   async deleteAccount(userId: string, email: string): Promise<void> {
@@ -44,6 +48,8 @@ export const userService = {
     }
 
     await prisma.$transaction(async (tx) => {
+      await detachBillingAccount(tx, userId);
+
       const ligas = await tx.liga.findMany({
         where: { userId },
         select: { logo: true, logoPublicId: true, cancha: true, canchaPublicId: true },

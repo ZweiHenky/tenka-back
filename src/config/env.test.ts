@@ -49,7 +49,226 @@ describe('parseBackendEnv', () => {
       PLAYOFF_GENERATION_RATE_WINDOW_MINUTES: 15,
       DESTRUCTIVE_OPERATION_RATE_LIMIT: 20,
       DESTRUCTIVE_OPERATION_RATE_WINDOW_MINUTES: 60,
+      BILLING_REVENUECAT_ENABLED: false,
+      BILLING_PERIODIC_RECONCILIATION_ENABLED: false,
+      BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED: false,
+      BILLING_PAID_ACCESS_SHADOW_ENABLED: false,
+      BILLING_RESOURCE_ACCESS_SHADOW_ENABLED: false,
+      BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED: false,
+      BILLING_PURCHASES_ENABLED: false,
+      BILLING_RECONCILIATION_ACTIVE_INTERVAL_MINUTES: 1440,
+      BILLING_RECONCILIATION_CRITICAL_INTERVAL_MINUTES: 360,
+      BILLING_RECONCILIATION_BATCH_SIZE: 5,
+      REVENUECAT_WEBHOOK_BODY_LIMIT: '256kb',
+      REVENUECAT_WEBHOOK_RATE_LIMIT: 300,
+      REVENUECAT_WEBHOOK_SIGNATURE_MODE: 'disabled',
+      BILLING_SYNC_RATE_LIMIT: 10,
+      BILLING_SYNC_RATE_WINDOW_MINUTES: 10,
+      BILLING_GRACE_DAYS: 7,
     });
+  });
+
+  it('only enables periodic reconciliation with the RevenueCat integration', () => {
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      BILLING_PERIODIC_RECONCILIATION_ENABLED: 'true',
+    })).toThrow('BILLING_PERIODIC_RECONCILIATION_ENABLED');
+  });
+
+  it('only enables effective access materialization with the RevenueCat integration', () => {
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED: 'true',
+    })).toThrow('BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED');
+  });
+
+  it('only enables paid access shadow resolution with materialization', () => {
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      BILLING_PAID_ACCESS_SHADOW_ENABLED: 'true',
+    })).toThrow('BILLING_PAID_ACCESS_SHADOW_ENABLED');
+  });
+
+  it('only enables resource access shadow resolution with materialization', () => {
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      BILLING_RESOURCE_ACCESS_SHADOW_ENABLED: 'true',
+    })).toThrow('BILLING_RESOURCE_ACCESS_SHADOW_ENABLED');
+  });
+
+  it('only enables resource enforcement after materialization and shadow observation', () => {
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED: 'true',
+    })).toThrow('BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED');
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      BILLING_REVENUECAT_ENABLED: 'true',
+      BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED: 'true',
+      BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED: 'true',
+      REVENUECAT_V2_SECRET_API_KEY: 'sk_revenuecat_server_key',
+      REVENUECAT_PROJECT_ID: 'proj_revenuecat',
+      REVENUECAT_WEBHOOK_SECRET: 'w'.repeat(32),
+    })).toThrow('BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED');
+    expect(parseBackendEnv({
+      ...validEnv,
+      BILLING_REVENUECAT_ENABLED: 'true',
+      BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED: 'true',
+      BILLING_RESOURCE_ACCESS_SHADOW_ENABLED: 'true',
+      BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED: 'true',
+      REVENUECAT_V2_SECRET_API_KEY: 'sk_revenuecat_server_key',
+      REVENUECAT_PROJECT_ID: 'proj_revenuecat',
+      REVENUECAT_WEBHOOK_SECRET: 'w'.repeat(32),
+    })).toMatchObject({ BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED: true });
+  });
+
+  it('only enables purchases with RevenueCat and effective access materialization', () => {
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      BILLING_PURCHASES_ENABLED: 'true',
+    })).toThrow('BILLING_PURCHASES_ENABLED');
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      BILLING_REVENUECAT_ENABLED: 'true',
+      BILLING_PURCHASES_ENABLED: 'true',
+      REVENUECAT_V2_SECRET_API_KEY: 'sk_revenuecat_server_key',
+      REVENUECAT_PROJECT_ID: 'proj_revenuecat',
+      REVENUECAT_WEBHOOK_SECRET: 'w'.repeat(32),
+    })).toThrow('BILLING_PURCHASES_ENABLED');
+    expect(parseBackendEnv({
+      ...validEnv,
+      BILLING_REVENUECAT_ENABLED: 'true',
+      BILLING_EFFECTIVE_ACCESS_MATERIALIZATION_ENABLED: 'true',
+      BILLING_PURCHASES_ENABLED: 'true',
+      REVENUECAT_V2_SECRET_API_KEY: 'sk_revenuecat_server_key',
+      REVENUECAT_PROJECT_ID: 'proj_revenuecat',
+      REVENUECAT_WEBHOOK_SECRET: 'w'.repeat(32),
+    })).toMatchObject({ BILLING_PURCHASES_ENABLED: true });
+  });
+
+  it('parses RevenueCat billing configuration when explicitly enabled', () => {
+    expect(parseBackendEnv({
+      ...validEnv,
+      BILLING_REVENUECAT_ENABLED: 'true',
+      REVENUECAT_V2_SECRET_API_KEY: 'sk_revenuecat_server_key',
+      REVENUECAT_PROJECT_ID: 'proj_revenuecat',
+      REVENUECAT_WEBHOOK_SECRET: 'w'.repeat(32),
+      REVENUECAT_WEBHOOK_PREVIOUS_SECRET: 'p'.repeat(32),
+      REVENUECAT_WEBHOOK_SIGNING_SECRET: 's'.repeat(32),
+      REVENUECAT_WEBHOOK_SIGNATURE_MODE: 'enforce',
+      REVENUECAT_WEBHOOK_BODY_LIMIT: '512kb',
+      REVENUECAT_WEBHOOK_RATE_LIMIT: '500',
+      BILLING_SYNC_RATE_LIMIT: '12',
+      BILLING_SYNC_RATE_WINDOW_MINUTES: '15',
+      BILLING_GRACE_DAYS: '5',
+    })).toMatchObject({
+      BILLING_REVENUECAT_ENABLED: true,
+      REVENUECAT_V2_SECRET_API_KEY: 'sk_revenuecat_server_key',
+      REVENUECAT_PROJECT_ID: 'proj_revenuecat',
+      REVENUECAT_WEBHOOK_SECRET: 'w'.repeat(32),
+      REVENUECAT_WEBHOOK_PREVIOUS_SECRET: 'p'.repeat(32),
+      REVENUECAT_WEBHOOK_SIGNING_SECRET: 's'.repeat(32),
+      REVENUECAT_WEBHOOK_SIGNATURE_MODE: 'enforce',
+      REVENUECAT_WEBHOOK_BODY_LIMIT: '512kb',
+      REVENUECAT_WEBHOOK_RATE_LIMIT: 500,
+      BILLING_SYNC_RATE_LIMIT: 12,
+      BILLING_SYNC_RATE_WINDOW_MINUTES: 15,
+      BILLING_GRACE_DAYS: 5,
+    });
+  });
+
+  it.each(['REVENUECAT_V2_SECRET_API_KEY', 'REVENUECAT_PROJECT_ID', 'REVENUECAT_WEBHOOK_SECRET'])(
+    'requires %s when RevenueCat billing is enabled',
+    (name) => {
+      expect(() => parseBackendEnv({
+        ...validEnv,
+        BILLING_REVENUECAT_ENABLED: 'true',
+        REVENUECAT_V2_SECRET_API_KEY: 'sk_revenuecat_server_key',
+        REVENUECAT_PROJECT_ID: 'proj_revenuecat',
+        REVENUECAT_WEBHOOK_SECRET: 'w'.repeat(32),
+        [name]: undefined,
+      })).toThrow(name);
+    },
+  );
+
+  it('rejects public SDK keys and weak or repeated webhook secrets', () => {
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      REVENUECAT_V2_SECRET_API_KEY: 'goog_public_sdk_key',
+    })).toThrow('REVENUECAT_V2_SECRET_API_KEY');
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      REVENUECAT_WEBHOOK_SECRET: 'too-short',
+    })).toThrow('REVENUECAT_WEBHOOK_SECRET');
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      REVENUECAT_WEBHOOK_SECRET: 'w'.repeat(32),
+      REVENUECAT_WEBHOOK_PREVIOUS_SECRET: 'w'.repeat(32),
+    })).toThrow('REVENUECAT_WEBHOOK_PREVIOUS_SECRET');
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      REVENUECAT_WEBHOOK_SECRET: 'w'.repeat(32),
+      REVENUECAT_WEBHOOK_SIGNING_SECRET: 'w'.repeat(32),
+    })).toThrow('REVENUECAT_WEBHOOK_SIGNING_SECRET');
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      REVENUECAT_WEBHOOK_PREVIOUS_SECRET: 'p'.repeat(32),
+      REVENUECAT_WEBHOOK_SIGNING_SECRET: 'p'.repeat(32),
+    })).toThrow('REVENUECAT_WEBHOOK_SIGNING_SECRET');
+  });
+
+  it('treats blank optional RevenueCat secrets as absent while disabled', () => {
+    expect(parseBackendEnv({
+      ...validEnv,
+      REVENUECAT_V2_SECRET_API_KEY: '',
+      REVENUECAT_PROJECT_ID: '',
+      REVENUECAT_WEBHOOK_SECRET: ' ',
+      REVENUECAT_WEBHOOK_PREVIOUS_SECRET: '',
+      REVENUECAT_WEBHOOK_SIGNING_SECRET: '',
+    })).toMatchObject({
+      BILLING_REVENUECAT_ENABLED: false,
+      REVENUECAT_V2_SECRET_API_KEY: undefined,
+      REVENUECAT_PROJECT_ID: undefined,
+      REVENUECAT_WEBHOOK_SECRET: undefined,
+    });
+  });
+
+  it('requires a signing secret for observe or enforce and enforcement in production', () => {
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      REVENUECAT_WEBHOOK_SIGNATURE_MODE: 'observe',
+    })).toThrow('REVENUECAT_WEBHOOK_SIGNING_SECRET');
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      REVENUECAT_WEBHOOK_SIGNING_SECRET: 's'.repeat(32),
+      REVENUECAT_WEBHOOK_SIGNATURE_MODE: 'observe',
+    })).toThrow('REVENUECAT_WEBHOOK_SIGNATURE_OBSERVE_UNTIL');
+    expect(() => parseBackendEnv({
+      ...validEnv,
+      REVENUECAT_WEBHOOK_SIGNING_SECRET: 's'.repeat(32),
+      REVENUECAT_WEBHOOK_SIGNATURE_MODE: 'observe',
+      REVENUECAT_WEBHOOK_SIGNATURE_OBSERVE_UNTIL: new Date(Date.now() + 25 * 60 * 60_000).toISOString(),
+    })).toThrow('REVENUECAT_WEBHOOK_SIGNATURE_OBSERVE_UNTIL');
+    expect(parseBackendEnv({
+      ...validEnv,
+      REVENUECAT_WEBHOOK_SIGNING_SECRET: 's'.repeat(32),
+      REVENUECAT_WEBHOOK_SIGNATURE_MODE: 'observe',
+      REVENUECAT_WEBHOOK_SIGNATURE_OBSERVE_UNTIL: new Date(Date.now() + 60 * 60_000).toISOString(),
+    })).toMatchObject({ REVENUECAT_WEBHOOK_SIGNATURE_MODE: 'observe' });
+    expect(parseBackendEnv({
+      ...validEnv,
+      REVENUECAT_WEBHOOK_SIGNING_SECRET: 's'.repeat(32),
+      REVENUECAT_WEBHOOK_SIGNATURE_MODE: 'observe',
+      REVENUECAT_WEBHOOK_SIGNATURE_OBSERVE_UNTIL: new Date(Date.now() - 60_000).toISOString(),
+    })).toMatchObject({ REVENUECAT_WEBHOOK_SIGNATURE_MODE: 'observe' });
+    expect(() => parseBackendEnv({
+      ...productionEnv,
+      BILLING_REVENUECAT_ENABLED: 'true',
+      REVENUECAT_V2_SECRET_API_KEY: 'sk_revenuecat_server_key',
+      REVENUECAT_PROJECT_ID: 'proj_revenuecat',
+      REVENUECAT_WEBHOOK_SECRET: 'w'.repeat(32),
+      REVENUECAT_WEBHOOK_SIGNATURE_MODE: 'disabled',
+    })).toThrow('REVENUECAT_WEBHOOK_SIGNATURE_MODE');
   });
 
   it('parses independent generation and destructive rate limits', () => {

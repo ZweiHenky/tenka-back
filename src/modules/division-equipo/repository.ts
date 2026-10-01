@@ -67,8 +67,8 @@ export const divisionEquipoRepository: DivisionEquipoRepository = {
     };
   },
 
-  async updateSaldoPendiente(divisionId, equipoId, saldoPendiente, actor): Promise<boolean> {
-    const result = await prisma.divisionEquipo.updateMany({
+  async updateSaldoPendiente(divisionId, equipoId, saldoPendiente, actor, tx): Promise<boolean> {
+    const result = await (tx ?? prisma).divisionEquipo.updateMany({
       where: {
         divisionId,
         equipoId,

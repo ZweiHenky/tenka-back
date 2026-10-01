@@ -4,10 +4,22 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DEVELOPMENT_SCRIPT_AUTH, resolveDevelopmentScriptDatabase } from './db-safety.mjs'
+import { resolveDevelopmentScriptOptions } from './development-script-policy.mjs'
 
 const scripts = {
   seed: 'prisma/seed.ts',
   'seed-catalogs': 'prisma/seed-catalogs.ts',
+  'load-billing-catalog': 'prisma/load-billing-catalog.ts',
+  'approve-activate-billing-catalog': 'prisma/approve-activate-billing-catalog.ts',
+  'reconcile-revenuecat-sandbox': 'prisma/reconcile-revenuecat-sandbox.ts',
+  'audit-billing-migration-candidates': 'prisma/audit-billing-migration-candidates.ts',
+  'prepare-billing-migration': 'prisma/prepare-billing-migration.ts',
+  'create-legacy-billing-migration-candidate': 'prisma/create-legacy-billing-migration-candidate.ts',
+  'rotate-development-billing-account': 'prisma/rotate-development-billing-account.ts',
+  'validate-billing-migration': 'prisma/validate-billing-migration.ts',
+  'audit-billing-free-foundation': 'prisma/audit-billing-free-foundation.ts',
+  'reconcile-billing-free-foundation': 'prisma/reconcile-billing-free-foundation.ts',
+  'audit-billing-operational-control': 'prisma/audit-billing-operational-control.ts',
   'create-teams': 'prisma/create-teams.ts',
   'assign-teams': 'prisma/assign-teams.ts',
   'check-teams': 'prisma/check-teams.ts',
@@ -21,13 +33,11 @@ const script = scripts[name]
 
 try {
   if (!script) throw new Error(`Unsupported development script: ${name || '(missing)'}`)
-  if (name === 'assign-teams' && !options.includes('--confirm=assign-teams')) {
-    throw new Error('assign-teams is destructive; repeat with --confirm=assign-teams')
-  }
+  const invocation = resolveDevelopmentScriptOptions(name, options)
 
   const databaseUrl = resolveDevelopmentScriptDatabase()
   if (!existsSync(resolve(process.cwd(), script))) throw new Error(`Script file not found: ${script}`)
-  if (options.includes('--dry-run')) {
+  if (invocation.dryRun) {
     console.log(`Protected development script is ready: ${name}`)
     process.exit(0)
   }
@@ -47,7 +57,10 @@ try {
   console.log(`Running protected development script: ${name}`)
   const result = spawnSync(
     process.execPath,
-    [fileURLToPath(import.meta.resolve('ts-node-dev/lib/bin.js')), '--transpile-only', '--exit-child', script],
+    [
+      fileURLToPath(import.meta.resolve('ts-node-dev/lib/bin.js')),
+      '--transpile-only', '--exit-child', script, ...invocation.childArgs,
+    ],
     { cwd: process.cwd(), env: childEnv, stdio: 'inherit' },
   )
   if (result.error) throw result.error

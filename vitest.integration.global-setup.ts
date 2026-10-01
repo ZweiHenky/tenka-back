@@ -54,6 +54,18 @@ async function assertRequiredExtensionsExist(): Promise<void> {
   }
 }
 
+async function assertIntegrationSearchPath(): Promise<void> {
+  const pool = new Pool({ connectionString: getIntegrationPgConnectionString(), max: 1 });
+  try {
+    const result = await pool.query<{ searchPath: string }>(`SELECT current_setting('search_path') AS "searchPath"`);
+    if (result.rows[0]?.searchPath !== INTEGRATION_SCHEMA) {
+      throw new Error(`Integration connection search_path must be ${INTEGRATION_SCHEMA}`);
+    }
+  } finally {
+    await pool.end();
+  }
+}
+
 function runPrisma(args: string[]): { ok: boolean; reason: string } {
   const result = spawnSync(
     process.execPath,
@@ -69,6 +81,7 @@ export default async function setup(): Promise<() => Promise<void>> {
   // Validate before opening a connection or executing any DDL.
   getIntegrationDatabaseUrl();
   await assertRequiredExtensionsExist();
+  await assertIntegrationSearchPath();
   await executeSchemaSql(resetSchemaSql);
 
   const steps = [

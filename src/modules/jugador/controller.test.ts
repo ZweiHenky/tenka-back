@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   divisionJugadorUpdateMany: vi.fn(),
   mediaLock: vi.fn(),
   mediaPrepare: vi.fn(),
+  resourceAccessObserveInTransaction: vi.fn(),
   transaction: vi.fn(),
 }));
 
@@ -33,6 +34,10 @@ vi.mock('../../config/database', () => ({
 
 vi.mock('../media/service', () => ({
   mediaService: { scheduleImageCleanup: vi.fn(), lockAttachmentTarget: mocks.mediaLock, prepareAttachment: mocks.mediaPrepare },
+}));
+
+vi.mock('../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: mocks.resourceAccessObserveInTransaction,
 }));
 
 import { jugadorController } from './controller';
@@ -333,6 +338,7 @@ describe('jugadorController division roster management', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.resourceAccessObserveInTransaction.mockResolvedValue(undefined);
     mocks.divisionEquipoFindUnique.mockResolvedValue({
       equipo: { userId: teamOwner.id },
       division: { liga: { userId: leagueOwner.id } },
@@ -342,6 +348,11 @@ describe('jugadorController division roster management', () => {
       divisionId: 'division-1', equipoId: 'team-1', jugadorId: 'player-1', dorsal: 10,
       jugador: { id: 'player-1', nombre: 'Player', showPhoneInPublicProfile: false },
     });
+    mocks.transaction.mockImplementation((work) => work({
+      divisionEquipo: { findUnique: mocks.divisionEquipoFindUnique },
+      equipoJugador: { findUnique: mocks.membershipFindUnique },
+      divisionJugador: { create: mocks.divisionJugadorCreate, delete: mocks.divisionJugadorDelete },
+    }));
   });
 
   function assignRequest(actor: AuthenticatedUser) {
@@ -360,7 +371,25 @@ describe('jugadorController division roster management', () => {
       data: { divisionId: 'division-1', equipoId: 'team-1', jugadorId: 'player-1', dorsal: 10 },
       include: { jugador: true },
     });
+    expect(mocks.resourceAccessObserveInTransaction).toHaveBeenCalledWith(expect.anything(), {
+      operation: 'division-roster.assign', capability: 'MANAGE_DIVISION', actor,
+      divisionId: 'division-1', resourceType: 'DIVISION',
+    });
+    expect(mocks.resourceAccessObserveInTransaction.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.divisionJugadorCreate.mock.invocationCallOrder[0]);
     expect(next).not.toHaveBeenCalled();
+  });
+
+  it('does not assign when the transactional gate rejects access', async () => {
+    const denied = new Error('denied');
+    mocks.resourceAccessObserveInTransaction.mockRejectedValue(denied);
+    const next = vi.fn() as NextFunction;
+
+    await jugadorController.assignToDivision(assignRequest(leagueOwner), response(), next);
+
+    expect(next).toHaveBeenCalledWith(denied);
+    expect(mocks.membershipFindUnique).not.toHaveBeenCalled();
+    expect(mocks.divisionJugadorCreate).not.toHaveBeenCalled();
   });
 
   it('hides the division team roster from an unrelated user', async () => {
@@ -412,6 +441,12 @@ describe('jugadorController division roster management', () => {
     expect(mocks.divisionJugadorDelete).toHaveBeenCalledWith({
       where: { divisionId_equipoId_jugadorId: { divisionId: 'division-1', equipoId: 'team-1', jugadorId: 'player-1' } },
     });
+    expect(mocks.resourceAccessObserveInTransaction).toHaveBeenCalledWith(expect.anything(), {
+      operation: 'division-roster.remove', capability: 'MANAGE_DIVISION', actor: leagueOwner,
+      divisionId: 'division-1', resourceType: 'DIVISION',
+    });
+    expect(mocks.resourceAccessObserveInTransaction.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.divisionJugadorDelete.mock.invocationCallOrder[0]);
     expect(next).not.toHaveBeenCalled();
   });
 });

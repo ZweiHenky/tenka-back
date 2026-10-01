@@ -9,6 +9,10 @@ import { runInTransaction } from '../../utils/transaction';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
 import { signalBackgroundJob } from '../../workers/jobSignals';
 import { acquireAccountQuotaLock, assertAccountQuotaDelta } from '../../utils/accountQuota';
+import { assertMigrationAllowsResourceCreation, closeFreeManagementGrantForDeletedResource } from '../billing/service';
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow';
+import { resolveLeagueAccessShadowInTransaction } from '../billing/resourceAccessResolver';
+import { env } from '../../config/env';
 
 const DUPLICATE_NAME_MESSAGE = 'Ya existe una liga con ese nombre';
 const DUPLICATE_COURT_MESSAGE = 'Ya existe una cancha con ese nombre en esta liga';
@@ -106,6 +110,20 @@ export const ligaService = {
   async getById(id: string, actor?: AuthenticatedUser): Promise<LigaEntity> {
     const liga = await ligaRepository.findVisibleById(id, actor);
     if (!liga) throw new NotFoundError('Liga');
+    if (env.BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED
+      && actor
+      && (actor.rol === 'ADMINISTRADOR' || actor.id === liga.userId)) {
+      const decision = await prisma.$transaction((tx) => resolveLeagueAccessShadowInTransaction(tx, {
+        leagueId: id,
+        actor,
+      }));
+      return {
+        ...liga, managementAccess: decision.access, managementReason: decision.reason,
+        migrationOverlayActive: decision.migrationOverlayActive,
+        migrationDeadline: decision.migrationDeadline,
+        migrationPaused: decision.migrationPaused,
+      };
+    }
     return liga;
   },
 
@@ -152,12 +170,13 @@ export const ligaService = {
       }));
       return await runInTransaction(async (tx) => {
         await acquireAccountQuotaLock(tx, actor.id);
+        await assertMigrationAllowsResourceCreation(tx, actor.id);
         await assertAccountQuotaDelta(tx, actor.id, { leagues: 1 });
         const location = await tx.ubicacion.findUnique({ where: { id: data.ubicacionId }, select: { timeZone: true } });
         if (!location) throw new NotFoundError('Ubicación');
         const logo = logoAssetId !== undefined ? await mediaService.prepareAttachment(tx, logoAssetId, actor.id, 'LEAGUE_LOGO') : undefined;
         const cover = coverAssetId !== undefined ? await mediaService.prepareAttachment(tx, coverAssetId, actor.id, 'LEAGUE_COVER') : undefined;
-        return ligaRepository.create({
+        const created = await ligaRepository.create({
           ...ligaData,
           userId: actor.id,
           timeZone: location.timeZone,
@@ -166,6 +185,10 @@ export const ligaService = {
           ...(logo && { logo: logo.url, logoPublicId: logo.publicId }),
           ...(cover && { cancha: cover.url, canchaPublicId: cover.publicId }),
         }, courtWrites, arbitros, tx);
+        await observeResourceAccessShadowInTransaction(tx, {
+          operation: 'league.create', capability: 'CREATE_LEAGUE', actor, leagueId: created.id, resourceType: 'LEAGUE',
+        });
+        return created;
       });
     } catch (error) {
       if (isUniqueConstraintError(error)) throw new ConflictError(DUPLICATE_NAME_MESSAGE);
@@ -224,16 +247,16 @@ export const ligaService = {
       // Turning multiple courts off drops every court and every per-court schedule, so it has
       // to be serialized against jornada generation like any other venue change.
       const touchesCourts = disablingMultipleCourts || (courtWrites !== undefined && courtWrites.length > 0);
-      if (logoAssetId === undefined && coverAssetId === undefined) {
-        updated = touchesCourts
-          ? await runInTransaction(async (tx) => {
-              await acquireLeagueScheduleLock(tx, id);
-              return ligaRepository.update(id, ligaData, courtWrites, arbitros, disablingMultipleCourts, tx);
-            })
-          : await ligaRepository.update(id, ligaData, courtWrites, arbitros);
-      } else updated = await runInTransaction(async (tx) => {
-        // Advisory lock first, row lock second — keeps a single ordering across all writers.
+      updated = await runInTransaction(async (tx) => {
+        await observeResourceAccessShadowInTransaction(tx, {
+          operation: 'league.update', capability: touchesCourts ? 'MANAGE_SHARED_RESOURCE' : 'MANAGE_LEAGUE', actor, leagueId: id,
+          resourceType: touchesCourts ? 'SHARED_RESOURCE' : 'LEAGUE',
+        });
+        // Billing gate first, schedule lock second, attachment row lock last.
         if (touchesCourts) await acquireLeagueScheduleLock(tx, id);
+        if (logoAssetId === undefined && coverAssetId === undefined) {
+          return ligaRepository.update(id, ligaData, courtWrites, arbitros, disablingMultipleCourts, tx);
+        }
         await mediaService.lockAttachmentTarget(tx, 'liga', id);
         const current = await tx.liga.findUniqueOrThrow({
           where: { id },
@@ -263,16 +286,20 @@ export const ligaService = {
     if (confirmName !== undefined && normalizeName(old.nombre) !== normalizeName(confirmName)) {
       throw new ValidationError('El nombre no coincide. Escribe el nombre de la liga para confirmar.');
     }
-    if (!old.logo && !old.cancha) {
-      await ligaRepository.delete(id);
-      return;
-    }
     await runInTransaction(async (tx) => {
-      await mediaService.scheduleImageCleanup(old.logo, old.logoPublicId, tx);
-      await mediaService.scheduleImageCleanup(old.cancha, old.canchaPublicId, tx);
-      await ligaRepository.delete(id, 'liga' in tx ? tx : undefined);
+      await acquireAccountQuotaLock(tx, old.userId);
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'league.delete', capability: 'DELETE_RESOURCE', actor, leagueId: id, resourceType: 'LEAGUE',
+      });
+      await closeFreeManagementGrantForDeletedResource(tx, old.userId, { leagueId: id });
+      if (old.logo || old.cancha) {
+        await mediaService.scheduleImageCleanup(old.logo, old.logoPublicId, tx);
+        await mediaService.scheduleImageCleanup(old.cancha, old.canchaPublicId, tx);
+      }
+      if ('liga' in tx) await ligaRepository.delete(id, tx);
+      else await ligaRepository.delete(id);
     });
-    signalBackgroundJob('media-deletion');
+    if (old.logo || old.cancha) signalBackgroundJob('media-deletion');
   },
 
   async getCanchas(ligaId: string, actor: AuthenticatedUser): Promise<LigaCanchaEntity[]> {
@@ -289,10 +316,15 @@ export const ligaService = {
     }
     const nombre = data.nombre.trim();
     const nombreNormalizado = normalizeName(nombre);
-    const existing = await prisma.ligaCancha.findFirst({ where: { ligaId, nombreNormalizado } });
-    if (existing) throw new ConflictError(DUPLICATE_COURT_MESSAGE);
     try {
-      return await prisma.ligaCancha.create({ data: { nombre, nombreNormalizado, ligaId } });
+      return await runInTransaction(async (tx) => {
+        await observeResourceAccessShadowInTransaction(tx, {
+          operation: 'league-court.create', capability: 'ADD_SHARED_RESOURCE', actor, leagueId: ligaId, resourceType: 'LEAGUE',
+        });
+        const existing = await tx.ligaCancha.findFirst({ where: { ligaId, nombreNormalizado } });
+        if (existing) throw new ConflictError(DUPLICATE_COURT_MESSAGE);
+        return tx.ligaCancha.create({ data: { nombre, nombreNormalizado, ligaId } });
+      });
     } catch (error) {
       if (isUniqueConstraintError(error)) throw new ConflictError(DUPLICATE_COURT_MESSAGE);
       throw error;
@@ -306,6 +338,9 @@ export const ligaService = {
       // Deactivating a court changes what generateNext considers a valid venue, so the reads
       // that gate it must happen under the league schedule lock.
       return await runInTransaction(async (tx) => {
+        await observeResourceAccessShadowInTransaction(tx, {
+          operation: 'league-court.update', capability: 'MANAGE_SHARED_RESOURCE', actor, leagueId: ligaId, resourceType: 'SHARED_RESOURCE',
+        });
         await acquireLeagueScheduleLock(tx, ligaId);
         const cancha = await tx.ligaCancha.findFirst({ where: { id: canchaId, ligaId } });
         if (!cancha) throw new NotFoundError('Cancha');
@@ -346,6 +381,9 @@ export const ligaService = {
     // and the delete, and onDelete: SetNull would strip their canchaId — putting them outside
     // the partidos_cancha_no_overlap constraint and blocking generation for the whole league.
     await runInTransaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'league-court.delete', capability: 'MANAGE_SHARED_RESOURCE', actor, leagueId: ligaId, resourceType: 'SHARED_RESOURCE',
+      });
       await acquireLeagueScheduleLock(tx, ligaId);
       const cancha = await tx.ligaCancha.findFirst({ where: { id: canchaId, ligaId } });
       if (!cancha) throw new NotFoundError('Cancha');
@@ -386,55 +424,70 @@ export const ligaService = {
     if (!liga.usaArbitros) {
       throw new ValidationError('La liga no tiene árbitros habilitados');
     }
-    const existing = await prisma.ligaArbitro.findUnique({
-      where: { ligaId_nombre: { ligaId, nombre: data.nombre } },
-    });
-    if (existing) throw new ConflictError('Ya existe un árbitro con ese nombre en esta liga');
-    return prisma.ligaArbitro.create({
-      data: { ...data, ligaId },
+    return runInTransaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'league-referee.create', capability: 'ADD_SHARED_RESOURCE', actor, leagueId: ligaId, resourceType: 'LEAGUE',
+      });
+      const existing = await tx.ligaArbitro.findUnique({
+        where: { ligaId_nombre: { ligaId, nombre: data.nombre } },
+      });
+      if (existing) throw new ConflictError('Ya existe un árbitro con ese nombre en esta liga');
+      return tx.ligaArbitro.create({
+        data: { ...data, ligaId },
+      });
     });
   },
 
   async updateArbitro(ligaId: string, arbitroId: string, data: { nombre?: string; activo?: boolean }, actor: AuthenticatedUser): Promise<LigaArbitroEntity> {
     const liga = await ligaRepository.findManagementContext(ligaId, actor);
     if (!liga) throw new NotFoundError('Liga');
-    const arbitro = await prisma.ligaArbitro.findFirst({ where: { id: arbitroId, ligaId } });
-    if (!arbitro) throw new NotFoundError('Árbitro');
-    if (liga.usaArbitros && arbitro.activo && data.activo === false) {
-      const remainingActive = await prisma.ligaArbitro.count({
-        where: { ligaId, activo: true, id: { not: arbitroId } },
+    return runInTransaction(async (tx) => {
+      const arbitro = await tx.ligaArbitro.findFirst({ where: { id: arbitroId, ligaId } });
+      if (!arbitro) throw new NotFoundError('Árbitro');
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'league-referee.update', capability: 'MANAGE_SHARED_RESOURCE', actor, leagueId: ligaId, resourceType: 'SHARED_RESOURCE',
       });
-      if (remainingActive < 2) {
-        throw new ValidationError('Una liga con árbitros habilitados debe conservar al menos 2 árbitros activos');
+      if (liga.usaArbitros && arbitro.activo && data.activo === false) {
+        const remainingActive = await tx.ligaArbitro.count({
+          where: { ligaId, activo: true, id: { not: arbitroId } },
+        });
+        if (remainingActive < 2) {
+          throw new ValidationError('Una liga con árbitros habilitados debe conservar al menos 2 árbitros activos');
+        }
       }
-    }
-    if (data.nombre && data.nombre !== arbitro.nombre) {
-      const existing = await prisma.ligaArbitro.findUnique({
-        where: { ligaId_nombre: { ligaId, nombre: data.nombre } },
-      });
-      if (existing) throw new ConflictError('Ya existe un árbitro con ese nombre en esta liga');
-    }
-    return prisma.ligaArbitro.update({ where: { id: arbitroId }, data });
+      if (data.nombre && data.nombre !== arbitro.nombre) {
+        const existing = await tx.ligaArbitro.findUnique({
+          where: { ligaId_nombre: { ligaId, nombre: data.nombre } },
+        });
+        if (existing) throw new ConflictError('Ya existe un árbitro con ese nombre en esta liga');
+      }
+      return tx.ligaArbitro.update({ where: { id: arbitroId }, data });
+    });
   },
 
   async deleteArbitro(ligaId: string, arbitroId: string, actor: AuthenticatedUser): Promise<void> {
     const liga = await ligaRepository.findManagementContext(ligaId, actor);
     if (!liga) throw new NotFoundError('Liga');
-    const arbitro = await prisma.ligaArbitro.findFirst({ where: { id: arbitroId, ligaId } });
-    if (!arbitro) throw new NotFoundError('Árbitro');
-    if (liga.usaArbitros && arbitro.activo) {
-      const remainingActive = await prisma.ligaArbitro.count({
-        where: { ligaId, activo: true, id: { not: arbitroId } },
+    await runInTransaction(async (tx) => {
+      const arbitro = await tx.ligaArbitro.findFirst({ where: { id: arbitroId, ligaId } });
+      if (!arbitro) throw new NotFoundError('Árbitro');
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'league-referee.delete', capability: 'MANAGE_SHARED_RESOURCE', actor, leagueId: ligaId, resourceType: 'SHARED_RESOURCE',
       });
-      if (remainingActive < 2) {
-        throw new ValidationError('Una liga con árbitros habilitados debe conservar al menos 2 árbitros activos');
+      if (liga.usaArbitros && arbitro.activo) {
+        const remainingActive = await tx.ligaArbitro.count({
+          where: { ligaId, activo: true, id: { not: arbitroId } },
+        });
+        if (remainingActive < 2) {
+          throw new ValidationError('Una liga con árbitros habilitados debe conservar al menos 2 árbitros activos');
+        }
       }
-    }
-    const matchCount = await prisma.partidoArbitro.count({ where: { arbitroId } });
-    if (matchCount > 0) {
-      await prisma.ligaArbitro.update({ where: { id: arbitroId }, data: { activo: false } });
-    } else {
-      await prisma.ligaArbitro.delete({ where: { id: arbitroId } });
-    }
+      const matchCount = await tx.partidoArbitro.count({ where: { arbitroId } });
+      if (matchCount > 0) {
+        await tx.ligaArbitro.update({ where: { id: arbitroId }, data: { activo: false } });
+      } else {
+        await tx.ligaArbitro.delete({ where: { id: arbitroId } });
+      }
+    });
   },
 };

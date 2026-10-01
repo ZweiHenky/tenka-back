@@ -5,6 +5,7 @@ import type { DivisionEquipoEntity, ReemplazoDivisionEquipoEntity } from './enti
 import type { AuthenticatedUser } from '../../types/auth';
 import { isAdmin } from '../../utils/authorization';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow';
 
 const replacementConflictMessage = 'Los equipos de la división cambiaron durante el reemplazo; vuelve a intentarlo';
 
@@ -45,6 +46,9 @@ export const divisionEquipoService = {
             select: { maxEquipos: true },
           });
           if (!division) throw new NotFoundError('División');
+          await observeResourceAccessShadowInTransaction(tx, {
+            operation: 'division-team.create', capability: 'MANAGE_DIVISION', actor, divisionId: data.divisionId, resourceType: 'DIVISION',
+          });
 
           const count = await tx.divisionEquipo.count({ where: { divisionId: data.divisionId } });
           if (count >= division.maxEquipos) {
@@ -65,14 +69,20 @@ export const divisionEquipoService = {
     saldoPendiente: string,
     actor: AuthenticatedUser,
   ): Promise<DivisionEquipoEntity> {
-    const updated = await divisionEquipoRepository.updateSaldoPendiente(
-      divisionId,
-      equipoId,
-      saldoPendiente,
-      actor,
-    );
-    if (!updated) throw new NotFoundError('Equipo de la división');
-    return { divisionId, equipoId, saldoPendiente };
+    return prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'division-team.balance.update', capability: 'MANAGE_DIVISION', actor, divisionId, resourceType: 'DIVISION',
+      });
+      const updated = await divisionEquipoRepository.updateSaldoPendiente(
+        divisionId,
+        equipoId,
+        saldoPendiente,
+        actor,
+        tx,
+      );
+      if (!updated) throw new NotFoundError('Equipo de la división');
+      return { divisionId, equipoId, saldoPendiente };
+    });
   },
 
   async reemplazo(
@@ -97,6 +107,9 @@ export const divisionEquipoService = {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         return await prisma.$transaction(async (tx) => {
+          await observeResourceAccessShadowInTransaction(tx, {
+            operation: 'division-team.replace', capability: 'MANAGE_DIVISION', actor, divisionId, resourceType: 'DIVISION',
+          });
           await acquireLeagueScheduleLock(tx, preflight.ligaId);
 
           const division = await tx.division.findFirst({
@@ -270,6 +283,9 @@ export const divisionEquipoService = {
   async delete(divisionId: string, equipoId: string, actor: AuthenticatedUser): Promise<void> {
     await assertDivisionOwner(divisionId, actor);
     await prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'division-team.delete', capability: 'MANAGE_DIVISION', actor, divisionId, resourceType: 'DIVISION',
+      });
       await divisionEquipoRepository.delete(divisionId, equipoId, tx);
       await tx.tablaPosicion.deleteMany({ where: { divisionId, equipoId } });
     });

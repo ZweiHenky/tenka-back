@@ -62,14 +62,16 @@ describe('gestion de canchas de liga', () => {
     expect(mocks.update.mock.calls[0][4]).toBe(true);
   });
 
-  it('toma el lock de liga antes de contar partidos y borrar una cancha', async () => {
+  it('evalua billing antes del lock de liga y luego cuenta partidos y borra una cancha', async () => {
     mocks.canchaFindFirst.mockResolvedValue(courts[0]);
     mocks.partidoCount.mockResolvedValue(0);
 
     await ligaService.deleteCancha('liga-1', 'court-1', owner);
 
     expect(mocks.executeRawUnsafe).toHaveBeenCalledWith(expect.stringContaining('pg_advisory_xact_lock'), 'liga-1');
+    const billingOrder = mocks.resourceAccessObserveInTransaction.mock.invocationCallOrder[0];
     const lockOrder = mocks.executeRawUnsafe.mock.invocationCallOrder[0];
+    expect(billingOrder).toBeLessThan(lockOrder);
     expect(lockOrder).toBeLessThan(mocks.partidoCount.mock.invocationCallOrder[0]);
     expect(lockOrder).toBeLessThan(mocks.divisionCanchaHorarioCount.mock.invocationCallOrder[0]);
     expect(lockOrder).toBeLessThan(mocks.canchaDelete.mock.invocationCallOrder[0]);
@@ -86,7 +88,7 @@ describe('gestion de canchas de liga', () => {
     expect(mocks.canchaDelete).not.toHaveBeenCalled();
   });
 
-  it('toma el lock de liga antes de validar la desactivacion de una cancha', async () => {
+  it('evalua billing antes del lock de liga y valida despues la desactivacion de una cancha', async () => {
     mocks.canchaFindFirst.mockResolvedValue(courts[0]);
     mocks.canchaCount.mockResolvedValue(2);
     mocks.canchaUpdate.mockResolvedValue({ ...courts[0], activa: false });
@@ -94,6 +96,8 @@ describe('gestion de canchas de liga', () => {
     await ligaService.updateCancha('liga-1', 'court-1', { activa: false }, owner);
 
     expect(mocks.executeRawUnsafe).toHaveBeenCalledWith(expect.stringContaining('pg_advisory_xact_lock'), 'liga-1');
+    expect(mocks.resourceAccessObserveInTransaction.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.executeRawUnsafe.mock.invocationCallOrder[0]);
     expect(mocks.executeRawUnsafe.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.canchaCount.mock.invocationCallOrder[0]);
   });

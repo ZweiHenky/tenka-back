@@ -84,7 +84,7 @@ describe('divisionEquipoService query and saldo update', () => {
       'division-1', 'equipo-1', '10.50', owner,
     )).resolves.toEqual({ divisionId: 'division-1', equipoId: 'equipo-1', saldoPendiente: '10.50' });
     expect(mocks.updateSaldoPendiente).toHaveBeenCalledWith(
-      'division-1', 'equipo-1', '10.50', owner,
+      'division-1', 'equipo-1', '10.50', owner, tx,
     );
   });
 

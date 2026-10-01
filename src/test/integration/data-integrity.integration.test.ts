@@ -9,6 +9,7 @@ import { ligaService } from '../../modules/liga/service';
 import { partidoService } from '../../modules/partido/service';
 import { equipoService } from '../../modules/equipo/service';
 import { acquireAccountQuotaLock } from '../../utils/accountQuota';
+import { acquireBillingAccountLock, acquireBillingOwnerBootstrapLock } from '../../modules/billing/service';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
 import type { AuthenticatedUser } from '../../types/auth';
 import { getIntegrationPgConnectionString, INTEGRATION_SCHEMA } from './database';
@@ -172,6 +173,7 @@ async function cleanupFixture(): Promise<void> {
   await prisma.liga.deleteMany({ where: { id: ids.liga } });
   await prisma.equipo.deleteMany({ where: { id: { in: [...ids.teams] } } });
   await prisma.jugador.deleteMany({ where: { id: ids.player } });
+  await prisma.billingAccount.deleteMany({ where: { id: 'billing_it-integrity-handoff' } });
   await prisma.user.deleteMany({ where: { id: ids.user } });
   await prisma.ubicacion.deleteMany({ where: { id: ids.ubicacion } });
   await Promise.all([
@@ -418,6 +420,64 @@ describe('transactional data integrity against PostgreSQL', () => {
       await Promise.allSettled([blockerTransaction, blocker.$disconnect()]);
     }
   });
+
+  test('a bootstrap waiter adopts the stable account lock after account creation', async () => {
+    const creator = newPrismaClient('it-integrity-billing-bootstrap-creator');
+    const waiter = newPrismaClient('it-integrity-billing-bootstrap-waiter');
+    const contender = newPrismaClient('it-integrity-billing-account-contender');
+    const billingAccountId = 'billing_it-integrity-handoff';
+    let releaseCreator!: () => void;
+    let releaseWaiter!: () => void;
+    const creatorMayCommit = new Promise<void>((resolve) => { releaseCreator = resolve; });
+    const waiterMayCommit = new Promise<void>((resolve) => { releaseWaiter = resolve; });
+    let creatorLocked!: () => void;
+    let waiterLocked!: () => void;
+    const creatorHasBootstrap = new Promise<void>((resolve) => { creatorLocked = resolve; });
+    const waiterHasAccount = new Promise<void>((resolve) => { waiterLocked = resolve; });
+
+    const creatorTransaction = creator.$transaction(async (tx) => {
+      await acquireBillingOwnerBootstrapLock(tx, ids.user);
+      creatorLocked();
+      await creatorMayCommit;
+      await tx.billingAccount.create({
+        data: { id: billingAccountId, userId: ids.user, ownerUserIdSnapshot: ids.user },
+      });
+    });
+
+    let waiterTransaction: Promise<void> | undefined;
+    let contenderTransaction: Promise<void> | undefined;
+    try {
+      await creatorHasBootstrap;
+      waiterTransaction = waiter.$transaction(async (tx) => {
+        await acquireAccountQuotaLock(tx, ids.user);
+        waiterLocked();
+        await waiterMayCommit;
+      });
+      await expect(waitForBlockedAdvisoryLock()).resolves.toBe(true);
+
+      releaseCreator();
+      await creatorTransaction;
+      await waiterHasAccount;
+
+      contenderTransaction = contender.$transaction(async (tx) => {
+        await acquireBillingAccountLock(tx, billingAccountId);
+      });
+      await expect(waitForBlockedAdvisoryLock()).resolves.toBe(true);
+      releaseWaiter();
+      await Promise.all([waiterTransaction, contenderTransaction]);
+    } finally {
+      releaseCreator();
+      releaseWaiter();
+      await Promise.allSettled([
+        creatorTransaction,
+        ...(waiterTransaction ? [waiterTransaction] : []),
+        ...(contenderTransaction ? [contenderTransaction] : []),
+        creator.$disconnect(),
+        waiter.$disconnect(),
+        contender.$disconnect(),
+      ]);
+    }
+  }, 30_000);
 
   test('activation and reset cannot consume the same active-division slot', async () => {
     const draftStateId = 'it-quota-draft-state';

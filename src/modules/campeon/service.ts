@@ -7,6 +7,7 @@ import { goleadoresService } from '../goleadores/service';
 import { campeonRepository } from './repository';
 import type { CampeonEntity, CampeonatoEquipoEntity, CampeonatoJugadorEntity, CampeonHistorialEntity } from './entity';
 import type { AssignInput } from './validator';
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow';
 
 /**
  * Autoriza y de paso devuelve lo que hay que congelar en el título: los snapshots los escribe el
@@ -77,21 +78,31 @@ export const campeonService = {
       goleo = { jugadorId: fila.jugadorId, jugadorNombre: fila.nombre, jugadorFoto: fila.foto, jugadorGoles: fila.goles };
     }
 
-    return campeonRepository.saveVigente(divisionId, {
-      divisionNombre: division.nombre,
-      ligaId: division.liga.id,
-      ligaNombre: division.liga.nombre,
-      ligaLogo: division.liga.logo,
-      divisionEstadoCodigo: division.estadoLiga.codigo,
-      equipoId: data.equipoId,
-      equipoNombre: inscripcion.equipo.nombre,
-      equipoLogo: inscripcion.equipo.logo,
-      ...goleo,
+    return prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'champion.assign', capability: 'MANAGE_DIVISION', actor, divisionId, resourceType: 'DIVISION',
+      });
+      return campeonRepository.saveVigente(divisionId, {
+        divisionNombre: division.nombre,
+        ligaId: division.liga.id,
+        ligaNombre: division.liga.nombre,
+        ligaLogo: division.liga.logo,
+        divisionEstadoCodigo: division.estadoLiga.codigo,
+        equipoId: data.equipoId,
+        equipoNombre: inscripcion.equipo.nombre,
+        equipoLogo: inscripcion.equipo.logo,
+        ...goleo,
+      }, tx);
     });
   },
 
   async remove(divisionId: string, actor: AuthenticatedUser): Promise<void> {
     await loadDivisionForWrite(divisionId, actor);
-    await campeonRepository.deleteByDivision(divisionId);
+    await prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'champion.remove', capability: 'MANAGE_DIVISION', actor, divisionId, resourceType: 'DIVISION',
+      });
+      await tx.divisionCampeon.deleteMany({ where: { divisionId, archivadoEn: null } });
+    });
   },
 };

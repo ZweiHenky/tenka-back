@@ -35,6 +35,9 @@ const mocks = vi.hoisted(() => ({
   divisionCanchaHorarioDeleteMany: vi.fn(),
   acquireAccountQuotaLock: vi.fn(),
   assertAccountQuotaDelta: vi.fn(),
+  assertMigrationAllowsResourceCreation: vi.fn(),
+  closeFreeManagementGrantForDeletedResource: vi.fn(),
+  resourceAccessObserveInTransaction: vi.fn(),
 }));
 
 vi.mock('./repository', () => ({
@@ -101,6 +104,15 @@ vi.mock('../media/service', () => ({
 vi.mock('../../utils/accountQuota', () => ({
   acquireAccountQuotaLock: mocks.acquireAccountQuotaLock,
   assertAccountQuotaDelta: mocks.assertAccountQuotaDelta,
+}));
+
+vi.mock('../billing/service', () => ({
+  assertMigrationAllowsResourceCreation: mocks.assertMigrationAllowsResourceCreation,
+  closeFreeManagementGrantForDeletedResource: mocks.closeFreeManagementGrantForDeletedResource,
+}));
+
+vi.mock('../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: mocks.resourceAccessObserveInTransaction,
 }));
 
 export const owner: AuthenticatedUser = { id: 'user-1', email: 'owner@test.com', rol: 'LIGA' };

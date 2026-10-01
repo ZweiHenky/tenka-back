@@ -8,11 +8,13 @@ import { rondaPlayoffService } from '../ronda-playoff/service';
 import type { PartidoEntity } from './entity';
 import { acquireLeagueScheduleLock } from '../../utils/leagueScheduleLock';
 import { validatePlayoffFinalizationSchedule } from './playoffFinalization';
-import { writeResultInTransaction } from './resultWriter';
+import { gateResultWriteInTransaction, writeResultInTransaction } from './resultWriter';
 import type { ResultInput } from './validator';
 import type { Pagination } from '../../utils/pagination';
 import { collectScheduleChanges, enqueueScheduleChange } from '../notification/scheduleChangeOutbox';
 import { signalBackgroundJob } from '../../workers/jobSignals';
+import { observeResourceAccessShadowInTransaction } from '../billing/resourceAccessShadow';
+import type { Prisma } from '../../generated/prisma/client';
 
 const pairKey = (a: string, b: string) => a < b ? `${a}|${b}` : `${b}|${a}`
 
@@ -148,7 +150,6 @@ export const partidoService = {
     const ctx = await partidoRepository.findAuthorizationContext(id)
     if (!ctx) throw new NotFoundError('Partido')
     assertOwnerOrAdmin(actor, ctx.ligaUserId, 'Partido')
-
     const replacesLocal = data.equipoLocalId !== undefined
     const replacesVisitor = data.equipoVisitanteId !== undefined
     if (replacesLocal || replacesVisitor) {
@@ -165,6 +166,9 @@ export const partidoService = {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
           const updated = await prisma.$transaction(async (tx) => {
+            await observeResourceAccessShadowInTransaction(tx, {
+              operation: 'match.update', capability: 'MANAGE_DIVISION', actor, divisionId: ctx.divisionId!, resourceType: 'DIVISION',
+            })
             await acquireLeagueScheduleLock(tx, ctx.ligaId)
 
             const lockedCtx = await partidoRepository.findAuthorizationContext(id, tx)
@@ -177,6 +181,9 @@ export const partidoService = {
             if (!lockedCtx.jornadaId || lockedCtx.rondaPlayoffId || !lockedCtx.divisionId || lockedCtx.tipoPartido !== 'REGULAR') {
               throw new ValidationError('Solo se pueden reemplazar equipos en partidos regulares de jornada')
             }
+            await observeResourceAccessShadowInTransaction(tx, {
+              operation: 'match.update', capability: 'MANAGE_DIVISION', actor, divisionId: lockedCtx.divisionId, resourceType: 'DIVISION',
+            })
 
             const linkedTeams = await tx.divisionEquipo.count({
               where: { divisionId: lockedCtx.divisionId, equipoId: incomingId },
@@ -379,6 +386,9 @@ export const partidoService = {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
           return await prisma.$transaction(async (tx) => {
+            await observeResourceAccessShadowInTransaction(tx, {
+              operation: 'match.update', capability: 'MANAGE_DIVISION', actor, divisionId: ctx.divisionId!, resourceType: 'DIVISION',
+            })
             await acquireLeagueScheduleLock(tx, ctx.ligaId)
             const lockedCtx = await partidoRepository.findAuthorizationContext(id, tx)
             if (!lockedCtx) throw new NotFoundError('Partido')
@@ -406,6 +416,11 @@ export const partidoService = {
                 throw new ValidationError('El partido de eliminatoria no puede terminar empatado. Define un ganador por penales.')
               }
             }
+            if (lockedCtx.divisionId) {
+              await observeResourceAccessShadowInTransaction(tx, {
+                operation: 'match.update', capability: 'MANAGE_DIVISION', actor, divisionId: lockedCtx.divisionId, resourceType: 'DIVISION',
+              })
+            }
             const playoffData = data.estado === 'PROGRAMADO'
               ? { ...data, golesLocal: 0, golesVisitante: 0, penalesLocal: null, penalesVisitante: null, version: { increment: 1 } }
               : data.estado ? { ...data, version: { increment: 1 } } : data
@@ -430,6 +445,9 @@ export const partidoService = {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
           return await prisma.$transaction(async (tx) => {
+            await observeResourceAccessShadowInTransaction(tx, {
+              operation: 'match.update', capability: 'MANAGE_DIVISION', actor, divisionId: ctx.divisionId!, resourceType: 'DIVISION',
+            })
             await acquireLeagueScheduleLock(tx, ctx.ligaId)
             const lockedCtx = await partidoRepository.findAuthorizationContext(id, tx)
             if (!lockedCtx) throw new NotFoundError('Partido')
@@ -442,6 +460,11 @@ export const partidoService = {
               if (!allowedTargets.includes(data.estado as string)) {
                 throw new ValidationError('No se puede modificar un partido ya finalizado')
               }
+            }
+            if (lockedCtx.divisionId) {
+              await observeResourceAccessShadowInTransaction(tx, {
+                operation: 'match.update', capability: 'MANAGE_DIVISION', actor, divisionId: lockedCtx.divisionId, resourceType: 'DIVISION',
+              })
             }
 
             const transactionalData = { ...data }
@@ -469,7 +492,13 @@ export const partidoService = {
       }
     }
 
-    return this._applyResult(id, data, ctx)
+    if (!ctx.divisionId) return this._applyResult(id, data, ctx)
+    return prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'match.update', capability: 'MANAGE_DIVISION', actor, divisionId: ctx.divisionId!, resourceType: 'DIVISION',
+      })
+      return this._applyResult(id, data, ctx, tx)
+    }, { isolationLevel: 'Serializable' })
   },
 
   async updateResult(id: string, data: ResultInput, actor: AuthenticatedUser) {
@@ -480,12 +509,13 @@ export const partidoService = {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         return await prisma.$transaction(async (tx) => {
+          await gateResultWriteInTransaction(tx, initial.divisionId!, actor)
           await acquireLeagueScheduleLock(tx, initial.ligaId)
           const locked = await partidoRepository.findAuthorizationContext(id, tx)
           if (!locked) throw new NotFoundError('Partido')
           assertOwnerOrAdmin(actor, locked.ligaUserId, 'Partido')
           if (locked.ligaId !== initial.ligaId) throw new ConflictError('El partido cambió durante la actualización; vuelve a intentarlo')
-          return writeResultInTransaction(tx, id, data)
+          return writeResultInTransaction(tx, id, data, actor)
         }, { isolationLevel: 'ReadCommitted' })
       } catch (error: any) {
         if (error?.code === 'P2034' && attempt < 2) continue
@@ -496,7 +526,7 @@ export const partidoService = {
     throw new ConflictError('El resultado cambió durante la actualización; vuelve a intentarlo')
   },
 
-  async _applyResult(id: string, data: Record<string, unknown>, ctx: { id: string; ligaUserId: string; estado: string | null; golesLocal: number; golesVisitante: number; penalesLocal: number | null; penalesVisitante: number | null; jornadaId: string | null; rondaPlayoffId: string | null }): Promise<PartidoEntity> {
+  async _applyResult(id: string, data: Record<string, unknown>, ctx: { id: string; ligaUserId: string; estado: string | null; golesLocal: number; golesVisitante: number; penalesLocal: number | null; penalesVisitante: number | null; jornadaId: string | null; rondaPlayoffId: string | null }, tx?: Prisma.TransactionClient): Promise<PartidoEntity> {
     if (data.estado === 'FINALIZADO' && ctx.rondaPlayoffId) {
       const golesLocal = (data.golesLocal ?? ctx.golesLocal) as number
       const golesVisitante = (data.golesVisitante ?? ctx.golesVisitante) as number
@@ -518,13 +548,13 @@ export const partidoService = {
       data.penalesVisitante = null
     }
 
-    const partido = await partidoRepository.update(id, data);
+    const partido = await partidoRepository.update(id, data, tx);
 
     const wasFinalizado = oldEstado === 'FINALIZADO';
     const nowFinalizado = partido.estado === 'FINALIZADO';
 
     if ((nowFinalizado || wasFinalizado) && partido.jornadaId) {
-      await this._recalcularDivision(partido.jornadaId);
+      await this._recalcularDivision(partido.jornadaId, tx);
     }
 
     return partido;
@@ -534,17 +564,24 @@ export const partidoService = {
     const ctx = await partidoRepository.findAuthorizationContext(id);
     if (!ctx) throw new NotFoundError('Partido');
     assertOwnerOrAdmin(actor, ctx.ligaUserId, 'Partido');
-
     if (ctx.rondaPlayoffId) {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
           return await prisma.$transaction(async (tx) => {
+            await observeResourceAccessShadowInTransaction(tx, {
+              operation: 'match.delete', capability: 'MANAGE_DIVISION', actor, divisionId: ctx.divisionId!, resourceType: 'DIVISION',
+            })
             await acquireLeagueScheduleLock(tx, ctx.ligaId)
             const lockedCtx = await partidoRepository.findAuthorizationContext(id, tx)
             if (!lockedCtx) throw new NotFoundError('Partido')
             assertOwnerOrAdmin(actor, lockedCtx.ligaUserId, 'Partido')
             if (!lockedCtx.rondaPlayoffId || lockedCtx.ligaId !== ctx.ligaId) {
               throw new ConflictError('El partido cambió durante la eliminación; vuelve a intentarlo')
+            }
+            if (lockedCtx.divisionId) {
+              await observeResourceAccessShadowInTransaction(tx, {
+                operation: 'match.delete', capability: 'MANAGE_DIVISION', actor, divisionId: lockedCtx.divisionId, resourceType: 'DIVISION',
+              })
             }
             const partido = await partidoRepository.delete(id, tx)
             await rondaPlayoffService.syncAdvancement(tx, lockedCtx.rondaPlayoffId)
@@ -563,12 +600,20 @@ export const partidoService = {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
           return await prisma.$transaction(async (tx) => {
+            await observeResourceAccessShadowInTransaction(tx, {
+              operation: 'match.delete', capability: 'MANAGE_DIVISION', actor, divisionId: ctx.divisionId!, resourceType: 'DIVISION',
+            })
             await acquireLeagueScheduleLock(tx, ctx.ligaId)
             const lockedCtx = await partidoRepository.findAuthorizationContext(id, tx)
             if (!lockedCtx) throw new NotFoundError('Partido')
             assertOwnerOrAdmin(actor, lockedCtx.ligaUserId, 'Partido')
             if (!lockedCtx.jornadaId || lockedCtx.rondaPlayoffId || lockedCtx.ligaId !== ctx.ligaId) {
               throw new ConflictError('El partido cambió durante la eliminación; vuelve a intentarlo')
+            }
+            if (lockedCtx.divisionId) {
+              await observeResourceAccessShadowInTransaction(tx, {
+                operation: 'match.delete', capability: 'MANAGE_DIVISION', actor, divisionId: lockedCtx.divisionId, resourceType: 'DIVISION',
+              })
             }
             const partido = await partidoRepository.delete(id, tx)
             if (lockedCtx.estado === 'FINALIZADO') {
@@ -583,7 +628,13 @@ export const partidoService = {
       }
     }
 
-    return partidoRepository.delete(id);
+    if (!ctx.divisionId) return partidoRepository.delete(id);
+    return prisma.$transaction(async (tx) => {
+      await observeResourceAccessShadowInTransaction(tx, {
+        operation: 'match.delete', capability: 'MANAGE_DIVISION', actor, divisionId: ctx.divisionId!, resourceType: 'DIVISION',
+      });
+      return partidoRepository.delete(id, tx);
+    }, { isolationLevel: 'Serializable' });
   },
 
   async _recalcularDivision(jornadaId: string, tx?: import('../../generated/prisma/client').Prisma.TransactionClient): Promise<void> {

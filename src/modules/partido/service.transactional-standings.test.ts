@@ -5,10 +5,16 @@ vi.mock('./repository', async () => (await import('./service.test-mocks')).repos
 vi.mock('../tabla-posicion/service', async () => (await import('./service.test-mocks')).tablaPosicionModuleMock);
 vi.mock('../ronda-playoff/service', async () => (await import('./service.test-mocks')).rondaPlayoffModuleMock);
 
-const resultWriterMocks = vi.hoisted(() => ({ writeResultInTransaction: vi.fn() }));
+const resultWriterMocks = vi.hoisted(() => ({ gateResultWriteInTransaction: vi.fn(), writeResultInTransaction: vi.fn() }));
 vi.mock('./resultWriter', () => ({
+  gateResultWriteInTransaction: resultWriterMocks.gateResultWriteInTransaction,
   getResultContext: vi.fn(),
   writeResultInTransaction: resultWriterMocks.writeResultInTransaction,
+}));
+
+const billingMocks = vi.hoisted(() => ({ observe: vi.fn() }));
+vi.mock('../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: billingMocks.observe,
 }));
 
 import {
@@ -24,6 +30,8 @@ import {
 
 beforeEach(() => {
   resetServiceTestHarness();
+  billingMocks.observe.mockReset().mockResolvedValue(undefined);
+  resultWriterMocks.gateResultWriteInTransaction.mockReset().mockResolvedValue(undefined);
   resultWriterMocks.writeResultInTransaction.mockReset().mockResolvedValue(partido);
 });
 
@@ -34,6 +42,11 @@ describe('partidoService transactional standings orchestration', () => {
     }, owner);
 
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'ReadCommitted' });
+    expect(vi.mocked(partidoRepository.findAuthorizationContext).mock.invocationCallOrder[0])
+      .toBeLessThan(resultWriterMocks.gateResultWriteInTransaction.mock.invocationCallOrder[0]);
+    expect(resultWriterMocks.gateResultWriteInTransaction).toHaveBeenCalledWith(prisma, 'division-1', owner);
+    expect(resultWriterMocks.gateResultWriteInTransaction.mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(prisma.$executeRawUnsafe).mock.invocationCallOrder[0]);
     expect(vi.mocked(prisma.$executeRawUnsafe).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(partidoRepository.findAuthorizationContext).mock.invocationCallOrder[1]);
     expect(vi.mocked(partidoRepository.findAuthorizationContext).mock.invocationCallOrder[1])
@@ -64,6 +77,11 @@ describe('partidoService transactional standings orchestration', () => {
 
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
     expect(tx.$executeRawUnsafe).toHaveBeenCalledWith('SELECT pg_advisory_xact_lock(hashtext($1))', 'liga-1');
+    expect(billingMocks.observe).toHaveBeenCalledTimes(2);
+    expect(billingMocks.observe.mock.invocationCallOrder[0])
+      .toBeLessThan(tx.$executeRawUnsafe.mock.invocationCallOrder[0]);
+    expect(tx.$executeRawUnsafe.mock.invocationCallOrder[0])
+      .toBeLessThan(billingMocks.observe.mock.invocationCallOrder[1]);
     expect(partidoRepository.findAuthorizationContext).toHaveBeenNthCalledWith(2, 'partido-1', tx);
     expect(partidoRepository.update).toHaveBeenCalledWith('partido-1', { estado: 'FINALIZADO', golesLocal: 2, version: { increment: 1 } }, tx);
     expect(tablaPosicionService.recalcular).toHaveBeenCalledWith('division-1', tx);
@@ -137,6 +155,9 @@ describe('partidoService transactional standings orchestration', () => {
     expect(partidoRepository.delete).toHaveBeenCalledWith('partido-1', prisma);
     expect(tablaPosicionService.recalcular).toHaveBeenCalledWith('division-1', prisma);
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
+    expect(billingMocks.observe).toHaveBeenCalledTimes(2);
+    expect(billingMocks.observe.mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(prisma.$executeRawUnsafe).mock.invocationCallOrder[0]);
     expect(vi.mocked(partidoRepository.delete).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(tablaPosicionService.recalcular).mock.invocationCallOrder[0]);
   });

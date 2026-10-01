@@ -11,6 +11,11 @@ const mocks = vi.hoisted(() => ({
   accessUpdate: vi.fn(),
   partidoFindUnique: vi.fn(),
   partidoUpdate: vi.fn(),
+  authorizationContext: vi.fn(),
+  accessUpsert: vi.fn(),
+  accessFindFirst: vi.fn(),
+  accessDelete: vi.fn(),
+  observe: vi.fn(),
 }))
 
 vi.mock('../../config/database', () => ({
@@ -27,9 +32,12 @@ vi.mock('./repository', () => ({
   },
 }))
 vi.mock('../partido/repository', () => ({
-  partidoRepository: { findById: mocks.partidoFindById },
+  partidoRepository: { findById: mocks.partidoFindById, findAuthorizationContext: mocks.authorizationContext },
   exposeAnotacionRead: (annotation: any) => annotation,
   exposeParticipacionRead: (participacion: any) => participacion,
+}))
+vi.mock('../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: mocks.observe,
 }))
 vi.mock('../tabla-posicion/service', () => ({ tablaPosicionService: {} }))
 vi.mock('../ronda-playoff/service', () => ({ rondaPlayoffService: {} }))
@@ -59,6 +67,36 @@ const basePartido = {
   jornada: null,
   rondaPlayoff: null,
 }
+
+describe('refereeAccessService link writes', () => {
+  const owner = { id: 'owner-1', email: 'owner@test.com', rol: 'LIGA' as const }
+  const tx = {
+    partidoRefereeAccess: {
+      upsert: mocks.accessUpsert,
+      findFirst: mocks.accessFindFirst,
+      delete: mocks.accessDelete,
+    },
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.transaction.mockImplementation(async (callback) => callback(tx))
+    mocks.authorizationContext.mockResolvedValue({ ligaUserId: owner.id, divisionId: 'division-1' })
+  })
+
+  it('gates link creation in the same transaction before upsert', async () => {
+    await refereeAccessService.createAccess('partido-1', owner)
+    expect(mocks.observe).toHaveBeenCalledWith(tx, expect.objectContaining({ operation: 'referee-access.create', divisionId: 'division-1' }))
+    expect(mocks.observe.mock.invocationCallOrder[0]).toBeLessThan(mocks.accessUpsert.mock.invocationCallOrder[0])
+  })
+
+  it('gates revocation in the same transaction before deleting', async () => {
+    mocks.accessFindFirst.mockResolvedValue({ id: 'access-1' })
+    await refereeAccessService.revokeAccess('partido-1', owner)
+    expect(mocks.observe).toHaveBeenCalledWith(tx, expect.objectContaining({ operation: 'referee-access.revoke', divisionId: 'division-1' }))
+    expect(mocks.observe.mock.invocationCallOrder[0]).toBeLessThan(mocks.accessDelete.mock.invocationCallOrder[0])
+  })
+})
 
 describe('refereeAccessService.getPartidoByToken', () => {
   beforeEach(() => {
@@ -230,10 +268,21 @@ describe('refereeAccessService.updateResultByToken', () => {
       'SELECT pg_advisory_xact_lock(hashtext($1))',
       'liga-1',
     )
-    expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'ReadCommitted' })
+    expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: 'ReadCommitted', timeout: 30_000,
+    })
+    expect(mocks.observe).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      operation: 'referee.result.update',
+      capability: 'WRITE_RESULT',
+      divisionId: 'division-1',
+    }))
+    expect(mocks.accessFindUnique.mock.invocationCallOrder[1])
+      .toBeLessThan(mocks.observe.mock.invocationCallOrder[0])
+    expect(mocks.observe.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.executeRawUnsafe.mock.invocationCallOrder[0])
     expect(mocks.partidoFindUnique).toHaveBeenCalledTimes(3)
     expect(mocks.executeRawUnsafe.mock.invocationCallOrder[0])
-      .toBeLessThan(mocks.accessFindUnique.mock.invocationCallOrder[1])
+      .toBeLessThan(mocks.accessFindUnique.mock.invocationCallOrder[2])
     expect(mocks.executeRawUnsafe.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.partidoFindUnique.mock.invocationCallOrder[1])
     expect(mocks.partidoUpdate).not.toHaveBeenCalled()

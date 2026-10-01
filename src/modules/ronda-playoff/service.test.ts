@@ -20,9 +20,13 @@ const mocks = vi.hoisted(() => ({
   campeonUpdateMany: vi.fn(),
   participacionDeleteMany: vi.fn(),
   executeRaw: vi.fn(),
+  observe: vi.fn(),
 }));
 
 vi.mock('./repository', () => ({ rondaPlayoffRepository: mocks }));
+vi.mock('../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: mocks.observe,
+}));
 vi.mock('../../config/database', () => ({
   prisma: {
     division: { findFirst: mocks.divisionFindFirst, findUnique: mocks.divisionFindUnique },
@@ -117,6 +121,7 @@ describe('rondaPlayoffService batch writes', () => {
     mocks.jornadaDeleteMany.mockResolvedValue({ count: 0 });
     mocks.campeonUpdateMany.mockResolvedValue({ count: 0 });
     mocks.executeRaw.mockResolvedValue(0);
+    mocks.observe.mockResolvedValue(undefined);
   });
 
   it('generates all rounds and first-round matches atomically within a four-query budget', async () => {
@@ -129,8 +134,11 @@ describe('rondaPlayoffService batch writes', () => {
     const result = await rondaPlayoffService.generate('division-1', 8, owner);
 
     expect(result.map((round) => round.id)).toEqual(['quarters', 'semis', 'final']);
-    expect(mocks.divisionFindFirst).toHaveBeenCalledTimes(1);
-    expect(mocks.divisionFindUnique).toHaveBeenCalledWith({ where: { id: 'division-1' }, select: { ligaId: true } });
+    expect(mocks.divisionFindFirst).toHaveBeenCalledTimes(2);
+    expect(mocks.divisionFindFirst).toHaveBeenCalledWith({
+      where: { id: 'division-1', liga: { userId: owner.id } },
+      select: { ligaId: true },
+    });
     expect(mocks.divisionFindFirst).toHaveBeenCalledWith({
       where: { id: 'division-1', liga: { userId: owner.id } },
       select: {
@@ -154,6 +162,8 @@ describe('rondaPlayoffService batch writes', () => {
       },
     });
     expect(mocks.transaction).toHaveBeenCalledTimes(1);
+    expect(mocks.divisionFindFirst.mock.invocationCallOrder[0]).toBeLessThan(mocks.observe.mock.invocationCallOrder[0]);
+    expect(mocks.observe.mock.invocationCallOrder[0]).toBeLessThan(mocks.executeRaw.mock.invocationCallOrder[0]);
     expect(mocks.roundCreateManyAndReturn).toHaveBeenCalledTimes(1);
     expect(mocks.partidoCreateMany).toHaveBeenCalledTimes(1);
     expect(mocks.partidoCreateMany).toHaveBeenCalledWith({
@@ -426,12 +436,14 @@ describe('rondaPlayoffService batch writes', () => {
 
   it('deletes an individual round only when it is the latest round', async () => {
     mocks.roundFindUnique
-      .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1' } })
+      .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1', liga: { userId: owner.id } } })
       .mockResolvedValueOnce({ orden: 2, division: { ligaId: 'league-1', liga: { userId: owner.id }, rondasPlayoff: [{ id: 'latest' }] } });
 
     await rondaPlayoffService.delete('latest', owner);
 
     expect(mocks.roundDelete).toHaveBeenCalledWith({ where: { id: 'latest' } });
+    expect(mocks.roundFindUnique.mock.invocationCallOrder[0]).toBeLessThan(mocks.observe.mock.invocationCallOrder[0]);
+    expect(mocks.observe.mock.invocationCallOrder[0]).toBeLessThan(mocks.executeRaw.mock.invocationCallOrder[0]);
     expect(mocks.executeRaw.mock.invocationCallOrder[0]).toBeLessThan(mocks.roundDelete.mock.invocationCallOrder[0]);
   });
 
@@ -451,6 +463,8 @@ describe('rondaPlayoffService batch writes', () => {
     it('borra las jornadas que quedaron sin partidos al borrar las eliminatorias', async () => {
       await rondaPlayoffService.deleteByDivision('division-1', owner)
 
+      expect(mocks.divisionFindUnique.mock.invocationCallOrder[0]).toBeLessThan(mocks.observe.mock.invocationCallOrder[0])
+      expect(mocks.observe.mock.invocationCallOrder[0]).toBeLessThan(mocks.executeRaw.mock.invocationCallOrder[0])
       expect(mocks.roundDeleteMany).toHaveBeenCalledWith({ where: { divisionId: 'division-1' } })
       expect(mocks.jornadaDeleteMany).toHaveBeenCalledWith(sinContenido)
       // Después de las rondas: antes no habría ninguna jornada sin contenido todavía.
@@ -474,7 +488,7 @@ describe('rondaPlayoffService batch writes', () => {
 
     it('también limpia al borrar una sola ronda', async () => {
       mocks.roundFindUnique
-        .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1' } })
+        .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1', liga: { userId: owner.id } } })
         .mockResolvedValueOnce({ orden: 2, division: { ligaId: 'league-1', liga: { userId: owner.id }, rondasPlayoff: [{ id: 'latest' }] } })
 
       await rondaPlayoffService.delete('latest', owner)
@@ -507,7 +521,7 @@ describe('rondaPlayoffService batch writes', () => {
 
     it('borrar la última ronda tampoco lo toca', async () => {
       mocks.roundFindUnique
-        .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1' } })
+        .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1', liga: { userId: owner.id } } })
         .mockResolvedValueOnce({ orden: 2, division: { ligaId: 'league-1', liga: { userId: owner.id }, rondasPlayoff: [{ id: 'latest' }] } })
 
       await rondaPlayoffService.delete('latest', owner)
@@ -518,7 +532,7 @@ describe('rondaPlayoffService batch writes', () => {
 
   it('rejects deletion of a non-latest round without deleting it', async () => {
     mocks.roundFindUnique
-      .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1' } })
+      .mockResolvedValueOnce({ divisionId: 'division-1', division: { ligaId: 'league-1', liga: { userId: owner.id } } })
       .mockResolvedValueOnce({ orden: 1, division: { ligaId: 'league-1', liga: { userId: owner.id }, rondasPlayoff: [{ id: 'latest' }] } });
 
     await expect(rondaPlayoffService.delete('earlier', owner)).rejects.toMatchObject({ statusCode: 409 });

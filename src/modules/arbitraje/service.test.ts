@@ -14,6 +14,10 @@ const db = vi.hoisted(() => ({
   assignmentsDeleteMany: vi.fn(),
   assignmentsCreateMany: vi.fn(),
   transaction: vi.fn(),
+  observe: vi.fn(),
+}));
+vi.mock('../billing/resourceAccessShadow', () => ({
+  observeResourceAccessShadowInTransaction: db.observe,
 }));
 
 vi.mock('../../config/database', () => ({
@@ -38,7 +42,7 @@ const admin = { id: 'admin-1', email: 'admin@test.com', rol: 'ADMINISTRADOR' as 
 beforeEach(() => {
   vi.clearAllMocks();
   db.transaction.mockImplementation(async (callback) => callback({
-    tandaArbitral: { create: db.tandaCreate },
+    tandaArbitral: { create: db.tandaCreate, delete: db.tandaDelete },
     tandaArbitralPartido: { findMany: db.linksFindMany, createMany: db.linksCreateMany },
     partidoArbitro: { deleteMany: db.assignmentsDeleteMany, createMany: db.assignmentsCreateMany },
   }));
@@ -64,6 +68,8 @@ describe('direct league assignments', () => {
     expect(db.linksCreateMany).toHaveBeenCalledWith({ data: [{ tandaId: 'batch-1', partidoId: 'm1' }] });
     expect(db.assignmentsDeleteMany).toHaveBeenCalledWith({ where: { partidoId: { in: ['m1'] } } });
     expect(db.assignmentsCreateMany).toHaveBeenCalledWith({ data: [{ partidoId: 'm1', arbitroId: 'a' }] });
+    expect(db.observe).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ operation: 'referee-batch.replace', leagueId: 'league-1' }));
+    expect(db.observe.mock.invocationCallOrder[0]).toBeLessThan(db.tandaCreate.mock.invocationCallOrder[0]);
     expect(result).toMatchObject({ asignacionId: 'batch-1', partidosAsignados: 1, asignacionesCreadas: 1 });
   });
 
@@ -71,17 +77,11 @@ describe('direct league assignments', () => {
     db.ligaFindUnique.mockResolvedValue({ userId: 'user-1' });
     db.tandaFindFirst.mockResolvedValue({ id: 'batch-1', ligaId: 'league-1', liga: { userId: 'user-1' } });
     db.linksFindMany.mockResolvedValue([{ partidoId: 'm1' }, { partidoId: 'm2' }]);
-    const removeRows = { operation: 'remove-rows' };
-    const removeHistory = { operation: 'remove-history' };
-    db.assignmentsDeleteMany.mockReturnValue(removeRows);
-    db.tandaDelete.mockReturnValue(removeHistory);
-    db.transaction.mockResolvedValue([]);
-
     await arbitrajeService.removeAssignment('league-1', 'batch-1', owner);
 
     expect(db.assignmentsDeleteMany).toHaveBeenCalledWith({ where: { partidoId: { in: ['m1', 'm2'] } } });
     expect(db.tandaDelete).toHaveBeenCalledWith({ where: { id: 'batch-1' } });
-    expect(db.transaction).toHaveBeenCalledWith([removeRows, removeHistory]);
+    expect(db.observe.mock.invocationCallOrder[0]).toBeLessThan(db.assignmentsDeleteMany.mock.invocationCallOrder[0]);
   });
 
   it('allows an administrator to manage a foreign league', async () => {
