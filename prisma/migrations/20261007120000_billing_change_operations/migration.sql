@@ -1,17 +1,29 @@
-CREATE TYPE "BillingChangeOperationType" AS ENUM ('GOOGLE_TWO_STEP');
-CREATE TYPE "BillingChangeOperationStatus" AS ENUM (
-  'DRAFT', 'FIRST_PURCHASE_PENDING', 'FIRST_VERIFICATION_PENDING', 'FIRST_VERIFIED',
-  'SECOND_STEP_PENDING', 'SCHEDULED', 'COMPLETED', 'CANCELED', 'ABANDONED'
-);
-CREATE TYPE "BillingCheckoutAttemptPurpose" AS ENUM (
-  'INITIAL_PURCHASE', 'PRODUCT_CHANGE_FIRST_STEP', 'PRODUCT_CHANGE_FINAL_STEP'
-);
+BEGIN;
+
+-- Duplicate guards allow a failed pre-transaction version of this migration to be resumed safely.
+DO $$ BEGIN
+  CREATE TYPE "BillingChangeOperationType" AS ENUM ('GOOGLE_TWO_STEP');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  CREATE TYPE "BillingChangeOperationStatus" AS ENUM (
+    'DRAFT', 'FIRST_PURCHASE_PENDING', 'FIRST_VERIFICATION_PENDING', 'FIRST_VERIFIED',
+    'SECOND_STEP_PENDING', 'SCHEDULED', 'COMPLETED', 'CANCELED', 'ABANDONED'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+  CREATE TYPE "BillingCheckoutAttemptPurpose" AS ENUM (
+    'INITIAL_PURCHASE', 'PRODUCT_CHANGE_FIRST_STEP', 'PRODUCT_CHANGE_FINAL_STEP'
+  );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 ALTER TABLE "billing_checkout_attempts"
   ALTER COLUMN "purchaseSelectionId" DROP NOT NULL,
-  ADD COLUMN "changeOperationId" TEXT,
-  ADD COLUMN "purpose" "BillingCheckoutAttemptPurpose" NOT NULL DEFAULT 'INITIAL_PURCHASE',
-  ADD COLUMN "revenueCatProductIdentifierSnapshot" TEXT;
+  ADD COLUMN IF NOT EXISTS "changeOperationId" TEXT,
+  ADD COLUMN IF NOT EXISTS "purpose" "BillingCheckoutAttemptPurpose" NOT NULL DEFAULT 'INITIAL_PURCHASE',
+  ADD COLUMN IF NOT EXISTS "revenueCatProductIdentifierSnapshot" TEXT;
 
 -- The previous immutable-row trigger rejects any historical update, including terminal rows.
 -- Disable only that user trigger while filling the newly added immutable snapshot.
@@ -27,8 +39,8 @@ WHERE p."catalogReleaseId" = a."catalogReleaseIdSnapshot"
 
 ALTER TABLE "billing_checkout_attempts" ENABLE TRIGGER "billing_checkout_attempts_guard";
 
-ALTER TYPE "BillingAuditAction" ADD VALUE 'BILLING_CHANGE_OPERATION_CONFIRMED';
-ALTER TYPE "BillingAuditAction" ADD VALUE 'BILLING_CHANGE_OPERATION_ABANDONED';
+ALTER TYPE "BillingAuditAction" ADD VALUE IF NOT EXISTS 'BILLING_CHANGE_OPERATION_CONFIRMED';
+ALTER TYPE "BillingAuditAction" ADD VALUE IF NOT EXISTS 'BILLING_CHANGE_OPERATION_ABANDONED';
 
 CREATE TABLE "billing_change_operations" (
   "id" TEXT NOT NULL,
@@ -459,3 +471,5 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER "billing_change_operations_no_truncate"
 BEFORE TRUNCATE ON "billing_change_operations"
 FOR EACH STATEMENT EXECUTE FUNCTION prevent_billing_change_operation_truncate();
+
+COMMIT;
