@@ -246,13 +246,26 @@ export function resolvePrismaCommand(action, target, env = process.env, options 
     return { args: ['migrate', 'reset', '--force'], databaseUrl: resolveTargetUrl(target, env) }
   }
   if (action === 'migrate-resolve') {
-    if (target !== 'production') throw new Error('migrate resolve is only allowed for the production target')
-    assertRailwayProduction(env)
-    assertProductionMigrationApproval(env, options)
+    if (target !== 'preview' && target !== 'production') {
+      throw new Error('migrate resolve is only allowed for preview or production targets')
+    }
+    if (target === 'production') {
+      assertRailwayProduction(env)
+      assertProductionMigrationApproval(env, options)
+    } else {
+      assertRailwayPreview(env)
+      if (options.filter((option) => option === '--confirm=preview-migration-rollback').length !== 1) {
+        throw new Error('Preview migration resolve requires exactly one --confirm=preview-migration-rollback')
+      }
+      if (options.some((option) => option !== '--confirm=preview-migration-rollback'
+        && !option.startsWith('--migration='))) {
+        throw new Error('Preview migration resolve received an unsupported option')
+      }
+    }
     const migrationOption = options.find((option) => option.startsWith('--migration='))
     const migration = migrationOption?.slice('--migration='.length)
     if (!migration || !/^\d{14}_[a-z0-9_]+$/.test(migration)) {
-      throw new Error('Production migration resolve requires a valid --migration=<migration_name>')
+      throw new Error('Migration resolve requires a valid --migration=<migration_name>')
     }
     return {
       args: ['migrate', 'resolve', '--rolled-back', migration],

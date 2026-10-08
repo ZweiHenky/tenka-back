@@ -156,7 +156,22 @@ test('production resolve only rolls back a named migration behind production gua
     () => resolvePrismaCommand('migrate-resolve', 'development', developmentEnv, [
       '--migration=20260813233356_league_timezone_and_instant',
     ]),
-    /only allowed for the production target/,
+    /only allowed for preview or production targets/,
+  )
+})
+
+test('preview resolve rolls back one named migration behind an explicit staging confirmation', () => {
+  const migration = '20261007120000_billing_change_operations'
+  assert.deepEqual(
+    resolvePrismaCommand('migrate-resolve', 'preview', previewEnv, [
+      `--migration=${migration}`,
+      '--confirm=preview-migration-rollback',
+    ]).args,
+    ['migrate', 'resolve', '--rolled-back', migration],
+  )
+  assert.throws(
+    () => resolvePrismaCommand('migrate-resolve', 'preview', previewEnv, [`--migration=${migration}`]),
+    /requires exactly one --confirm=preview-migration-rollback/,
   )
 })
 
