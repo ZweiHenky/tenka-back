@@ -55,6 +55,9 @@ const backendEnvSchema = z.object({
   APPLE_KEY_ID: optionalString(z.string().trim().min(1)),
   APPLE_PRIVATE_KEY: optionalString(z.string().trim().min(1)),
   APPLE_APP_BUNDLE_IDENTIFIER: optionalString(z.string().trim().min(1)),
+  GOOGLE_PLAY_ANDROID_PACKAGE_ID: z.string().trim()
+    .regex(/^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$/, 'must be an Android application id such as studio.tenka.app')
+    .default('studio.tenka.app'),
   ONESIGNAL_APP_ID: requiredString,
   ONESIGNAL_REST_API_KEY: requiredString,
   CLOUDINARY_CLOUD_NAME: requiredString,

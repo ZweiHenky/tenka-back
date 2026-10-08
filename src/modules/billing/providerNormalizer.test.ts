@@ -92,6 +92,20 @@ describe('Google provider normalizer', () => {
     expect(result.issues).toEqual([]);
   });
 
+  it('changes canonical evidence when Google exposes a pending replacement', () => {
+    const current = normalize([subscription()]).subscriptions[0];
+    const scheduled = normalize([subscription({
+      pendingProductStoreIdentifier: 'tenka_capacity_2:annual',
+      autoRenewalStatus: 'will_change_product',
+    })]).subscriptions[0];
+
+    expect(scheduled.pendingProduct).toMatchObject({
+      logicalProductId: 'tenka_capacity_2', billingInterval: 'ANNUAL',
+    });
+    expect(scheduled.pendingEffectiveAt).toEqual(new Date(EXPIRES_AT));
+    expect(scheduled.canonicalEvidenceReference).not.toBe(current.canonicalEvidenceReference);
+  });
+
   it.each([
     ['will_renew', true], ['has_already_renewed', true], ['will_change_product', true],
     ['will_not_renew', false], ['will_pause', false], ['requires_price_increase_consent', false],

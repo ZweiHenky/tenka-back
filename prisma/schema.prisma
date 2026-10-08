@@ -127,6 +127,28 @@ enum BillingStore {
   GOOGLE
 }
 
+enum BillingChangeOperationType {
+  GOOGLE_TWO_STEP
+}
+
+enum BillingChangeOperationStatus {
+  DRAFT
+  FIRST_PURCHASE_PENDING
+  FIRST_VERIFICATION_PENDING
+  FIRST_VERIFIED
+  SECOND_STEP_PENDING
+  SCHEDULED
+  COMPLETED
+  CANCELED
+  ABANDONED
+}
+
+enum BillingCheckoutAttemptPurpose {
+  INITIAL_PURCHASE
+  PRODUCT_CHANGE_FIRST_STEP
+  PRODUCT_CHANGE_FINAL_STEP
+}
+
 enum BillingInterval {
   MONTHLY
   QUARTERLY
@@ -337,6 +359,8 @@ enum BillingAuditAction {
   BILLING_LOCAL_GRACE_RECOVERED
   BILLING_LOCAL_GRACE_EXPIRED
   BILLING_LOCAL_GRACE_TERMINATED
+  BILLING_CHANGE_OPERATION_CONFIRMED
+  BILLING_CHANGE_OPERATION_ABANDONED
 }
 
 enum BillingAuditActorType {
@@ -394,6 +418,7 @@ model BillingAccount {
   purchaseSelections BillingPurchaseSelection[]
   checkoutAttempts BillingCheckoutAttempt[]
   billingVerifications BillingVerification[]
+  changeOperations BillingChangeOperation[]
   localGraces BillingLocalGrace[]
 
   @@index([ownerUserIdSnapshot])
@@ -570,7 +595,9 @@ model BillingPurchaseSelection {
 model BillingCheckoutAttempt {
   id                         String                       @id @default(cuid())
   billingAccountId           String
-  purchaseSelectionId        String
+  purchaseSelectionId        String?
+  changeOperationId          String?
+  purpose                    BillingCheckoutAttemptPurpose @default(INITIAL_PURCHASE)
   store                      BillingStore
   catalogReleaseIdSnapshot   String
   logicalProductIdSnapshot   String
@@ -580,6 +607,7 @@ model BillingCheckoutAttempt {
   packageIdSnapshot          String
   storeProductIdSnapshot     String
   basePlanIdSnapshot         String?
+  revenueCatProductIdentifierSnapshot String?
   status                     BillingCheckoutAttemptStatus @default(PREPARED)
   version                    Int                          @default(1)
   idempotencyKey             String
@@ -597,13 +625,15 @@ model BillingCheckoutAttempt {
   updatedAt                  DateTime                     @updatedAt
 
   billingAccount    BillingAccount             @relation(fields: [billingAccountId], references: [id], onDelete: Restrict, map: "billing_checkout_attempts_account_fkey")
-  purchaseSelection BillingPurchaseSelection   @relation("CheckoutAttemptSelection", fields: [purchaseSelectionId], references: [id], onDelete: Restrict, map: "billing_checkout_attempts_selection_fkey")
+  purchaseSelection BillingPurchaseSelection?  @relation("CheckoutAttemptSelection", fields: [purchaseSelectionId], references: [id], onDelete: Restrict, map: "billing_checkout_attempts_selection_fkey")
+  changeOperation   BillingChangeOperation?     @relation(fields: [changeOperationId], references: [id], onDelete: Restrict, map: "billing_checkout_attempts_change_operation_fkey")
   activeForSelection BillingPurchaseSelection? @relation("ActiveCheckoutAttempt")
   verification      BillingVerification?
 
   @@unique([billingAccountId, idempotencyKey], map: "billing_checkout_attempts_account_idempotency_key")
   @@index([status, nextVerificationAt, leaseUntil], map: "billing_checkout_attempts_due_idx")
   @@index([purchaseSelectionId, createdAt], map: "billing_checkout_attempts_selection_created_idx")
+  @@index([changeOperationId, purpose, createdAt], map: "billing_checkout_attempts_operation_purpose_created_idx")
   @@map("billing_checkout_attempts")
 }
 
@@ -628,6 +658,8 @@ model BillingVerification {
   billingAccount BillingAccount                   @relation(fields: [billingAccountId], references: [id], onDelete: Restrict, map: "billing_verifications_account_fkey")
   checkoutAttempt BillingCheckoutAttempt           @relation(fields: [checkoutAttemptId], references: [id], onDelete: Restrict, map: "billing_verifications_checkout_attempt_fkey")
   providerSubscriptionChain BillingProviderSubscriptionChain? @relation(fields: [providerSubscriptionChainId], references: [id], onDelete: Restrict, map: "billing_verifications_chain_fkey")
+  firstForChangeOperation BillingChangeOperation? @relation("BillingChangeOperationFirstVerification")
+  secondForChangeOperation BillingChangeOperation? @relation("BillingChangeOperationSecondVerification")
 
   @@unique([billingAccountId, idempotencyKey], map: "billing_verifications_account_idempotency_key")
   @@index([status, requestedAt], map: "billing_verifications_status_requested_idx")
@@ -736,6 +768,9 @@ model BillingProductCatalog {
   createdAt                    DateTime        @default(now())
 
   catalogRelease BillingCatalogRelease @relation(fields: [catalogReleaseId], references: [id], onDelete: Restrict)
+  sourceForChangeOperations BillingChangeOperation[] @relation("BillingChangeOperationSourceVariant")
+  intermediateForChangeOperations BillingChangeOperation[] @relation("BillingChangeOperationIntermediateVariant")
+  targetForChangeOperations BillingChangeOperation[] @relation("BillingChangeOperationTargetVariant")
 
   @@unique([catalogReleaseId, revenueCatOfferingId, revenueCatPackageId, store], map: "billing_product_catalog_offering_package_store_key")
   @@index([catalogReleaseId, store, storeProductId, basePlanId], map: "billing_product_catalog_release_store_product_plan_idx")
@@ -829,6 +864,45 @@ model BillingWebhookObservation {
   @@map("billing_webhook_observations")
 }
 
+model BillingChangeOperation {
+  id                          String                    @id @default(cuid())
+  billingAccountId            String
+  providerSubscriptionChainId String
+  store                       BillingStore              @default(GOOGLE)
+  idempotencyKey              String
+  requestFingerprint          String
+  abandonIdempotencyKey       String?
+  abandonRequestFingerprint   String?
+  type                        BillingChangeOperationType
+  status                      BillingChangeOperationStatus @default(DRAFT)
+  sourceVariantId             String
+  intermediateVariantId       String
+  targetVariantId             String
+  firstVerificationId         String?                   @unique(map: "billing_change_operations_first_verification_key")
+  secondVerificationId        String?                   @unique(map: "billing_change_operations_second_verification_key")
+  scheduledAt                 DateTime?                 @db.Timestamptz(3)
+  completedAt                 DateTime?                 @db.Timestamptz(3)
+  lastErrorCode               String?
+  version                     Int                       @default(1)
+  createdAt                   DateTime                  @default(now())
+  updatedAt                   DateTime                  @updatedAt
+
+  billingAccount            BillingAccount                    @relation(fields: [billingAccountId], references: [id], onDelete: Restrict, map: "billing_change_operations_account_fkey")
+  providerSubscriptionChain BillingProviderSubscriptionChain  @relation(fields: [providerSubscriptionChainId], references: [id], onDelete: Restrict, map: "billing_change_operations_chain_fkey")
+  firstVerification         BillingVerification?              @relation("BillingChangeOperationFirstVerification", fields: [firstVerificationId], references: [id], onDelete: Restrict, map: "billing_change_operations_first_verification_fkey")
+  secondVerification        BillingVerification?              @relation("BillingChangeOperationSecondVerification", fields: [secondVerificationId], references: [id], onDelete: Restrict, map: "billing_change_operations_second_verification_fkey")
+  checkoutAttempts          BillingCheckoutAttempt[]
+  sourceVariant             BillingProductCatalog             @relation("BillingChangeOperationSourceVariant", fields: [sourceVariantId], references: [id], onDelete: Restrict, map: "billing_change_operations_source_variant_fkey")
+  intermediateVariant       BillingProductCatalog             @relation("BillingChangeOperationIntermediateVariant", fields: [intermediateVariantId], references: [id], onDelete: Restrict, map: "billing_change_operations_intermediate_variant_fkey")
+  targetVariant             BillingProductCatalog             @relation("BillingChangeOperationTargetVariant", fields: [targetVariantId], references: [id], onDelete: Restrict, map: "billing_change_operations_target_variant_fkey")
+
+  @@unique([billingAccountId, idempotencyKey], map: "billing_change_operations_account_idempotency_key")
+  @@unique([billingAccountId, abandonIdempotencyKey], map: "billing_change_operations_account_abandon_idempotency_key")
+  @@index([billingAccountId, status])
+  @@index([providerSubscriptionChainId, status])
+  @@map("billing_change_operations")
+}
+
 model BillingProviderSubscriptionChain {
   id                     String       @id @default(cuid())
   billingAccountId       String
@@ -839,6 +913,7 @@ model BillingProviderSubscriptionChain {
   billingAccount BillingAccount               @relation(fields: [billingAccountId], references: [id], onDelete: Restrict)
   subscriptions  BillingProviderSubscription[]
   verifications BillingVerification[]
+  changeOperations BillingChangeOperation[]
 
   @@unique([store, providerChainReference])
   @@index([billingAccountId, store])

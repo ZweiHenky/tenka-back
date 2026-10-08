@@ -26,7 +26,12 @@ export const billingSyncBodySchema = z.object({
   checkoutAttemptId: z.string().trim().min(1).max(255).optional(),
 }).strict();
 
+export const billingCheckoutAbandonBodySchema = z.object({
+  expectedVersion: z.number().int().min(1).max(2_147_483_647),
+}).strict();
+
 export const billingCheckoutIdempotencyKeySchema = billingWebhookIdempotencyKeySchema;
 
 export type BillingCheckoutStartInput = z.output<typeof billingCheckoutStartBodySchema>;
 export type BillingCheckoutOutcomeInput = z.output<typeof billingCheckoutOutcomeBodySchema>;
+export type BillingCheckoutAbandonInput = z.output<typeof billingCheckoutAbandonBodySchema>;

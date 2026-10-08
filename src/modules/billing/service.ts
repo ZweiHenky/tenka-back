@@ -6,6 +6,8 @@ import { AppError, NotFoundError, ValidationError } from '../../utils/errors';
 import type { AccountAccessPolicy, BillingStateDto } from './types';
 import { billingEnvironmentForApp, getActiveBillingCatalog } from './catalog';
 import { resolvePaidAccessShadowInTransaction } from './paidAccessShadow';
+import { resolveSubscriptionManagement } from './storeManagement';
+import { resolveBillingChangeOperationState } from './changeOperationState';
 
 type BillingClient = Pick<Prisma.TransactionClient, 'user' | 'billingAccount'>;
 
@@ -345,6 +347,8 @@ export async function getBillingState(userId: string, client: BillingClient = pr
       purchasesEnabled = false;
     }
   }
+  const subscriptionManagement = await resolveSubscriptionManagement(policy.billingAccountId, client);
+  const changeOperationState = await resolveBillingChangeOperationState(policy.billingAccountId, client);
   return {
     role: policy.role,
     effectiveAccess: policy.effectiveAccess,
@@ -358,6 +362,9 @@ export async function getBillingState(userId: string, client: BillingClient = pr
     },
     freeManagementGrant: policy.freeManagementGrant,
     purchasesEnabled,
+    subscriptionManagement,
+    nextAction: changeOperationState.nextAction,
+    activeChangeOperation: changeOperationState.activeChangeOperation,
     migrationOverlayActive: policy.migrationOverlayActive,
     migrationDeadline: policy.migrationDeadline,
     migrationPaused: policy.migrationPaused,

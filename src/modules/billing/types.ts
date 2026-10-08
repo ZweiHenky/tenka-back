@@ -31,6 +31,53 @@ export interface AccountAccessPolicy {
   migrationDivisions?: Array<{ id: string; name: string; leagueName: string }>;
 }
 
+export interface StoreSubscriptionManagementDto {
+  url: string;
+  store: BillingStoreName;
+  storeProductId: string | null;
+  willRenew: boolean | null;
+}
+
+export type BillingChangeDirectionName = 'UPGRADE' | 'DOWNGRADE' | 'SAME';
+export type BillingChangeTimingName = 'IMMEDIATE' | 'DEFERRED' | 'TWO_STEP';
+export type BillingChangeOperationStatusName =
+  | 'DRAFT'
+  | 'FIRST_PURCHASE_PENDING'
+  | 'FIRST_VERIFICATION_PENDING'
+  | 'FIRST_VERIFIED'
+  | 'SECOND_STEP_PENDING'
+  | 'SCHEDULED'
+  | 'COMPLETED'
+  | 'CANCELED'
+  | 'ABANDONED';
+
+export interface BillingChangeVariantDto {
+  variantId: string;
+  logicalProductId: string;
+  billingInterval: BillingIntervalName;
+  capacity: number;
+  storeProductId: string;
+}
+
+export interface BillingActiveChangeOperationDto {
+  id: string;
+  status: BillingChangeOperationStatusName;
+  version: number;
+  lastErrorCode: string | null;
+  current: BillingChangeVariantDto;
+  target: BillingChangeVariantDto;
+  firstStep: BillingChangeVariantDto;
+  direction: 'UPGRADE';
+  timing: 'TWO_STEP';
+  requiresRenewalSelection: false;
+  activeAttempt: {
+    id: string;
+    status: string;
+    purpose: 'PRODUCT_CHANGE_FIRST_STEP' | 'PRODUCT_CHANGE_FINAL_STEP';
+    version: number;
+  } | null;
+}
+
 export interface BillingStateDto {
   role: UserRole;
   effectiveAccess: EffectiveBillingAccess;
@@ -44,6 +91,9 @@ export interface BillingStateDto {
   };
   freeManagementGrant: FreeManagementGrantSummary | null;
   purchasesEnabled: boolean;
+  subscriptionManagement: StoreSubscriptionManagementDto | null;
+  nextAction?: 'PURCHASE_FIRST_STEP' | 'WAIT_FOR_FIRST_VERIFICATION' | 'SCHEDULE_PERIOD_CHANGE' | 'WAIT_FOR_SCHEDULE_VERIFICATION' | null;
+  activeChangeOperation?: BillingActiveChangeOperationDto | null;
   migrationOverlayActive?: boolean;
   migrationDeadline?: Date | null;
   migrationPaused?: boolean;

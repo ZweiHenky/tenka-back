@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../../config/database';
+import { env } from '../../config/env';
 import type { BillingInterval, Prisma, PrismaClient } from '../../generated/prisma/client';
 import { AppError } from '../../utils/errors';
 import { signalBackgroundJob } from '../../workers/jobSignals';
@@ -506,6 +507,145 @@ async function recoverHistoricalPurchaseSelection(
   return true;
 }
 
+async function reconcileGoogleTwoStepChangeOperation(
+  tx: Prisma.TransactionClient,
+  billingAccountId: string,
+  normalized: NormalizedGoogleCustomer,
+  now: Date,
+): Promise<void> {
+  const operation = await tx.billingChangeOperation.findFirst({
+    where: {
+      billingAccountId, type: 'GOOGLE_TWO_STEP',
+      status: { in: ['FIRST_PURCHASE_PENDING', 'FIRST_VERIFICATION_PENDING', 'SECOND_STEP_PENDING', 'SCHEDULED'] },
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true, status: true, version: true, providerSubscriptionChainId: true, scheduledAt: true,
+      intermediateVariant: true, targetVariant: true,
+      providerSubscriptionChain: { select: { providerChainReference: true } },
+      checkoutAttempts: {
+        where: { purpose: { in: ['PRODUCT_CHANGE_FIRST_STEP', 'PRODUCT_CHANGE_FINAL_STEP'] } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true, purpose: true, status: true, version: true, requestFingerprint: true,
+          verification: { select: { id: true, status: true, attemptCount: true } },
+        },
+      },
+    },
+  });
+  if (!operation) return;
+  if (normalized.issues.some(({ severity }) => severity === 'BLOCKING')) return;
+  const expectedEnvironment = env.APP_ENV === 'production' ? 'PRODUCTION' : 'SANDBOX';
+  const subscription = normalized.subscriptions.find((candidate) =>
+    candidate.providerChainReference === operation.providerSubscriptionChain.providerChainReference);
+  if (!subscription
+    || subscription.storeEnvironment !== expectedEnvironment
+    || subscription.ownershipType !== 'PURCHASED'
+    || !subscription.entitlementActive
+    || !subscription.eligibleForNewAccess
+    || subscription.pendingPayment) return;
+  const exact = (prefix: 'current' | 'pending', variant: typeof operation.targetVariant) => {
+    const product = prefix === 'current' ? subscription.currentProduct : subscription.pendingProduct;
+    if (!product) return false;
+    return product.logicalProductId === variant.logicalProductId
+      && product.storeProductId === variant.storeProductId
+      && product.basePlanId === variant.basePlanId
+      && product.capacity === variant.capacity
+      && product.billingInterval === variant.billingInterval;
+  };
+  const verifyAttempt = async (
+    purpose: 'PRODUCT_CHANGE_FIRST_STEP' | 'PRODUCT_CHANGE_FINAL_STEP',
+  ) => {
+    const attempt = operation.checkoutAttempts.find((candidate) => candidate.purpose === purpose);
+    if (!attempt) return null;
+    const verification = attempt.verification ?? await tx.billingVerification.create({
+      data: {
+        billingAccountId, checkoutAttemptId: attempt.id, store: 'GOOGLE',
+        idempotencyKey: `canonical:${attempt.id}`.slice(0, 128),
+        requestFingerprint: attempt.requestFingerprint, requestedAt: now,
+      },
+      select: { id: true, status: true, attemptCount: true },
+    });
+    if (verification.status === 'PENDING') {
+      await tx.billingVerification.update({
+        where: { id: verification.id },
+        data: {
+          status: 'VERIFIED', providerSubscriptionChainId: operation.providerSubscriptionChainId,
+          lastAttemptAt: now, verifiedAt: now,
+          attemptCount: Math.max(1, verification.attemptCount), lastErrorCode: null,
+        },
+      });
+    }
+    if (verification.status !== 'PENDING' && verification.status !== 'VERIFIED') return null;
+    if (!['VERIFIED', 'CANCELED', 'REJECTED', 'OWNERSHIP_CONFLICT', 'ABANDONED'].includes(attempt.status)) {
+      await tx.billingCheckoutAttempt.update({
+        where: { id: attempt.id },
+        data: {
+          status: 'VERIFIED', terminalAt: now, nextVerificationAt: null,
+          leaseUntil: null, lockedBy: null, lastVerificationAt: now,
+          verificationAttempts: { increment: 1 }, lastErrorCode: null, version: { increment: 1 },
+        },
+      });
+    }
+    return verification.id;
+  };
+
+  if (operation.status === 'FIRST_PURCHASE_PENDING' && exact('current', operation.intermediateVariant)) {
+    await tx.billingChangeOperation.update({
+      where: { id: operation.id },
+      data: { status: 'FIRST_VERIFICATION_PENDING', version: { increment: 1 } },
+    });
+  }
+  if ((operation.status === 'FIRST_PURCHASE_PENDING' || operation.status === 'FIRST_VERIFICATION_PENDING')
+    && exact('current', operation.intermediateVariant)) {
+    const verificationId = await verifyAttempt('PRODUCT_CHANGE_FIRST_STEP');
+    if (!verificationId) return;
+    await tx.billingChangeOperation.update({
+      where: { id: operation.id },
+      data: { status: 'FIRST_VERIFIED', firstVerificationId: verificationId, version: { increment: 1 } },
+    });
+    await tx.billingChangeOperation.update({
+      where: { id: operation.id },
+      data: { status: 'SECOND_STEP_PENDING', version: { increment: 1 } },
+    });
+    return;
+  }
+  if (operation.status === 'SECOND_STEP_PENDING' && exact('pending', operation.targetVariant)) {
+    const verificationId = await verifyAttempt('PRODUCT_CHANGE_FINAL_STEP');
+    if (!verificationId) return;
+    await tx.billingChangeOperation.update({
+      where: { id: operation.id },
+      data: {
+        status: 'SCHEDULED', secondVerificationId: verificationId,
+        scheduledAt: subscription.pendingEffectiveAt ?? now, version: { increment: 1 },
+      },
+    });
+    return;
+  }
+  if (operation.status === 'SECOND_STEP_PENDING' && exact('current', operation.targetVariant)) {
+    const verificationId = await verifyAttempt('PRODUCT_CHANGE_FINAL_STEP');
+    if (!verificationId) return;
+    await tx.billingChangeOperation.update({
+      where: { id: operation.id },
+      data: {
+        status: 'SCHEDULED', secondVerificationId: verificationId,
+        scheduledAt: now, version: { increment: 1 },
+      },
+    });
+    await tx.billingChangeOperation.update({
+      where: { id: operation.id },
+      data: { status: 'COMPLETED', completedAt: now, version: { increment: 1 } },
+    });
+    return;
+  }
+  if (operation.status === 'SCHEDULED' && exact('current', operation.targetVariant)) {
+    await tx.billingChangeOperation.update({
+      where: { id: operation.id },
+      data: { status: 'COMPLETED', completedAt: now, version: { increment: 1 } },
+    });
+  }
+}
+
 export async function materializeStoreEffectiveAccessInTransaction(
   billingAccountId: string,
   normalized: NormalizedGoogleCustomer,
@@ -523,6 +663,7 @@ export async function materializeStoreEffectiveAccessInTransaction(
   }
 
   const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT NOW() AS now`;
+  await reconcileGoogleTwoStepChangeOperation(tx, billingAccountId, normalized, now);
   await recoverHistoricalPurchaseSelection(tx, {
     billingAccountId, ownerUserId: account.userId, normalized, now,
   });
@@ -1031,7 +1172,11 @@ export async function materializeStoreEffectiveAccessInTransaction(
   return 'PERIOD_CREATED';
 }
 
-export const effectiveAccessMaterializerInternals = { isPurchaseTransition, planRolloverAssignments };
+export const effectiveAccessMaterializerInternals = {
+  isPurchaseTransition,
+  planRolloverAssignments,
+  reconcileGoogleTwoStepChangeOperation,
+};
 
 export async function persistLedgerAndMaterializeStoreAccess(
   billingAccountId: string,

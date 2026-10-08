@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   paid: vi.fn(),
 }));
 vi.mock('../../config/env', () => ({
-  env: { BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED: true },
+  env: { BILLING_RESOURCE_ACCESS_ENFORCEMENT_ENABLED: true, LOG_LEVEL: 'silent', APP_ENV: 'test' },
 }));
 vi.mock('../../config/database', () => ({ prisma: {} }));
 vi.mock('./catalog', () => ({

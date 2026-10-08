@@ -61,6 +61,35 @@ router.post(
   billingSyncLimiter,
   billingController.checkoutOutcome,
 );
+router.post(
+  '/checkout-attempts/:attemptId/abandon',
+  requireRole('LIGA'),
+  billingSyncLimiter,
+  destructiveOperationLimiter,
+  billingController.abandonCheckout,
+);
 router.post('/sync', requireRole('LIGA'), billingSyncLimiter, billingController.sync);
+router.post('/change-preview', requireRole('LIGA'), billingSyncLimiter, billingController.changePreview);
+router.post(
+  '/change-operations/confirm',
+  requireRole('LIGA'),
+  billingSyncLimiter,
+  destructiveOperationLimiter,
+  billingController.confirmChangeOperation,
+);
+router.post(
+  '/change-operations/:operationId/final-step/confirm',
+  requireRole('LIGA'),
+  billingSyncLimiter,
+  destructiveOperationLimiter,
+  billingController.confirmChangeOperationFinalStep,
+);
+router.post(
+  '/change-operations/:operationId/abandon',
+  requireRole('LIGA'),
+  billingSyncLimiter,
+  destructiveOperationLimiter,
+  billingController.abandonChangeOperation,
+);
 
 export { router as billingRouter };

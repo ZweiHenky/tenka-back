@@ -580,6 +580,8 @@ La promoción del catálogo fuera de development usa exclusivamente `billing-cat
 
 `BillingPurchaseSelection` prepara en forma durable las asignaciones del primer periodo pagado. `GET/PUT /api/billing/purchase-selection` exige `LIGA`; capacidad y slots se derivan del catalogo, el grant gratuito ocupa el slot 1 fijo y el cliente envia solo IDs editables. Preparar `DRAFT` no depende del kill switch. Iniciar comercio pasa exclusivamente por `BillingCheckoutAttempt`: exige `purchasesEnabled=true`, crea snapshots e idempotencia y cambia la seleccion a `LOCKED` en la misma transaccion. Los outcomes del SDK solo crean trabajo de `BillingVerification`; no conceden acceso. El worker `billing-checkout` reconcilia RevenueCat con leases y backoff, libera una cancelacion o abandona un `PREPARED` de una hora solo despues de probar ausencia de evidencia, y la materializacion STORE consume la seleccion y marca intento/verificacion `VERIFIED` bajo el lock de cuenta.
 
+Los cambios Google `TWO_STEP` usan el mismo worker y verificacion, pero no una seleccion de compra. `change-preview` es puro; `change-operations/confirm` crea atomicamente la operacion y el intento `PRODUCT_CHANGE_FIRST_STEP` antes del I/O nativo. Solo evidencia canonica de la variante intermedia habilita `SECOND_STEP_PENDING`; la confirmacion final crea `PRODUCT_CHANGE_FINAL_STEP` con reemplazo `DEFERRED`, y solo evidencia pendiente/final avanza a `SCHEDULED`/`COMPLETED`. Un reinicio nunca vuelve a abrir Google Play para un intento activo. El segundo paso puede continuar con compras pausadas, y `ABANDONED` solo conserva el plan intermedio ya verificado.
+
 ## Testing
 
 - **Runner**: Vitest (`vitest.config.ts`)

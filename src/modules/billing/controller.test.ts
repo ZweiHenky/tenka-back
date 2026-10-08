@@ -9,9 +9,14 @@ const mocks = vi.hoisted(() => ({
   getBillingPurchaseSelection: vi.fn(),
   putBillingPurchaseSelection: vi.fn(),
   getActiveBillingCheckout: vi.fn(),
+  abandonPreviewBillingCheckout: vi.fn(),
   reportBillingCheckoutOutcome: vi.fn(),
   startBillingCheckout: vi.fn(),
   syncBillingCheckout: vi.fn(),
+  previewBillingChange: vi.fn(),
+  confirmBillingChange: vi.fn(),
+  confirmBillingChangeFinalStep: vi.fn(),
+  abandonBillingChangeOperation: vi.fn(),
   activateBillingMigration: vi.fn(),
   selectMigrationFreeDivision: vi.fn(),
   createBillingMigrationActivationReview: vi.fn(),
@@ -37,9 +42,16 @@ vi.mock('./purchaseSelectionService', () => ({
 }));
 vi.mock('./checkoutService', () => ({
   getActiveBillingCheckout: mocks.getActiveBillingCheckout,
+  abandonPreviewBillingCheckout: mocks.abandonPreviewBillingCheckout,
   reportBillingCheckoutOutcome: mocks.reportBillingCheckoutOutcome,
   startBillingCheckout: mocks.startBillingCheckout,
   syncBillingCheckout: mocks.syncBillingCheckout,
+}));
+vi.mock('./changePreviewService', () => ({
+  previewBillingChange: mocks.previewBillingChange,
+  confirmBillingChange: mocks.confirmBillingChange,
+  confirmBillingChangeFinalStep: mocks.confirmBillingChangeFinalStep,
+  abandonBillingChangeOperation: mocks.abandonBillingChangeOperation,
 }));
 vi.mock('./migrationLifecycleService', () => ({
   activateBillingMigration: mocks.activateBillingMigration,
@@ -529,5 +541,114 @@ describe('billingController purchase selection', () => {
       actor: { userId: 'session-user', requestId: 'request-1' },
     });
     expect(res.json).toHaveBeenCalledWith({ success: true, data: selection });
+  });
+});
+
+describe('billingController change operations', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('previews a normalized target without creating commercial intent', async () => {
+    const preview = { eligible: true, timing: 'TWO_STEP' };
+    mocks.previewBillingChange.mockResolvedValue(preview);
+    const req = {
+      user: { id: 'user-1' }, requestId: 'request-1',
+      body: { logicalProductId: ' tenka_capacity_6 ', billingInterval: 'ANNUAL' },
+    } as any;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as any;
+    const next = vi.fn();
+
+    await billingController.changePreview(req, res, next);
+
+    expect(mocks.previewBillingChange).toHaveBeenCalledWith({
+      change: { logicalProductId: 'tenka_capacity_6', billingInterval: 'ANNUAL' },
+      actor: { userId: 'user-1', requestId: 'request-1' },
+    });
+    expect(res.json).toHaveBeenCalledWith({ success: true, data: preview });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('abandons a normalized operation with user and idempotency context', async () => {
+    const operation = { id: 'operation-1', status: 'ABANDONED', version: 6 };
+    mocks.abandonBillingChangeOperation.mockResolvedValue(operation);
+    const req = {
+      user: { id: 'user-1' }, requestId: 'request-2', params: { operationId: ' operation-1 ' },
+      get: vi.fn().mockReturnValue('change-abandon-1'),
+    } as any;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as any;
+    const next = vi.fn();
+
+    await billingController.abandonChangeOperation(req, res, next);
+
+    expect(mocks.abandonBillingChangeOperation).toHaveBeenCalledWith({
+      operation: { operationId: 'operation-1' },
+      idempotencyKey: 'change-abandon-1',
+      actor: { userId: 'user-1', requestId: 'request-2' },
+    });
+    expect(res.json).toHaveBeenCalledWith({ success: true, data: operation });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('confirms the first and final steps with validated concurrency inputs', async () => {
+    const result = { operation: { id: 'operation-1' }, attempt: { id: 'attempt-1' } };
+    mocks.confirmBillingChange.mockResolvedValue(result);
+    mocks.confirmBillingChangeFinalStep.mockResolvedValue(result);
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as any;
+    const next = vi.fn();
+    await billingController.confirmChangeOperation({
+      user: { id: 'user-1' }, requestId: 'request-3', params: {},
+      body: { targetVariantId: 'target-1', expectedSourceVariantId: 'source-1', previewFingerprint: 'a'.repeat(64) },
+      get: vi.fn().mockReturnValue('change-confirm-1'),
+    } as any, res, next);
+    expect(mocks.confirmBillingChange).toHaveBeenCalledWith({
+      confirm: { targetVariantId: 'target-1', expectedSourceVariantId: 'source-1', previewFingerprint: 'a'.repeat(64) },
+      idempotencyKey: 'change-confirm-1', actor: { userId: 'user-1', requestId: 'request-3' },
+    });
+    await billingController.confirmChangeOperationFinalStep({
+      user: { id: 'user-1' }, requestId: 'request-4', params: { operationId: ' operation-1 ' },
+      body: { expectedVersion: 4 }, get: vi.fn().mockReturnValue('change-final-1'),
+    } as any, res, next);
+    expect(mocks.confirmBillingChangeFinalStep).toHaveBeenCalledWith({
+      operation: { operationId: 'operation-1' }, confirm: { expectedVersion: 4 },
+      idempotencyKey: 'change-final-1', actor: { userId: 'user-1', requestId: 'request-4' },
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe('billingController checkout abandonment', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('forwards a validated owner request and returns accepted while evidence is pending', async () => {
+    const result = { status: 'PENDING', reason: 'settlement_window', attempt: { id: 'attempt-1' } };
+    mocks.abandonPreviewBillingCheckout.mockResolvedValue(result);
+    const req = {
+      user: { id: 'league-1' }, requestId: 'request-1', params: { attemptId: ' attempt-1 ' },
+      body: { expectedVersion: 3 }, get: vi.fn().mockReturnValue('abandon-checkout-1'),
+    } as any;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as any;
+    const next = vi.fn();
+
+    await billingController.abandonCheckout(req, res, next);
+
+    expect(mocks.abandonPreviewBillingCheckout).toHaveBeenCalledWith({
+      attemptId: 'attempt-1', abandon: { expectedVersion: 3 }, idempotencyKey: 'abandon-checkout-1',
+      actor: { userId: 'league-1', requestId: 'request-1' },
+    });
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(res.json).toHaveBeenCalledWith({ success: true, data: result });
+  });
+
+  it('rejects an invalid version before calling the service', async () => {
+    const req = {
+      user: { id: 'league-1' }, requestId: 'request-1', params: { attemptId: 'attempt-1' },
+      body: { expectedVersion: 0 }, get: vi.fn().mockReturnValue('abandon-checkout-1'),
+    } as any;
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() } as any;
+    const next = vi.fn();
+
+    await billingController.abandonCheckout(req, res, next);
+
+    expect(mocks.abandonPreviewBillingCheckout).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 422 }));
   });
 });

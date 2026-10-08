@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  billingCheckoutAbandonBodySchema,
   billingCheckoutOutcomeBodySchema,
   billingCheckoutStartBodySchema,
   billingSyncBodySchema,
@@ -24,5 +25,13 @@ describe('billing checkout validation', () => {
     expect(() => billingCheckoutOutcomeBodySchema.parse({ outcome: 'SUCCESS' })).toThrow();
     expect(billingSyncBodySchema.parse({})).toEqual({});
     expect(() => billingSyncBodySchema.parse({ receipt: 'private' })).toThrow();
+  });
+
+  it('accepts only a positive PostgreSQL integer version for abandonment', () => {
+    expect(billingCheckoutAbandonBodySchema.parse({ expectedVersion: 2 })).toEqual({ expectedVersion: 2 });
+    for (const expectedVersion of [0, -1, 1.5, Number.MAX_SAFE_INTEGER]) {
+      expect(() => billingCheckoutAbandonBodySchema.parse({ expectedVersion })).toThrow();
+    }
+    expect(() => billingCheckoutAbandonBodySchema.parse({ expectedVersion: 2, receipt: 'private' })).toThrow();
   });
 });

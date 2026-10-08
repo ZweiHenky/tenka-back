@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 
 const mocks = vi.hoisted(() => ({
   ensureBillingAccount: vi.fn(),
@@ -6,12 +7,17 @@ const mocks = vi.hoisted(() => ({
   configureRawQuerySchema: vi.fn(),
   assertCanonicalBillingIdentity: vi.fn(),
   reconcilePeriodicCandidateNow: vi.fn(),
+  acquireBillingAccountLock: vi.fn(),
+  env: { APP_ENV: 'preview', BILLING_REVENUECAT_ENABLED: true },
 }));
 
 vi.mock('../../config/database', () => ({ prisma: {} }));
-vi.mock('../../config/env', () => ({ env: { BILLING_REVENUECAT_ENABLED: true } }));
+vi.mock('../../config/env', () => ({ env: mocks.env }));
 vi.mock('../../utils/rawDatabaseSchema', () => ({ configureRawQuerySchema: mocks.configureRawQuerySchema }));
-vi.mock('./service', () => ({ ensureBillingAccount: mocks.ensureBillingAccount }));
+vi.mock('./service', () => ({
+  ensureBillingAccount: mocks.ensureBillingAccount,
+  acquireBillingAccountLock: mocks.acquireBillingAccountLock,
+}));
 vi.mock('./canonicalIdentity', () => ({ assertCanonicalBillingIdentity: mocks.assertCanonicalBillingIdentity }));
 vi.mock('./catalog', () => ({
   billingEnvironmentForApp: vi.fn(() => 'PREVIEW'),
@@ -20,7 +26,12 @@ vi.mock('./catalog', () => ({
 vi.mock('./periodicReconciliationWorker', () => ({ reconcilePeriodicCandidateNow: mocks.reconcilePeriodicCandidateNow }));
 vi.mock('../../workers/jobSignals', () => ({ signalBackgroundJob: vi.fn() }));
 
-import { reportBillingCheckoutOutcome, startBillingCheckout, syncBillingCheckout } from './checkoutService';
+import {
+  abandonPreviewBillingCheckout,
+  reportBillingCheckoutOutcome,
+  startBillingCheckout,
+  syncBillingCheckout,
+} from './checkoutService';
 
 const now = new Date('2026-09-26T10:00:00Z');
 
@@ -61,6 +72,9 @@ function transaction() {
       }),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    billingProviderSubscription: { findFirst: vi.fn().mockResolvedValue(null) },
+    billingPeriod: { findFirst: vi.fn().mockResolvedValue(null) },
+    billingLocalGrace: { findFirst: vi.fn().mockResolvedValue(null) },
     billingAuditLog: { create: vi.fn() },
     $queryRaw: vi.fn().mockResolvedValue([{ now, verificationAt: new Date('2026-09-26T10:05:00Z') }]),
   };
@@ -88,6 +102,41 @@ function syncClient(attempt: ReturnType<typeof checkoutAttempt> | null) {
   } as never;
 }
 
+function abandonClient(current: ReturnType<typeof checkoutAttempt>, databaseNow: Date) {
+  const projected = { ...current, billingAccountId: 'billing-1', lockedBy: null, leaseUntil: null };
+  const tx = {
+    billingCheckoutAttempt: {
+      findFirst: vi.fn().mockResolvedValue(projected),
+      update: vi.fn().mockResolvedValue({ ...current, status: 'ABANDONED', version: current.version + 1 }),
+    },
+    billingAuditLog: { findFirst: vi.fn().mockResolvedValue(null), createMany: vi.fn() },
+    billingProviderSubscription: { findFirst: vi.fn().mockResolvedValue(null) },
+    billingTransaction: { findFirst: vi.fn().mockResolvedValue(null) },
+    billingProviderPeriod: { findFirst: vi.fn().mockResolvedValue(null) },
+    billingPeriod: { findFirst: vi.fn().mockResolvedValue(null) },
+    billingPurchaseSelection: {
+      findUnique: vi.fn().mockResolvedValue({ status: 'LOCKED', checkoutAttemptId: current.id, version: 4 }),
+      update: vi.fn(),
+    },
+    billingVerification: {
+      findUnique: vi.fn().mockResolvedValue({
+        id: 'verification-1', status: 'PENDING', providerSubscriptionChainId: null, providerTransactionId: null,
+      }),
+      update: vi.fn(),
+    },
+    $executeRawUnsafe: vi.fn(),
+    $queryRaw: vi.fn().mockResolvedValue([{ now: databaseNow }]),
+  };
+  const client = {
+    user: { findUnique: vi.fn().mockResolvedValue({ rol: 'LIGA' }) },
+    billingAccount: { findUnique: vi.fn().mockResolvedValue({ id: 'billing-1' }) },
+    billingCheckoutAttempt: { findFirst: vi.fn().mockResolvedValue(current) },
+    billingAuditLog: { findFirst: vi.fn().mockResolvedValue(null) },
+    $transaction: vi.fn((callback) => callback(tx)),
+  };
+  return { client: client as never, tx };
+}
+
 describe('billing checkout service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -95,6 +144,8 @@ describe('billing checkout service', () => {
     mocks.getActiveBillingCatalog.mockResolvedValue(catalog());
     mocks.assertCanonicalBillingIdentity.mockResolvedValue(undefined);
     mocks.reconcilePeriodicCandidateNow.mockResolvedValue({ kind: 'SUCCESS' });
+    mocks.env.APP_ENV = 'preview';
+    mocks.env.BILLING_REVENUECAT_ENABLED = true;
   });
 
   it('creates the durable attempt and locks the exact selection atomically', async () => {
@@ -135,6 +186,47 @@ describe('billing checkout service', () => {
     }, client)).rejects.toMatchObject({ code: 'BILLING_PURCHASES_PAUSED', statusCode: 409 });
     expect(tx.billingCheckoutAttempt.create).not.toHaveBeenCalled();
     expect(tx.billingPurchaseSelection.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['an active provider subscription', 'billingProviderSubscription'],
+    ['a current store period', 'billingPeriod'],
+    ['an active local grace', 'billingLocalGrace'],
+  ] as const)('rejects a new initial checkout when the account has %s', async (_, delegate) => {
+    const tx = transaction();
+    tx[delegate].findFirst.mockResolvedValueOnce({ id: `${delegate}-1` });
+    const client = { $transaction: vi.fn((callback) => callback(tx)) } as never;
+
+    await expect(startBillingCheckout({
+      checkout: { purchaseSelectionId: 'selection-1', expectedVersion: 3, store: 'GOOGLE' },
+      idempotencyKey: 'checkout-start-2',
+      actor: { userId: 'user-1', requestId: 'request-1' },
+    }, client)).rejects.toMatchObject({ code: 'BILLING_INITIAL_PURCHASE_NOT_ALLOWED', statusCode: 409 });
+
+    expect(mocks.getActiveBillingCatalog).not.toHaveBeenCalled();
+    expect(tx.billingCheckoutAttempt.create).not.toHaveBeenCalled();
+    expect(tx.billingPurchaseSelection.updateMany).not.toHaveBeenCalled();
+    expect(tx.billingAuditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('returns an idempotent prior attempt before checking current paid access', async () => {
+    const tx = transaction();
+    const checkout = { purchaseSelectionId: 'selection-1', expectedVersion: 3, store: 'GOOGLE' as const };
+    tx.billingCheckoutAttempt.findUnique.mockResolvedValueOnce({
+      ...checkoutAttempt('VERIFIED'),
+      requestFingerprint: createHash('sha256').update(JSON.stringify(checkout)).digest('hex'),
+    });
+    tx.billingProviderSubscription.findFirst.mockResolvedValueOnce({ id: 'subscription-1' });
+    const client = { $transaction: vi.fn((callback) => callback(tx)) } as never;
+
+    await expect(startBillingCheckout({
+      checkout,
+      idempotencyKey: 'checkout-start-1',
+      actor: { userId: 'user-1', requestId: 'request-1' },
+    }, client)).resolves.toMatchObject({ id: 'attempt-1', status: 'VERIFIED' });
+
+    expect(tx.billingProviderSubscription.findFirst).not.toHaveBeenCalled();
+    expect(tx.billingCheckoutAttempt.create).not.toHaveBeenCalled();
   });
 
   it('creates durable verification work for a pending store payment', async () => {
@@ -207,5 +299,77 @@ describe('billing checkout service', () => {
     }, syncClient(checkoutAttempt('VERIFICATION_PENDING')))).resolves.toMatchObject({
       status: 'PENDING', reason: 'failed', attempt: { status: 'VERIFICATION_PENDING' },
     });
+  });
+
+  it('returns the authoritative verified attempt after reconciliation', async () => {
+    const initial = checkoutAttempt('VERIFICATION_PENDING');
+    const verified = { ...checkoutAttempt('VERIFIED'), version: 3 };
+    const { client, tx } = abandonClient(verified, new Date('2026-09-26T12:00:00Z'));
+    (client as any).billingCheckoutAttempt.findFirst.mockResolvedValue(initial);
+    tx.billingCheckoutAttempt.findFirst.mockResolvedValue(verified);
+    mocks.reconcilePeriodicCandidateNow.mockResolvedValue({
+      kind: 'SUCCESS', result: { subscriptionsObserved: 1, issues: [] },
+    });
+
+    await expect(abandonPreviewBillingCheckout({
+      attemptId: initial.id, abandon: { expectedVersion: initial.version }, idempotencyKey: 'abandon-1',
+      actor: { userId: 'user-1', requestId: 'request-1' },
+    }, client)).resolves.toMatchObject({ status: 'SYNCHRONIZED', attempt: { status: 'VERIFIED', version: 3 } });
+    expect(tx.billingVerification.update).not.toHaveBeenCalled();
+  });
+
+  it('keeps a recent attempt pending during the settlement window', async () => {
+    const initial = checkoutAttempt('VERIFICATION_PENDING');
+    const { client, tx } = abandonClient(initial, new Date('2026-09-26T10:30:00Z'));
+    mocks.reconcilePeriodicCandidateNow.mockResolvedValue({
+      kind: 'SUCCESS', result: { subscriptionsObserved: 0, issues: [] },
+    });
+
+    await expect(abandonPreviewBillingCheckout({
+      attemptId: initial.id, abandon: { expectedVersion: initial.version }, idempotencyKey: 'abandon-1',
+      actor: { userId: 'user-1', requestId: 'request-1' },
+    }, client)).resolves.toMatchObject({ status: 'PENDING', reason: 'settlement_window' });
+    expect(tx.billingTransaction.findFirst).not.toHaveBeenCalled();
+    expect(tx.billingVerification.update).not.toHaveBeenCalled();
+  });
+
+  it('atomically abandons an old attempt only when exact commercial evidence is absent', async () => {
+    const initial = checkoutAttempt('VERIFICATION_PENDING');
+    const { client, tx } = abandonClient(initial, new Date('2026-09-26T12:00:00Z'));
+    mocks.reconcilePeriodicCandidateNow.mockResolvedValue({
+      kind: 'SUCCESS', result: { subscriptionsObserved: 0, issues: [] },
+    });
+
+    await expect(abandonPreviewBillingCheckout({
+      attemptId: initial.id, abandon: { expectedVersion: initial.version }, idempotencyKey: 'abandon-1',
+      actor: { userId: 'user-1', requestId: 'request-1' },
+    }, client)).resolves.toMatchObject({ status: 'ABANDONED', attempt: { version: 3 } });
+    expect(tx.billingVerification.update).toHaveBeenCalledWith({
+      where: { id: 'verification-1' },
+      data: {
+        status: 'REJECTED', lastAttemptAt: new Date('2026-09-26T12:00:00Z'),
+        attemptCount: { increment: 1 }, lastErrorCode: 'preview_abandoned_no_commercial_evidence',
+      },
+    });
+    expect(tx.billingPurchaseSelection.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'DRAFT', checkoutAttemptId: null }),
+    }));
+    expect(tx.billingAuditLog.createMany).toHaveBeenCalledOnce();
+  });
+
+  it('does not abandon when the exact product already has an active sandbox subscription', async () => {
+    const initial = checkoutAttempt('VERIFICATION_PENDING');
+    const { client, tx } = abandonClient(initial, new Date('2026-09-26T12:00:00Z'));
+    tx.billingProviderSubscription.findFirst.mockResolvedValue({ id: 'subscription-1' });
+    mocks.reconcilePeriodicCandidateNow.mockResolvedValue({
+      kind: 'SUCCESS', result: { subscriptionsObserved: 1, issues: [] },
+    });
+
+    await expect(abandonPreviewBillingCheckout({
+      attemptId: initial.id, abandon: { expectedVersion: initial.version }, idempotencyKey: 'abandon-1',
+      actor: { userId: 'user-1', requestId: 'request-1' },
+    }, client)).resolves.toMatchObject({ status: 'PENDING', reason: 'commercial_evidence' });
+    expect(tx.billingVerification.update).not.toHaveBeenCalled();
+    expect(tx.billingCheckoutAttempt.update).not.toHaveBeenCalled();
   });
 });

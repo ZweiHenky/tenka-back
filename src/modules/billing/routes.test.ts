@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+﻿import { describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   requireAuth: vi.fn((_req, _res, next) => next()),
@@ -26,7 +26,12 @@ const mocks = vi.hoisted(() => ({
   activeCheckout: vi.fn(),
   startCheckout: vi.fn(),
   checkoutOutcome: vi.fn(),
+  abandonCheckout: vi.fn(),
   sync: vi.fn(),
+  changePreview: vi.fn(),
+  confirmChangeOperation: vi.fn(),
+  confirmChangeOperationFinalStep: vi.fn(),
+  abandonChangeOperation: vi.fn(),
   billingSyncLimiter: vi.fn((_req, _res, next) => next()),
 }));
 
@@ -61,7 +66,12 @@ vi.mock('./controller', () => ({
     activeCheckout: mocks.activeCheckout,
     startCheckout: mocks.startCheckout,
     checkoutOutcome: mocks.checkoutOutcome,
+    abandonCheckout: mocks.abandonCheckout,
     sync: mocks.sync,
+    changePreview: mocks.changePreview,
+    confirmChangeOperation: mocks.confirmChangeOperation,
+    confirmChangeOperationFinalStep: mocks.confirmChangeOperationFinalStep,
+    abandonChangeOperation: mocks.abandonChangeOperation,
   },
 }));
 
@@ -130,8 +140,23 @@ describe('billing routes', () => {
     const outcomeLayer = (billingRouter as any).stack.find((entry: any) =>
       entry.route?.path === '/checkout-attempts/:attemptId/outcome' && entry.route?.methods?.post,
     );
+    const abandonLayer = (billingRouter as any).stack.find((entry: any) =>
+      entry.route?.path === '/checkout-attempts/:attemptId/abandon' && entry.route?.methods?.post,
+    );
     const syncLayer = (billingRouter as any).stack.find((entry: any) =>
       entry.route?.path === '/sync' && entry.route?.methods?.post,
+    );
+    const changePreviewLayer = (billingRouter as any).stack.find((entry: any) =>
+      entry.route?.path === '/change-preview' && entry.route?.methods?.post,
+    );
+    const abandonChangeLayer = (billingRouter as any).stack.find((entry: any) =>
+      entry.route?.path === '/change-operations/:operationId/abandon' && entry.route?.methods?.post,
+    );
+    const confirmChangeLayer = (billingRouter as any).stack.find((entry: any) =>
+      entry.route?.path === '/change-operations/confirm' && entry.route?.methods?.post,
+    );
+    const confirmFinalChangeLayer = (billingRouter as any).stack.find((entry: any) =>
+      entry.route?.path === '/change-operations/:operationId/final-step/confirm' && entry.route?.methods?.post,
     );
 
     expect(authLayer.handle).toBe(mocks.requireAuth);
@@ -219,10 +244,39 @@ describe('billing routes', () => {
       mocks.billingSyncLimiter,
       mocks.checkoutOutcome,
     ]);
+    expect(abandonLayer.route.stack.map((entry: any) => entry.handle)).toEqual([
+      mocks.requireLeagueRole,
+      mocks.billingSyncLimiter,
+      mocks.destructiveOperationLimiter,
+      mocks.abandonCheckout,
+    ]);
     expect(syncLayer.route.stack.map((entry: any) => entry.handle)).toEqual([
       mocks.requireLeagueRole,
       mocks.billingSyncLimiter,
       mocks.sync,
+    ]);
+    expect(changePreviewLayer.route.stack.map((entry: any) => entry.handle)).toEqual([
+      mocks.requireLeagueRole,
+      mocks.billingSyncLimiter,
+      mocks.changePreview,
+    ]);
+    expect(abandonChangeLayer.route.stack.map((entry: any) => entry.handle)).toEqual([
+      mocks.requireLeagueRole,
+      mocks.billingSyncLimiter,
+      mocks.destructiveOperationLimiter,
+      mocks.abandonChangeOperation,
+    ]);
+    expect(confirmChangeLayer.route.stack.map((entry: any) => entry.handle)).toEqual([
+      mocks.requireLeagueRole,
+      mocks.billingSyncLimiter,
+      mocks.destructiveOperationLimiter,
+      mocks.confirmChangeOperation,
+    ]);
+    expect(confirmFinalChangeLayer.route.stack.map((entry: any) => entry.handle)).toEqual([
+      mocks.requireLeagueRole,
+      mocks.billingSyncLimiter,
+      mocks.destructiveOperationLimiter,
+      mocks.confirmChangeOperationFinalStep,
     ]);
   });
 });

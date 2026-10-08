@@ -28,6 +28,7 @@ import { billingPurchaseSelectionBodySchema } from './purchaseSelectionValidator
 import { getBillingPurchaseSelection, putBillingPurchaseSelection } from './purchaseSelectionService';
 import {
   billingCheckoutAttemptParamsSchema,
+  billingCheckoutAbandonBodySchema,
   billingCheckoutIdempotencyKeySchema,
   billingCheckoutOutcomeBodySchema,
   billingCheckoutStartBodySchema,
@@ -35,10 +36,24 @@ import {
 } from './checkoutValidator';
 import {
   getActiveBillingCheckout,
+  abandonPreviewBillingCheckout,
   reportBillingCheckoutOutcome,
   startBillingCheckout,
   syncBillingCheckout,
 } from './checkoutService';
+import {
+  billingChangeIdempotencyKeySchema,
+  billingChangeConfirmBodySchema,
+  billingChangeFinalStepConfirmBodySchema,
+  billingChangeOperationParamsSchema,
+  billingChangePreviewBodySchema,
+} from './changePreviewValidator';
+import {
+  abandonBillingChangeOperation,
+  confirmBillingChange,
+  confirmBillingChangeFinalStep,
+  previewBillingChange,
+} from './changePreviewService';
 import {
   billingMigrationActivationParamsSchema,
   billingMigrationSelectionBodySchema,
@@ -275,6 +290,21 @@ export const billingController = {
     }
   },
 
+  async abandonCheckout(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { attemptId } = validated(billingCheckoutAttemptParamsSchema.safeParse(req.params));
+      const abandon = validated(billingCheckoutAbandonBodySchema.safeParse(req.body));
+      const idempotencyKey = validated(billingCheckoutIdempotencyKeySchema.safeParse(req.get('Idempotency-Key')));
+      const data = await abandonPreviewBillingCheckout({
+        attemptId, abandon, idempotencyKey,
+        actor: { userId: req.user!.id, requestId: req.requestId },
+      });
+      res.status(data.status === 'PENDING' ? 202 : 200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
   async sync(req: Request, res: Response, next: NextFunction) {
     try {
       const input = validated(billingSyncBodySchema.safeParse(req.body));
@@ -283,6 +313,58 @@ export const billingController = {
         checkoutAttemptId: input.checkoutAttemptId,
       });
       res.status(data.status === 'PENDING' ? 202 : 200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async changePreview(req: Request, res: Response, next: NextFunction) {
+    try {
+      const change = validated(billingChangePreviewBodySchema.safeParse(req.body));
+      ok(res, await previewBillingChange({
+        change,
+        actor: { userId: req.user!.id, requestId: req.requestId },
+      }));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async confirmChangeOperation(req: Request, res: Response, next: NextFunction) {
+    try {
+      const confirm = validated(billingChangeConfirmBodySchema.safeParse(req.body));
+      const idempotencyKey = validated(billingChangeIdempotencyKeySchema.safeParse(req.get('Idempotency-Key')));
+      ok(res, await confirmBillingChange({
+        confirm, idempotencyKey,
+        actor: { userId: req.user!.id, requestId: req.requestId },
+      }));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async confirmChangeOperationFinalStep(req: Request, res: Response, next: NextFunction) {
+    try {
+      const operation = validated(billingChangeOperationParamsSchema.safeParse(req.params));
+      const confirm = validated(billingChangeFinalStepConfirmBodySchema.safeParse(req.body));
+      const idempotencyKey = validated(billingChangeIdempotencyKeySchema.safeParse(req.get('Idempotency-Key')));
+      ok(res, await confirmBillingChangeFinalStep({
+        operation, confirm, idempotencyKey,
+        actor: { userId: req.user!.id, requestId: req.requestId },
+      }));
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async abandonChangeOperation(req: Request, res: Response, next: NextFunction) {
+    try {
+      const operation = validated(billingChangeOperationParamsSchema.safeParse(req.params));
+      const idempotencyKey = validated(billingChangeIdempotencyKeySchema.safeParse(req.get('Idempotency-Key')));
+      ok(res, await abandonBillingChangeOperation({
+        operation, idempotencyKey,
+        actor: { userId: req.user!.id, requestId: req.requestId },
+      }));
     } catch (error) {
       next(error);
     }

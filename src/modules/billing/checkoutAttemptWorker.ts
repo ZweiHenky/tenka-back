@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../../config/database';
+import { env } from '../../config/env';
 import { logger } from '../../config/logger';
 import { Sentry } from '../../instrument';
-import type { BillingCheckoutAttemptStatus, PrismaClient } from '../../generated/prisma/client';
+import type { BillingCheckoutAttemptPurpose, BillingCheckoutAttemptStatus, PrismaClient } from '../../generated/prisma/client';
 import { configureRawQuerySchema } from '../../utils/rawDatabaseSchema';
 import type { BatchResult } from '../../workers/dueProcessor';
 import { assertCanonicalBillingIdentity } from './canonicalIdentity';
@@ -15,7 +16,9 @@ const RETRY_MINUTES = 5;
 interface ClaimedAttempt {
   id: string;
   billingAccountId: string;
-  purchaseSelectionId: string;
+  purchaseSelectionId: string | null;
+  changeOperationId: string | null;
+  purpose: BillingCheckoutAttemptPurpose;
   status: BillingCheckoutAttemptStatus;
   startedAt: Date;
   lastVerificationAt: Date;
@@ -44,7 +47,8 @@ async function claimAttempt(workerId: string, client: PrismaClient): Promise<Cla
           "version" = "version" + 1, "updatedAt" = NOW()
       FROM due
       WHERE attempt."id" = due."id"
-      RETURNING attempt."id", attempt."billingAccountId", attempt."purchaseSelectionId",
+       RETURNING attempt."id", attempt."billingAccountId", attempt."purchaseSelectionId",
+         attempt."changeOperationId", attempt."purpose",
         attempt."status", attempt."startedAt", attempt."lastVerificationAt", attempt."lastErrorCode"
     `;
     if (attempt) {
@@ -99,43 +103,93 @@ async function closeAttemptWithoutEvidence(
       },
     });
     if (!current || current.status !== expectedStatus || current.lockedBy !== workerId) return false;
+    const storeEnvironment = env.APP_ENV === 'production' ? 'PRODUCTION' : 'SANDBOX';
+    const exactProduct = {
+      logicalProductId: current.logicalProductIdSnapshot,
+      storeProductId: current.storeProductIdSnapshot,
+      basePlanId: current.basePlanIdSnapshot,
+      billingInterval: current.billingIntervalSnapshot,
+      capacity: current.targetCapacitySnapshot,
+    };
     const evidence = await tx.billingProviderSubscription.findFirst({
       where: {
         chain: { billingAccountId: attempt.billingAccountId, store: 'GOOGLE' },
-        currentLogicalProductId: current.logicalProductIdSnapshot,
-        currentBillingInterval: current.billingIntervalSnapshot,
-        currentCapacity: current.targetCapacitySnapshot,
-        currentStoreProductId: current.storeProductIdSnapshot,
+        storeEnvironment,
+        OR: [
+          {
+            currentLogicalProductId: current.logicalProductIdSnapshot,
+            currentBillingInterval: current.billingIntervalSnapshot,
+            currentCapacity: current.targetCapacitySnapshot,
+            currentStoreProductId: current.storeProductIdSnapshot,
+            currentBasePlanId: current.basePlanIdSnapshot,
+          },
+          {
+            pendingLogicalProductId: current.logicalProductIdSnapshot,
+            pendingBillingInterval: current.billingIntervalSnapshot,
+            pendingCapacity: current.targetCapacitySnapshot,
+            pendingStoreProductId: current.storeProductIdSnapshot,
+            pendingBasePlanId: current.basePlanIdSnapshot,
+          },
+        ],
         providerStatus: { in: ['ACTIVE', 'BILLING_RETRY', 'STORE_GRACE', 'ACCOUNT_HOLD', 'PAUSED'] },
       },
       select: { id: true },
     });
     if (evidence) return false;
-    const historicalEvidence = await tx.billingPeriod.findFirst({
-      where: {
-        billingAccountId: attempt.billingAccountId, source: 'STORE',
-        logicalProductIdSnapshot: current.logicalProductIdSnapshot,
-        billingIntervalAtStart: current.billingIntervalSnapshot,
-        capacityAtStart: current.targetCapacitySnapshot,
-        effectiveStart: { gte: attempt.startedAt },
-        primaryProviderPeriod: {
-          store: 'GOOGLE', storeProductId: current.storeProductIdSnapshot,
-          basePlanId: current.basePlanIdSnapshot,
-          transaction: { is: { purchasedAt: { gte: attempt.startedAt } } },
+    const [transactionEvidence, providerPeriodEvidence, historicalEvidence] = await Promise.all([
+      tx.billingTransaction.findFirst({
+        where: {
+          billingAccountId: attempt.billingAccountId, store: 'GOOGLE', storeEnvironment,
+          ...exactProduct, purchasedAt: { gte: attempt.startedAt },
         },
-      },
-      select: { id: true },
-    });
-    if (historicalEvidence) return false;
+        select: { id: true },
+      }),
+      tx.billingProviderPeriod.findFirst({
+        where: {
+          billingAccountId: attempt.billingAccountId, store: 'GOOGLE', storeEnvironment,
+          ...exactProduct, providerPeriodStart: { gte: attempt.startedAt },
+        },
+        select: { id: true },
+      }),
+      tx.billingPeriod.findFirst({
+        where: {
+          billingAccountId: attempt.billingAccountId, source: 'STORE',
+          logicalProductIdSnapshot: current.logicalProductIdSnapshot,
+          billingIntervalAtStart: current.billingIntervalSnapshot,
+          capacityAtStart: current.targetCapacitySnapshot,
+          effectiveStart: { gte: attempt.startedAt },
+          primaryProviderPeriod: {
+            store: 'GOOGLE', storeEnvironment, storeProductId: current.storeProductIdSnapshot,
+            basePlanId: current.basePlanIdSnapshot,
+            transaction: { is: { purchasedAt: { gte: attempt.startedAt } } },
+          },
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (transactionEvidence || providerPeriodEvidence || historicalEvidence) return false;
     const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT NOW() AS now`;
-    const selection = await tx.billingPurchaseSelection.findUnique({
-      where: { id: attempt.purchaseSelectionId }, select: { version: true, status: true, checkoutAttemptId: true },
-    });
-    if (!selection || selection.status !== 'LOCKED' || selection.checkoutAttemptId !== attempt.id) return false;
-    await tx.billingPurchaseSelection.update({
-      where: { id: attempt.purchaseSelectionId },
-      data: { status: 'DRAFT', lockedAt: null, checkoutAttemptId: null, version: { increment: 1 } },
-    });
+    let selectionVersion: number | null = null;
+    if (attempt.purpose === 'INITIAL_PURCHASE') {
+      if (!attempt.purchaseSelectionId) return false;
+      const selection = await tx.billingPurchaseSelection.findUnique({
+        where: { id: attempt.purchaseSelectionId }, select: { version: true, status: true, checkoutAttemptId: true },
+      });
+      if (!selection || selection.status !== 'LOCKED' || selection.checkoutAttemptId !== attempt.id) return false;
+      await tx.billingPurchaseSelection.update({
+        where: { id: attempt.purchaseSelectionId },
+        data: { status: 'DRAFT', lockedAt: null, checkoutAttemptId: null, version: { increment: 1 } },
+      });
+      selectionVersion = selection.version + 1;
+    } else if (attempt.purpose === 'PRODUCT_CHANGE_FIRST_STEP' && attempt.changeOperationId) {
+      await tx.billingChangeOperation.updateMany({
+        where: {
+          id: attempt.changeOperationId, billingAccountId: attempt.billingAccountId,
+          status: { in: ['FIRST_PURCHASE_PENDING', 'FIRST_VERIFICATION_PENDING'] },
+        },
+        data: { status: 'CANCELED', lastErrorCode: 'checkout_canceled_no_evidence', version: { increment: 1 } },
+      });
+    }
     await tx.billingCheckoutAttempt.update({
       where: { id: attempt.id },
       data: {
@@ -148,7 +202,10 @@ async function closeAttemptWithoutEvidence(
         action: 'BILLING_CHECKOUT_ATTEMPT_COMPLETED', actorType: 'SYSTEM',
         actorUserIdSnapshot: 'billing-checkout-worker', targetType: 'BillingCheckoutAttempt',
         targetId: attempt.id, requestId: randomUUID(),
-        metadataRedacted: { resultingStatus: terminalStatus, selectionVersion: selection.version + 1 },
+         metadataRedacted: {
+           resultingStatus: terminalStatus, selectionVersion,
+           ...(attempt.purpose === 'INITIAL_PURCHASE' ? {} : { purpose: attempt.purpose }),
+         },
       },
     });
     return true;
@@ -180,16 +237,31 @@ async function closeCanonicalOwnershipConflict(
       || ['VERIFIED', 'CANCELED', 'REJECTED', 'OWNERSHIP_CONFLICT', 'ABANDONED'].includes(current.status)) {
       return false;
     }
-    const selection = await tx.billingPurchaseSelection.findUnique({
-      where: { id: attempt.purchaseSelectionId },
-      select: { status: true, checkoutAttemptId: true, version: true },
-    });
-    if (!selection || selection.status !== 'LOCKED' || selection.checkoutAttemptId !== attempt.id) return false;
+    const selection = attempt.purpose === 'INITIAL_PURCHASE' && attempt.purchaseSelectionId
+      ? await tx.billingPurchaseSelection.findUnique({
+        where: { id: attempt.purchaseSelectionId },
+        select: { status: true, checkoutAttemptId: true, version: true },
+      }) : null;
+    if (attempt.purpose === 'INITIAL_PURCHASE'
+      && (!selection || selection.status !== 'LOCKED' || selection.checkoutAttemptId !== attempt.id)) return false;
     const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT NOW() AS now`;
-    await tx.billingPurchaseSelection.update({
-      where: { id: attempt.purchaseSelectionId },
-      data: { status: 'DRAFT', lockedAt: null, checkoutAttemptId: null, version: { increment: 1 } },
-    });
+    if (selection && attempt.purchaseSelectionId) {
+      await tx.billingPurchaseSelection.update({
+        where: { id: attempt.purchaseSelectionId },
+        data: { status: 'DRAFT', lockedAt: null, checkoutAttemptId: null, version: { increment: 1 } },
+      });
+    }
+    if (attempt.purpose === 'PRODUCT_CHANGE_FIRST_STEP' && attempt.changeOperationId) {
+      await tx.billingChangeOperation.updateMany({
+        where: { id: attempt.changeOperationId, status: { in: ['FIRST_PURCHASE_PENDING', 'FIRST_VERIFICATION_PENDING'] } },
+        data: { status: 'CANCELED', lastErrorCode: 'canonical_unsafe_ownership', version: { increment: 1 } },
+      });
+    } else if (attempt.purpose === 'PRODUCT_CHANGE_FINAL_STEP' && attempt.changeOperationId) {
+      await tx.billingChangeOperation.updateMany({
+        where: { id: attempt.changeOperationId, status: 'SECOND_STEP_PENDING' },
+        data: { lastErrorCode: 'canonical_unsafe_ownership', version: { increment: 1 } },
+      });
+    }
     const verificationRecord = await tx.billingVerification.findUnique({
       where: { checkoutAttemptId: attempt.id },
       select: { id: true, status: true },
@@ -217,7 +289,8 @@ async function closeCanonicalOwnershipConflict(
         metadataRedacted: {
           resultingStatus: 'OWNERSHIP_CONFLICT',
           resultingVersion: current.version + 1,
-          selectionVersion: selection.version + 1,
+          selectionVersion: selection ? selection.version + 1 : null,
+          purpose: attempt.purpose,
         },
       },
     });

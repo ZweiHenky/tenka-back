@@ -23,6 +23,8 @@ const claimed = {
   id: 'attempt-1',
   billingAccountId: 'billing-1',
   purchaseSelectionId: 'selection-1',
+  changeOperationId: null,
+  purpose: 'INITIAL_PURCHASE' as const,
   status: 'CANCEL_REPORTED' as const,
   startedAt: new Date('2026-09-26T10:00:00Z'),
   lastVerificationAt: new Date('2026-09-26T10:01:00Z'),
@@ -43,6 +45,8 @@ function cancellationTransaction(
       update: vi.fn(),
     },
     billingProviderSubscription: { findFirst: vi.fn().mockResolvedValue(evidence) },
+    billingTransaction: { findFirst: vi.fn().mockResolvedValue(null) },
+    billingProviderPeriod: { findFirst: vi.fn().mockResolvedValue(null) },
     billingPeriod: { findFirst: vi.fn().mockResolvedValue(null) },
     billingPurchaseSelection: {
       findUnique: vi.fn().mockResolvedValue({
@@ -154,6 +158,39 @@ describe('checkout attempt worker', () => {
     expect(tx.billingCheckoutAttempt.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: 'OWNERSHIP_CONFLICT', nextVerificationAt: null }),
     }));
+  });
+
+  it('blocks retrying a final step after canonical unsafe ownership', async () => {
+    const tx = {
+      billingCheckoutAttempt: {
+        findUnique: vi.fn().mockResolvedValue({
+          status: 'VERIFICATION_PENDING', lockedBy: 'worker-1',
+          lastErrorCode: 'sdk_ownership_conflict', version: 3,
+        }),
+        update: vi.fn(),
+      },
+      billingPurchaseSelection: { findUnique: vi.fn(), update: vi.fn() },
+      billingChangeOperation: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      billingVerification: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'verification-1', status: 'PENDING' }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      billingAuditLog: { create: vi.fn() },
+      $queryRaw: vi.fn().mockResolvedValue([{ now: new Date('2026-09-26T10:05:00Z') }]),
+    };
+    const client = { $transaction: vi.fn((callback) => callback(tx)) } as never;
+
+    await expect(checkoutAttemptWorkerInternals.closeCanonicalOwnershipConflict({
+      ...claimed,
+      purchaseSelectionId: null,
+      changeOperationId: 'operation-1',
+      purpose: 'PRODUCT_CHANGE_FINAL_STEP',
+      lastErrorCode: 'sdk_ownership_conflict',
+    }, 'worker-1', client)).resolves.toBe(true);
+    expect(tx.billingChangeOperation.updateMany).toHaveBeenCalledWith({
+      where: { id: 'operation-1', status: 'SECOND_STEP_PENDING' },
+      data: { lastErrorCode: 'canonical_unsafe_ownership', version: { increment: 1 } },
+    });
   });
 
   it('keeps ambiguous SDK ownership reports pending', async () => {

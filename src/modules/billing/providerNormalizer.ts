@@ -244,6 +244,10 @@ function normalizeSubscription(
     environment: subscription.environment,
     store: subscription.store,
     productIdentifier: latestTransaction?.productStoreIdentifier ?? null,
+    pendingProductIdentifier: subscription.pendingProductStoreIdentifier,
+    pendingEffectiveAtMs: subscription.pendingProductStoreIdentifier
+      ? subscription.currentPeriodEndsAtMs
+      : null,
     status: subscription.status,
     expirationReason: subscription.expirationReason,
     expectedEntitlements,

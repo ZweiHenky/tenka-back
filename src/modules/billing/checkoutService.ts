@@ -6,9 +6,13 @@ import { AppError, ConflictError, NotFoundError, ValidationError } from '../../u
 import { configureRawQuerySchema } from '../../utils/rawDatabaseSchema';
 import { assertCanonicalBillingIdentity } from './canonicalIdentity';
 import { billingEnvironmentForApp, getActiveBillingCatalog } from './catalog';
-import type { BillingCheckoutOutcomeInput, BillingCheckoutStartInput } from './checkoutValidator';
+import type {
+  BillingCheckoutAbandonInput,
+  BillingCheckoutOutcomeInput,
+  BillingCheckoutStartInput,
+} from './checkoutValidator';
 import { reconcilePeriodicCandidateNow } from './periodicReconciliationWorker';
-import { ensureBillingAccount } from './service';
+import { acquireBillingAccountLock, ensureBillingAccount } from './service';
 import { signalBackgroundJob } from '../../workers/jobSignals';
 
 interface CheckoutActor { userId: string; requestId: string }
@@ -20,6 +24,8 @@ const TERMINAL_STATUSES: BillingCheckoutAttemptStatus[] = [
 const checkoutProjection = {
   id: true,
   purchaseSelectionId: true,
+  changeOperationId: true,
+  purpose: true,
   store: true,
   logicalProductIdSnapshot: true,
   billingIntervalSnapshot: true,
@@ -28,6 +34,7 @@ const checkoutProjection = {
   packageIdSnapshot: true,
   storeProductIdSnapshot: true,
   basePlanIdSnapshot: true,
+  revenueCatProductIdentifierSnapshot: true,
   status: true,
   version: true,
   startedAt: true,
@@ -40,7 +47,9 @@ type CheckoutProjection = Prisma.BillingCheckoutAttemptGetPayload<{ select: type
 
 export interface BillingCheckoutAttemptDto {
   id: string;
-  purchaseSelectionId: string;
+  purchaseSelectionId: string | null;
+  changeOperationId: string | null;
+  purpose: 'INITIAL_PURCHASE' | 'PRODUCT_CHANGE_FIRST_STEP' | 'PRODUCT_CHANGE_FINAL_STEP';
   store: 'GOOGLE';
   logicalProductId: string;
   billingInterval: 'MONTHLY' | 'QUARTERLY' | 'ANNUAL';
@@ -63,6 +72,12 @@ export interface BillingCheckoutSyncResult {
   attempt: BillingCheckoutAttemptDto | null;
 }
 
+export interface BillingCheckoutAbandonResult {
+  status: 'ABANDONED' | 'PENDING' | 'SYNCHRONIZED';
+  reason?: 'reconciliation_busy' | 'reconciliation_failed' | 'commercial_evidence' | 'checkout_busy' | 'settlement_window';
+  attempt: BillingCheckoutAttemptDto;
+}
+
 function dto(attempt: CheckoutProjection): BillingCheckoutAttemptDto {
   if (attempt.store !== 'GOOGLE' || !attempt.basePlanIdSnapshot) {
     throw new Error('invalid_google_checkout_attempt_projection');
@@ -70,13 +85,16 @@ function dto(attempt: CheckoutProjection): BillingCheckoutAttemptDto {
   return {
     id: attempt.id,
     purchaseSelectionId: attempt.purchaseSelectionId,
+    changeOperationId: attempt.changeOperationId,
+    purpose: attempt.purpose,
     store: 'GOOGLE',
     logicalProductId: attempt.logicalProductIdSnapshot,
     billingInterval: attempt.billingIntervalSnapshot,
     targetCapacity: attempt.targetCapacitySnapshot,
     offeringId: attempt.offeringIdSnapshot,
     packageId: attempt.packageIdSnapshot,
-    productIdentifier: `${attempt.storeProductIdSnapshot}:${attempt.basePlanIdSnapshot}`,
+    productIdentifier: attempt.revenueCatProductIdentifierSnapshot
+      ?? `${attempt.storeProductIdSnapshot}:${attempt.basePlanIdSnapshot}`,
     basePlanId: attempt.basePlanIdSnapshot,
     status: attempt.status,
     version: attempt.version,
@@ -139,6 +157,49 @@ export async function startBillingCheckout(input: {
       return dto(prior);
     }
 
+    const [{ now, verificationAt }] = await tx.$queryRaw<Array<{ now: Date; verificationAt: Date }>>`
+      SELECT NOW() AS now, NOW() + INTERVAL '5 minutes' AS "verificationAt"
+    `;
+    const storeEnvironment = env.APP_ENV === 'production' ? 'PRODUCTION' : 'SANDBOX';
+    const [subscription, period, localGrace] = await Promise.all([
+      tx.billingProviderSubscription.findFirst({
+        where: {
+          chain: { billingAccountId: account.id, store: 'GOOGLE' },
+          storeEnvironment,
+          ownershipType: 'PURCHASED',
+          providerStatus: { in: ['ACTIVE', 'BILLING_RETRY', 'STORE_GRACE', 'ACCOUNT_HOLD', 'PAUSED'] },
+          OR: [{ providerAccessEndsAt: null }, { providerAccessEndsAt: { gt: now } }],
+        },
+        select: { id: true },
+      }),
+      tx.billingPeriod.findFirst({
+        where: {
+          billingAccountId: account.id,
+          source: 'STORE',
+          effectiveStart: { lte: now },
+          effectiveEnd: { gt: now },
+          OR: [{ endedEarlyAt: null }, { endedEarlyAt: { gt: now } }],
+        },
+        select: { id: true },
+      }),
+      tx.billingLocalGrace.findFirst({
+        where: {
+          billingAccountId: account.id,
+          status: 'ACTIVE',
+          startedAt: { lte: now },
+          endsAt: { gt: now },
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (subscription || period || localGrace) {
+      throw new AppError(
+        409,
+        'La cuenta ya tiene acceso de pago activo; la compra inicial no está disponible',
+        'BILLING_INITIAL_PURCHASE_NOT_ALLOWED',
+      );
+    }
+
     const catalog = await getActiveBillingCatalog(billingEnvironmentForApp(), tx);
     if (!catalog.available || !catalog.release) {
       throw new AppError(503, 'El catálogo de billing no está disponible', 'BILLING_CATALOG_UNAVAILABLE');
@@ -168,9 +229,6 @@ export async function startBillingCheckout(input: {
     if (!variant || !variant.basePlanId) {
       throw new AppError(503, 'La variante de Google Play no está disponible', 'BILLING_CHECKOUT_VARIANT_UNAVAILABLE');
     }
-    const [{ now, verificationAt }] = await tx.$queryRaw<Array<{ now: Date; verificationAt: Date }>>`
-      SELECT NOW() AS now, NOW() + INTERVAL '5 minutes' AS "verificationAt"
-    `;
     const attempt = await tx.billingCheckoutAttempt.create({
       data: {
         billingAccountId: account.id,
@@ -184,6 +242,7 @@ export async function startBillingCheckout(input: {
         packageIdSnapshot: variant.revenueCatPackageId,
         storeProductIdSnapshot: variant.storeProductId,
         basePlanIdSnapshot: variant.basePlanId,
+        revenueCatProductIdentifierSnapshot: variant.revenueCatProductIdentifier,
         idempotencyKey: input.idempotencyKey,
         requestFingerprint,
         startedAt: now,
@@ -231,7 +290,11 @@ export async function getActiveBillingCheckout(
   const account = await client.billingAccount.findUnique({ where: { userId }, select: { id: true } });
   if (!account) return null;
   const attempt = await client.billingCheckoutAttempt.findFirst({
-    where: { billingAccountId: account.id, status: { notIn: TERMINAL_STATUSES } },
+    where: {
+      billingAccountId: account.id,
+      purpose: 'INITIAL_PURCHASE',
+      status: { notIn: TERMINAL_STATUSES },
+    },
     orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
     select: checkoutProjection,
   });
@@ -305,6 +368,15 @@ export async function reportBillingCheckoutOutcome(input: {
           metadataRedacted: { store: 'GOOGLE' },
         },
       });
+      if (attempt.purpose === 'PRODUCT_CHANGE_FIRST_STEP' && attempt.changeOperationId) {
+        await tx.billingChangeOperation.updateMany({
+          where: {
+            id: attempt.changeOperationId, billingAccountId: account.id,
+            status: 'FIRST_PURCHASE_PENDING',
+          },
+          data: { status: 'FIRST_VERIFICATION_PENDING', version: { increment: 1 } },
+        });
+      }
     }
     await tx.billingAuditLog.create({
       data: {
@@ -356,6 +428,229 @@ export async function syncBillingCheckout(input: {
       : { status: 'SYNCHRONIZED', attempt: null };
   }
   return { status: 'PENDING', reason: outcome.kind.toLowerCase(), attempt: projectedAttempt };
+}
+
+export async function abandonPreviewBillingCheckout(input: {
+  attemptId: string;
+  abandon: BillingCheckoutAbandonInput;
+  idempotencyKey: string;
+  actor: CheckoutActor;
+}, client: PrismaClient = prisma): Promise<BillingCheckoutAbandonResult> {
+  if (env.APP_ENV !== 'preview') throw new NotFoundError('Operación de checkout');
+  await assertLeagueActor(client, input.actor.userId);
+  const account = await client.billingAccount.findUnique({
+    where: { userId: input.actor.userId }, select: { id: true },
+  });
+  if (!account) throw new NotFoundError('Cuenta de billing');
+  const requestFingerprint = fingerprint({ operation: 'preview_abandon', ...input.abandon });
+  const initial = await client.billingCheckoutAttempt.findFirst({
+    where: { id: input.attemptId, billingAccountId: account.id },
+    select: checkoutProjection,
+  });
+  if (!initial) throw new NotFoundError('Intento de checkout');
+  const replay = await client.billingAuditLog.findFirst({
+    where: {
+      action: 'BILLING_CHECKOUT_ATTEMPT_COMPLETED', actorUserIdSnapshot: input.actor.userId,
+      targetType: 'BillingCheckoutAttempt', targetId: input.attemptId, idempotencyKey: input.idempotencyKey,
+    },
+    select: { requestFingerprint: true },
+  });
+  if (replay) {
+    if (replay.requestFingerprint !== requestFingerprint) {
+      throw new ConflictError('Idempotency-Key ya fue utilizada con otra solicitud');
+    }
+    return { status: initial.status === 'ABANDONED' ? 'ABANDONED' : 'SYNCHRONIZED', attempt: dto(initial) };
+  }
+  if (TERMINAL_STATUSES.includes(initial.status)) {
+    return { status: initial.status === 'ABANDONED' ? 'ABANDONED' : 'SYNCHRONIZED', attempt: dto(initial) };
+  }
+  if (initial.status !== 'VERIFICATION_PENDING' || initial.version !== input.abandon.expectedVersion) {
+    throw new AppError(409, 'El intento cambió; vuelve a cargar su estado', 'BILLING_CHECKOUT_CHANGED');
+  }
+  if (!env.BILLING_REVENUECAT_ENABLED) {
+    throw new AppError(503, 'La reconciliación de billing no está disponible', 'BILLING_REVENUECAT_DISABLED');
+  }
+  await assertCanonicalBillingIdentity(account.id, client);
+
+  const reconciliation = await reconcilePeriodicCandidateNow(
+    account.id,
+    `checkout-abandon:${randomUUID()}`,
+    client,
+  );
+  if (reconciliation.kind === 'BUSY') {
+    return { status: 'PENDING', reason: 'reconciliation_busy', attempt: dto(initial) };
+  }
+  if (reconciliation.kind !== 'SUCCESS') {
+    return { status: 'PENDING', reason: 'reconciliation_failed', attempt: dto(initial) };
+  }
+  if (reconciliation.result.issues.length !== 0) {
+    return { status: 'PENDING', reason: 'reconciliation_failed', attempt: dto(initial) };
+  }
+
+  return transactionWithRetry(client, async (tx) => {
+    await configureRawQuerySchema(tx);
+    await acquireBillingAccountLock(tx, account.id);
+    const current = await tx.billingCheckoutAttempt.findFirst({
+      where: { id: input.attemptId, billingAccountId: account.id },
+      select: {
+        ...checkoutProjection,
+        billingAccountId: true,
+        startedAt: true,
+        lockedBy: true,
+        leaseUntil: true,
+        storeProductIdSnapshot: true,
+        logicalProductIdSnapshot: true,
+        billingIntervalSnapshot: true,
+        targetCapacitySnapshot: true,
+        basePlanIdSnapshot: true,
+      },
+    });
+    if (!current) throw new NotFoundError('Intento de checkout');
+    const transactionReplay = await tx.billingAuditLog.findFirst({
+      where: {
+        action: 'BILLING_CHECKOUT_ATTEMPT_COMPLETED', actorUserIdSnapshot: input.actor.userId,
+        targetType: 'BillingCheckoutAttempt', targetId: input.attemptId, idempotencyKey: input.idempotencyKey,
+      }, select: { requestFingerprint: true },
+    });
+    if (transactionReplay) {
+      if (transactionReplay.requestFingerprint !== requestFingerprint) {
+        throw new ConflictError('Idempotency-Key ya fue utilizada con otra solicitud');
+      }
+      return { status: current.status === 'ABANDONED' ? 'ABANDONED' : 'SYNCHRONIZED', attempt: dto(current) };
+    }
+    if (TERMINAL_STATUSES.includes(current.status)) {
+      return { status: current.status === 'ABANDONED' ? 'ABANDONED' : 'SYNCHRONIZED', attempt: dto(current) };
+    }
+    if (current.status !== 'VERIFICATION_PENDING' || current.version !== input.abandon.expectedVersion) {
+      throw new AppError(409, 'El intento cambió; vuelve a cargar su estado', 'BILLING_CHECKOUT_CHANGED');
+    }
+    const exactProduct = {
+      logicalProductId: current.logicalProductIdSnapshot,
+      storeProductId: current.storeProductIdSnapshot,
+      basePlanId: current.basePlanIdSnapshot,
+      billingInterval: current.billingIntervalSnapshot,
+      capacity: current.targetCapacitySnapshot,
+    };
+    const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT NOW() AS now`;
+    if (current.lockedBy && current.leaseUntil && current.leaseUntil > now) {
+      return { status: 'PENDING', reason: 'checkout_busy', attempt: dto(current) };
+    }
+    if (now.getTime() - current.startedAt.getTime() < 60 * 60_000) {
+      return { status: 'PENDING', reason: 'settlement_window', attempt: dto(current) };
+    }
+
+    const [subscriptionEvidence, transactionEvidence, providerPeriodEvidence, billingPeriodEvidence] = await Promise.all([
+      tx.billingProviderSubscription.findFirst({
+        where: {
+          chain: { billingAccountId: account.id, store: 'GOOGLE' },
+          storeEnvironment: 'SANDBOX',
+          providerStatus: { in: ['ACTIVE', 'BILLING_RETRY', 'STORE_GRACE', 'ACCOUNT_HOLD', 'PAUSED'] },
+          OR: [
+            {
+              currentLogicalProductId: exactProduct.logicalProductId,
+              currentStoreProductId: exactProduct.storeProductId,
+              currentBasePlanId: exactProduct.basePlanId,
+              currentBillingInterval: exactProduct.billingInterval,
+              currentCapacity: exactProduct.capacity,
+            },
+            {
+              pendingLogicalProductId: exactProduct.logicalProductId,
+              pendingStoreProductId: exactProduct.storeProductId,
+              pendingBasePlanId: exactProduct.basePlanId,
+              pendingBillingInterval: exactProduct.billingInterval,
+              pendingCapacity: exactProduct.capacity,
+            },
+          ],
+        },
+        select: { id: true },
+      }),
+      tx.billingTransaction.findFirst({
+        where: {
+          billingAccountId: account.id, store: 'GOOGLE', storeEnvironment: 'SANDBOX',
+          ...exactProduct, purchasedAt: { gte: current.startedAt },
+        }, select: { id: true },
+      }),
+      tx.billingProviderPeriod.findFirst({
+        where: {
+          billingAccountId: account.id, store: 'GOOGLE', storeEnvironment: 'SANDBOX',
+          ...exactProduct, providerPeriodStart: { gte: current.startedAt },
+        }, select: { id: true },
+      }),
+      tx.billingPeriod.findFirst({
+        where: {
+          billingAccountId: account.id, source: 'STORE',
+          logicalProductIdSnapshot: exactProduct.logicalProductId,
+          billingIntervalAtStart: exactProduct.billingInterval,
+          capacityAtStart: exactProduct.capacity,
+          effectiveStart: { gte: current.startedAt },
+          primaryProviderPeriod: {
+            store: 'GOOGLE', storeEnvironment: 'SANDBOX',
+            storeProductId: exactProduct.storeProductId, basePlanId: exactProduct.basePlanId,
+          },
+        }, select: { id: true },
+      }),
+    ]);
+    if (subscriptionEvidence || transactionEvidence || providerPeriodEvidence || billingPeriodEvidence) {
+      return { status: 'PENDING', reason: 'commercial_evidence', attempt: dto(current) };
+    }
+
+    if ((current.purpose && current.purpose !== 'INITIAL_PURCHASE') || !current.purchaseSelectionId) {
+      throw new AppError(409, 'Este intento no pertenece a una compra inicial', 'BILLING_CHECKOUT_PURPOSE_MISMATCH');
+    }
+    const selection = await tx.billingPurchaseSelection.findUnique({
+      where: { id: current.purchaseSelectionId },
+      select: { status: true, checkoutAttemptId: true, version: true },
+    });
+    const verification = await tx.billingVerification.findUnique({
+      where: { checkoutAttemptId: current.id },
+      select: { id: true, status: true, providerSubscriptionChainId: true, providerTransactionId: true },
+    });
+    if (!selection || selection.status !== 'LOCKED' || selection.checkoutAttemptId !== current.id
+      || !verification || verification.status !== 'PENDING'
+      || verification.providerSubscriptionChainId || verification.providerTransactionId) {
+      throw new AppError(409, 'El intento cambió; vuelve a cargar su estado', 'BILLING_CHECKOUT_CHANGED');
+    }
+    await tx.billingVerification.update({
+      where: { id: verification.id },
+      data: {
+        status: 'REJECTED', lastAttemptAt: now, attemptCount: { increment: 1 },
+        lastErrorCode: 'preview_abandoned_no_commercial_evidence',
+      },
+    });
+    await tx.billingPurchaseSelection.update({
+      where: { id: current.purchaseSelectionId },
+      data: { status: 'DRAFT', lockedAt: null, checkoutAttemptId: null, version: { increment: 1 } },
+    });
+    const abandoned = await tx.billingCheckoutAttempt.update({
+      where: { id: current.id },
+      data: {
+        status: 'ABANDONED', terminalAt: now, nextVerificationAt: null,
+        lastVerificationAt: now, lastErrorCode: null, version: { increment: 1 },
+      },
+      select: checkoutProjection,
+    });
+    await tx.billingAuditLog.createMany({
+      data: [
+        {
+          action: 'BILLING_VERIFICATION_COMPLETED', actorType: 'USER',
+          actorUserId: input.actor.userId, actorUserIdSnapshot: input.actor.userId,
+          targetType: 'BillingVerification', targetId: verification.id, requestId: input.actor.requestId,
+          metadataRedacted: { resultingStatus: 'REJECTED', reasonCode: 'preview_abandoned_no_commercial_evidence' },
+        },
+        {
+          action: 'BILLING_CHECKOUT_ATTEMPT_COMPLETED', actorType: 'USER',
+          actorUserId: input.actor.userId, actorUserIdSnapshot: input.actor.userId,
+          targetType: 'BillingCheckoutAttempt', targetId: current.id, requestId: input.actor.requestId,
+          idempotencyKey: input.idempotencyKey, requestFingerprint,
+          metadataRedacted: {
+            resultingStatus: 'ABANDONED', reasonCode: 'preview_abandoned_no_commercial_evidence',
+            selectionVersion: selection.version + 1,
+          },
+        },
+      ],
+    });
+    return { status: 'ABANDONED', attempt: dto(abandoned) };
+  });
 }
 
 export const checkoutServiceInternals = { fingerprint, dto, TERMINAL_STATUSES };
