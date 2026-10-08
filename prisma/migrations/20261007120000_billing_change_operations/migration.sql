@@ -13,6 +13,10 @@ ALTER TABLE "billing_checkout_attempts"
   ADD COLUMN "purpose" "BillingCheckoutAttemptPurpose" NOT NULL DEFAULT 'INITIAL_PURCHASE',
   ADD COLUMN "revenueCatProductIdentifierSnapshot" TEXT;
 
+-- The previous immutable-row trigger rejects any historical update, including terminal rows.
+-- Disable only that user trigger while filling the newly added immutable snapshot.
+ALTER TABLE "billing_checkout_attempts" DISABLE TRIGGER "billing_checkout_attempts_guard";
+
 UPDATE "billing_checkout_attempts" a
 SET "revenueCatProductIdentifierSnapshot" = p."revenueCatProductIdentifier"
 FROM "billing_product_catalog" p
@@ -20,6 +24,8 @@ WHERE p."catalogReleaseId" = a."catalogReleaseIdSnapshot"
   AND p."store" = a."store"
   AND p."storeProductId" = a."storeProductIdSnapshot"
   AND p."basePlanId" IS NOT DISTINCT FROM a."basePlanIdSnapshot";
+
+ALTER TABLE "billing_checkout_attempts" ENABLE TRIGGER "billing_checkout_attempts_guard";
 
 ALTER TYPE "BillingAuditAction" ADD VALUE 'BILLING_CHANGE_OPERATION_CONFIRMED';
 ALTER TYPE "BillingAuditAction" ADD VALUE 'BILLING_CHANGE_OPERATION_ABANDONED';
